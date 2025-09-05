@@ -36,6 +36,10 @@ Stake == [v \in Validators |->
   ELSE IF v = 5 THEN 199 
   ELSE 200]
 
+(***************************************************************************
+ We assume that (1) Byzantine nodes are always a subset of Validators, (2) 
+ there is at least one Block, and (3) there is at least one Validator.
+***************************************************************************)
 ASSUME Byz \subseteq Validators /\ Blocks # {} /\ Validators # {}
 
 (***************************************************************************
