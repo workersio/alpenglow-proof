@@ -1,0 +1,17 @@
+# TLA+ generated files
+*.old
+*.out
+states/
+MC.tla
+MC.cfg
+
+# Test files
+test.*
+simple.cfg
+
+# IDE and tool files
+.vscode/
+.claude/
+
+# Java
+*.class
