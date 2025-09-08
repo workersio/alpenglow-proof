@@ -46,7 +46,7 @@ Alpenglow introduces a "20+20" resilience model:
 - **Pool-Driven Events** (Defs. 15–16):
   - `Block(s, h, parent)` from Blokstor when a complete block for slot `s` is reconstructed.
   - `ParentReady(s, h)`: `s` must be the first slot of its leader window and Pool must hold (i) a notarization or notar-fallback certificate for some prior block `b`, and (ii) skip certificates for all intermediate slots `s'` with `slot(b) < s' < s`.
-  - `SafeToNotar(s, h)`: only after the node cast its initial vote in `s` (but not notarized `h`), and iff Def. 16 thresholds hold (see 2.3).
+  - `SafeToNotar(s, h)`: only after the node cast its initial vote in `s` (but not notarized `h`), and iff Def. 16 thresholds hold (see 2.3). Additionally, if `s` is not the first slot of the window, the node must (a) have retrieved `b` (repair) to identify its parent, and (b) already hold the notar-fallback certificate for the parent (Def. 16, last paragraph).
   - `SafeToSkip(s)`: only after the node cast its initial vote in `s` (but not skip), and iff Def. 16 threshold holds (see 2.3).
   - `Timeout(i)`: a single timeout per slot in the current window, scheduled at `clock() + Δtimeout + (i − s + 1)·Δblock` when the first `ParentReady` for that window is seen (Def. 17).
 
@@ -70,7 +70,7 @@ Alpenglow introduces a "20+20" resilience model:
 - Leader window boundaries (`windowSlots` function) constrain allowable voting dependencies within a window (Alg. 2).
 
 #### 2.1.5 Stake Distribution
-- Validator set V with stake function ρ: V → ℕ
+- Validator set V with stake function ρ: V → Weights (non‑negative, summing to 1; or normalized integers with a fixed denominator)
 - Byzantine stake < 20% (Assumption 1)
 - Optional: Additional 20% crash failures (Assumption 2)
 - **Stake aggregation rules** for mixed vote types in certificates
@@ -235,6 +235,7 @@ The highest finalized slot number increases without bound (no permanent halting)
 5. **Network partition**: Temporary partition, recovery after GST
 6. **Cascading timeouts**: Multiple validators timeout simultaneously
 7. **Rejoin/resync**: A node reboots or joins late; validates it can safely reconstruct state using either a fast-finalization certificate for some slot or a finalization certificate for the slot together with a notarization certificate for the unique notarized block in that slot (Sec. 3.3).
+8. **Repair-gated fallback**: In a non-first slot, SafeToNotar requires the block to be repaired and the parent’s notar-fallback certificate to be present; verify event gating and absence of premature fallback.
 
 ### 6.3 Proof Techniques
 
@@ -265,6 +266,7 @@ AlpenglowMain.tla
 │   ├── VoteTypes.tla    (5 vote type definitions)
 │   └── CertificateTypes.tla (5 certificate types)
 ├── BlockStructure.tla   (blocks, parents, slots)
+├── Blokstor.tla         (first-block storage + repair; emits Block events)
 ├── Pool.tla             (vote/certificate storage)
 ├── StakeModel.tla       (stake distribution, quorums)
 ├── TimeModel.tla        (slots, timeouts, synchrony)
@@ -339,10 +341,13 @@ TrySkipWindow(v, s0) ==
 #### 7.3.2 Fallback Event Detection (Definition 16)
 ```tla
 SafeToNotarEvent(v, s, b) ==
+  LET parent == ParentOf(b) IN
   /\ State[v][s].Voted
   /\ ~VotedNotarInState(v, s, b)
   /\ ( NotarStake(s, b) >= 40 
      \/ ((SkipStake(s) + NotarStake(s, b) >= 60) /\ (NotarStake(s, b) >= 20)) )
+  /\ ( IsFirstSlotOfWindow(s)
+     \/ ( BlockAvailableInBlokstor(b) /\ PoolHasNotarFallbackCert(s-1, parent) ) )
 
 SafeToSkipEvent(v, s) ==
   LET maxNotar == Max_b(NotarStake(s, b)) IN
@@ -411,6 +416,9 @@ SafeToSkipEvent(v, s) ==
 4. **Invariant I4**: Fallback event mutual exclusion and gating (Def. 16)
    - Both fallback events require that the node already cast its initial vote in the slot.
    - Under Def. 16 arithmetic and count-once-per-slot rule, `SafeToNotar(s, b)` and `SafeToSkip(s)` cannot both hold simultaneously at a correct node.
+
+5. **Invariant I5**: Pool certificate uniqueness (Def. 13)
+   - At most one stored certificate of each type for a given (slot, block) in any node’s Pool; moreover, a node cannot simultaneously store a skip certificate for slot s and any notarization/notar-fallback certificate for slot s.
 
 ### 10.2 Key Proof Dependencies
 ```
@@ -600,6 +608,11 @@ PROPERTIES
   
 SYMMETRY
   Permutations(Validators \ ByzantineNodes)
+
+FAIRNESS
+  \* Use weak fairness to model post-GST eventual delivery and timer firing
+  WF_vars(TimeoutAction)
+  WF_vars(DeliverMessage)
 ```
 
 ## Appendix F: Critical Protocol Invariants to Maintain
@@ -609,12 +622,16 @@ SYMMETRY
 2. **BadWindow Propagation**: If `BadWindow ∈ state[s]`, then no `FinalVote` can be cast in slot s
 3. **ItsOver Finality**: If `ItsOver ∈ state[s]`, then no fallback votes can be cast in slot s
 4. **Parent Readiness**: `ParentReady(s,h)` only if s is first slot of window AND parent has certificate
+5. **Notar Gating**: A notarization vote in slot s can only be present if either (i) `ParentReady(hash(parent)) ∈ state[s]` and s is first slot of window, or (ii) `VotedNotar(hash(parent)) ∈ state[s−1]` and s is not first slot (Alg. 2, line 11)
+6. **BlockNotarized Accuracy**: `BlockNotarized(hash(b)) ∈ state[s]` only if Pool holds a notarization certificate for b in slot s
 
-### Certificate Generation Invariants  
+### Pool and Certificate Invariants  
 1. **Threshold Enforcement**: Certificates only created when exact thresholds met (60%, 80%)
 2. **Vote Type Consistency**: Notar-Fallback cert can mix NotarVote and NotarFallbackVote types
 3. **Skip Certificate Mixing**: Skip cert can mix SkipVote and SkipFallbackVote types
 4. **Count-Once Rule**: Each validator's stake counted at most once per slot for thresholds
+5. **Single-Certificate Storage**: For each (slot, block, type) at most one certificate is stored in Pool (Def. 13)
+6. **No Skip vs Notar Clash**: A node cannot store both a skip certificate for slot s and any notarization/notar-fallback certificate for slot s
 
 ### Timing Invariants
 1. **Single Timeout Family**: Only one timeout schedule per window (not separate vote/finalize timers)
