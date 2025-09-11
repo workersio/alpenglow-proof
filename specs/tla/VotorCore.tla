@@ -1,5 +1,5 @@
 ---------------------------- MODULE VotorCore ----------------------------
-EXTENDS Common, /Users/shrenikborad/Downloads/Solana Alpenglow White Paper v1.1.pdf, CryptoAbstraction, Certificates, Pool, TLC
+EXTENDS Common, Stake, CryptoAbstraction, Certificates, Pool, TLC
 
 CONSTANTS
     Blocks,
