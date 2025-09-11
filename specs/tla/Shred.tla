@@ -1,30 +1,43 @@
 ---------------------------- MODULE Shred ----------------------------
-(*
-Implementation of Definition 1: Shred from Alpenglow White Paper
-
-A shred fits neatly in a UDP datagram. It has the form:
-(s, t, i, z_t, r_t, (d_i, π_i), σ_t)
-
-Where:
-- s, t, i ∈ ℕ are slot number, slice index, shred index, respectively
-- z_t ∈ {0, 1} is a flag (see Definition 2)
-- d_i is the data at position i with path π_i for Merkle root r_t
-- σ_t is the signature of the object Slice(s, t, z_t, r_t) from the node leader(s)
-*)
+(***************************************************************************
+ * Implementation of Definition 1: Shred from Alpenglow White Paper
+ * 
+ * Reference: Alpenglow White Paper, Page 12, Definition 1 (shred)
+ * 
+ * From the paper:
+ * "A shred fits neatly in a UDP datagram. It has the form:
+ * (s, t, i, z_t, r_t, (d_i, π_i), σ_t)"
+ * 
+ * Component Mapping to TLA+:
+ * - s ∈ ℕ: slot number → shred.slot ∈ Slots
+ * - t ∈ ℕ: slice index → shred.sliceIndex ∈ SliceIndices  
+ * - i ∈ ℕ: shred index → shred.shredIndex ∈ ShredIndices
+ * - z_t ∈ {0, 1}: last slice flag → shred.isLastSlice ∈ BOOLEAN
+ * - r_t: Merkle root hash → shred.merkleRoot ∈ MerkleRoots
+ * - d_i: data at position i → shred.data ∈ ShredData
+ * - π_i: Merkle path for d_i → shred.merklePath ∈ MerklePaths
+ * - σ_t: signature on Slice(s,t,z_t,r_t) → shred.signature ∈ Signatures
+ * 
+ * Key Protocol Properties:
+ * 1. Shreds must fit in UDP datagrams (max ~1500 bytes)
+ * 2. Any γ out of Γ shreds can reconstruct the slice (erasure coding)
+ * 3. Signature is on the slice object, not individual shreds
+ * 4. Merkle path proves shred belongs to the slice
+ ***************************************************************************)
 
 EXTENDS Naturals, Sequences, FiniteSets, TLC
 
 CONSTANTS
-    Slots,              \* Set of possible slot numbers
-    SliceIndices,       \* Set of possible slice indices  
-    ShredIndices,       \* Set of possible shred indices
-    MerkleRoots,        \* Set of possible Merkle root hashes
-    ShredData,          \* Set of possible shred data
-    MerklePaths,        \* Set of possible Merkle paths
-    Signatures,         \* Set of possible signatures
-    Nodes,              \* Set of validator nodes
-    UDP_MAX_SIZE,       \* Maximum UDP datagram size
-    GAMMA               \* Reed-Solomon recovery threshold
+    Slots,              \* Set of possible slot numbers (s in Definition 1)
+    SliceIndices,       \* Set of possible slice indices (t in Definition 1)  
+    ShredIndices,       \* Set of possible shred indices (i in Definition 1)
+    MerkleRoots,        \* Set of possible Merkle root hashes (r_t in Definition 1)
+    ShredData,          \* Set of possible shred data (d_i in Definition 1)
+    MerklePaths,        \* Set of possible Merkle paths (π_i in Definition 1)
+    Signatures,         \* Set of possible signatures (σ_t in Definition 1)
+    Nodes,              \* Set of validator nodes (for leader(s) function)
+    UDP_MAX_SIZE,       \* Maximum UDP datagram size (protocol constraint)
+    GAMMA               \* Reed-Solomon parameter γ (Definition 2: "any γ of the Γ shreds")
 
 ASSUME
     /\ Slots # {}
@@ -46,19 +59,27 @@ VARIABLES
 
 vars == <<shreds, validMerklePaths, validSignatures, leaderSchedule>>
 
+\***************************************************************************
 \* Type definition for a shred
+\* Directly implements the tuple structure from Definition 1:
+\* (s, t, i, z_t, r_t, (d_i, π_i), σ_t)
+\***************************************************************************
 Shred == [
-    slot: Slots,
-    sliceIndex: SliceIndices,
-    shredIndex: ShredIndices,
-    isLastSlice: BOOLEAN,          \* z_t flag
-    merkleRoot: MerkleRoots,       \* r_t
-    data: ShredData,               \* d_i
-    merklePath: MerklePaths,       \* π_i
-    signature: Signatures          \* σ_t
+    slot: Slots,                   \* s: slot number (natural number)
+    sliceIndex: SliceIndices,      \* t: slice index within the block
+    shredIndex: ShredIndices,      \* i: position within the slice (0 to Γ-1)
+    isLastSlice: BOOLEAN,          \* z_t: flag indicating last slice (Definition 2)
+    merkleRoot: MerkleRoots,       \* r_t: Merkle root of the slice data
+    data: ShredData,               \* d_i: erasure-coded data piece at position i
+    merklePath: MerklePaths,       \* π_i: Merkle proof for d_i at position i
+    signature: Signatures          \* σ_t: leader's signature on Slice(s,t,z_t,r_t)
 ]
 
+\***************************************************************************
 \* Leader assignment function
+\* References: "σ_t is the signature... from the node leader(s)"
+\* The leader for each slot is determined by the protocol's leader schedule
+\***************************************************************************
 Leader(slot) ==
     leaderSchedule[slot]
 
@@ -74,14 +95,27 @@ IsValidShred(shred) ==
     /\ shred.merklePath \in MerklePaths
     /\ shred.signature \in Signatures
 
+\***************************************************************************
 \* Verify Merkle path for shred data
+\* Reference: Definition 1 - "d_i is the data at position i with path π_i 
+\*            for Merkle root r_t"
+\* 
+\* This abstracts the cryptographic verification that:
+\* - The data d_i is at position i in the Merkle tree
+\* - The path π_i correctly proves membership for root r_t
+\***************************************************************************
 VerifyShredMerklePath(shred) ==
-    \* Check if this shred's data and path are valid for the claimed Merkle root
     <<shred.data, shred.merklePath, shred.shredIndex, shred.merkleRoot>> \in validMerklePaths
 
+\***************************************************************************
 \* Verify signature on slice object
+\* Reference: Definition 1 - "σ_t is the signature of the object 
+\*            Slice(s, t, z_t, r_t) from the node leader(s)"
+\* 
+\* Key insight: The signature is on the slice metadata, NOT the shred data
+\* This allows any γ shreds to verify the same signature
+\***************************************************************************
 VerifyShredSignature(shred) ==
-    \* Check if the slice object was signed by the correct leader
     LET leader == Leader(shred.slot)
     IN <<shred.slot, shred.sliceIndex, shred.isLastSlice, shred.merkleRoot, leader, shred.signature>> \in validSignatures
 
@@ -97,9 +131,17 @@ CreateShred(slot, sliceIdx, shredIdx, isLast, root, data, path, sig) ==
      signature |-> sig]
 
 \* Check if shred fits in UDP datagram (size constraint)
+\***************************************************************************
+\* Check if shred fits in UDP datagram
+\* Reference: Definition 1 - "A shred fits neatly in a UDP datagram"
+\* 
+\* Critical for network layer: UDP max ~1500 bytes (typical MTU)
+\* This ensures shreds can be transmitted without fragmentation
+\***************************************************************************
 FitsInUDPDatagram(shred) ==
-    \* Abstract size check - in practice would calculate actual byte size
-    \* of all shred fields and verify <= UDP_MAX_SIZE
+    \* Abstract size check - actual implementation would sum:
+    \* sizeof(s) + sizeof(t) + sizeof(i) + 1 + sizeof(r_t) + 
+    \* sizeof(d_i) + sizeof(π_i) + sizeof(σ_t) <= UDP_MAX_SIZE
     IsValidShred(shred)
 
 \* Get shred identifier (for uniqueness checking)
@@ -120,7 +162,15 @@ GetShredsForSlice(slot, sliceIndex) ==
 GetShredsWithRoot(merkleRoot) ==
     {shred \in shreds : shred.merkleRoot = merkleRoot}
 
-\* Check if we have enough shreds to potentially reconstruct a slice
+\***************************************************************************
+\* Check if we have enough shreds to reconstruct a slice
+\* Reference: Definition 2 - "Given any γ of the Γ shreds, we can decode 
+\*            (Section 1.6) the slice"
+\* 
+\* This implements the erasure coding recovery threshold:
+\* - Need at least γ valid shreds from the same slice
+\* - All must have the same Merkle root (ensures consistency)
+\***************************************************************************
 HasSufficientShreds(slot, sliceIndex, merkleRoot) ==
     LET relevantShreds == {shred \in shreds : 
                             /\ shred.slot = slot
@@ -192,17 +242,35 @@ ValidShredPreservation ==
         /\ VerifyShredMerklePath(shred)
         /\ FitsInUDPDatagram(shred)
 
+\***************************************************************************
 \* Property: No duplicate shreds at same position
+\* Reference: Definition 10 (Blokstor) - "the Blokstor does not contain a 
+\*            shred for indices (s,t,i) yet"
+\* 
+\* Ensures uniqueness constraint: at most one shred per (slot, slice, index)
+\***************************************************************************
 NoDuplicatePositions ==
     \A shred1, shred2 \in shreds :
         shred1 # shred2 => ~SamePosition(shred1, shred2)
 
+\***************************************************************************
 \* Property: Shreds from correct leaders have valid signatures
+\* Reference: Definition 10 - "σ_t is the signature of the object 
+\*            Slice(s,t,z_t,r_t) from the node leader(s)"
+\* 
+\* Ensures only designated leaders can produce valid shreds for their slots
+\***************************************************************************
 CorrectLeaderSignatures ==
     \A shred \in shreds :
         VerifyShredSignature(shred)
 
+\***************************************************************************
 \* Property: Merkle paths are consistent
+\* Reference: Definition 10 - "(d_i, π_i) is the data with path for 
+\*            Merkle root r_t at position i"
+\* 
+\* Ensures data integrity: shred data must be provably part of the slice
+\***************************************************************************
 MerklePathConsistency ==
     \A shred \in shreds :
         VerifyShredMerklePath(shred)
@@ -222,28 +290,5 @@ ShredDataIntegrity ==
         /\ shred.data \in ShredData
         /\ shred.merklePath \in MerklePaths
         /\ shred.signature \in Signatures
-
-\* Liveness Properties (would require fairness assumptions)
-
-\* Property: If conditions are met, shreds can be added
-\* CanAddShred ==
-\*     \A shred \in Shred :
-\*         /\ IsValidShred(shred)
-\*         /\ VerifyShredMerklePath(shred)
-\*         /\ VerifyShredSignature(shred)
-\*         /\ FitsInUDPDatagram(shred)
-\*         /\ ~\E existing \in shreds : SamePosition(shred, existing) =>
-\*             \Diamond (shred \in shreds)
-
-\* These invariants should be added to the model checker configuration 
-\* when creating the TLC model, not in the specification itself.
-\* Properties to check:
-\* - TypeOK
-\* - ValidShredPreservation  
-\* - NoDuplicatePositions
-\* - CorrectLeaderSignatures
-\* - MerklePathConsistency
-\* - UDPSizeConstraint
-\* - ShredDataIntegrity
 
 =======================================================================
