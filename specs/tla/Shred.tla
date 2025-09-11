@@ -23,7 +23,8 @@ CONSTANTS
     MerklePaths,        \* Set of possible Merkle paths
     Signatures,         \* Set of possible signatures
     Nodes,              \* Set of validator nodes
-    UDP_MAX_SIZE        \* Maximum UDP datagram size
+    UDP_MAX_SIZE,       \* Maximum UDP datagram size
+    GAMMA               \* Reed-Solomon recovery threshold
 
 ASSUME
     /\ Slots # {}
@@ -35,11 +36,15 @@ ASSUME
     /\ Signatures # {}
     /\ Nodes # {}
     /\ UDP_MAX_SIZE \in Nat /\ UDP_MAX_SIZE > 0
+    /\ GAMMA \in Nat /\ GAMMA > 0
 
 VARIABLES
-    shreds              \* Set of all shreds in the system
+    shreds,             \* Set of all shreds in the system
+    validMerklePaths,   \* Set of <<data, path, index, root>> tuples with valid paths
+    validSignatures,    \* Set of <<slot, sliceIndex, isLastSlice, merkleRoot, node, signature>> tuples
+    leaderSchedule      \* Function: Slots -> Nodes (leader assignment)
 
-vars == <<shreds>>
+vars == <<shreds, validMerklePaths, validSignatures, leaderSchedule>>
 
 \* Type definition for a shred
 Shred == [
@@ -53,9 +58,9 @@ Shred == [
     signature: Signatures          \* σ_t
 ]
 
-\* Leader assignment function (abstract)
+\* Leader assignment function
 Leader(slot) ==
-    CHOOSE node \in Nodes : TRUE  \* Placeholder - would use actual leader selection
+    leaderSchedule[slot]
 
 \* Check if shred has valid structure
 IsValidShred(shred) ==
@@ -69,24 +74,16 @@ IsValidShred(shred) ==
     /\ shred.merklePath \in MerklePaths
     /\ shred.signature \in Signatures
 
-\* Verify Merkle path for shred data (abstract cryptographic operation)
+\* Verify Merkle path for shred data
 VerifyShredMerklePath(shred) ==
-    \* In a real implementation, this would verify that:
-    \* shred.merklePath proves shred.data is at position shred.shredIndex 
-    \* for Merkle root shred.merkleRoot
-    /\ IsValidShred(shred)
-    /\ shred.merklePath \in MerklePaths
-    /\ shred.data \in ShredData
-    /\ shred.merkleRoot \in MerkleRoots
+    \* Check if this shred's data and path are valid for the claimed Merkle root
+    <<shred.data, shred.merklePath, shred.shredIndex, shred.merkleRoot>> \in validMerklePaths
 
-\* Verify signature on slice object (abstract cryptographic operation)
+\* Verify signature on slice object
 VerifyShredSignature(shred) ==
-    \* In a real implementation, this would verify the signature on
-    \* Slice(shred.slot, shred.sliceIndex, shred.isLastSlice, shred.merkleRoot)
-    \* by the designated leader for this slot
-    /\ IsValidShred(shred)
-    /\ LET leader == Leader(shred.slot)
-       IN shred.signature \in Signatures
+    \* Check if the slice object was signed by the correct leader
+    LET leader == Leader(shred.slot)
+    IN <<shred.slot, shred.sliceIndex, shred.isLastSlice, shred.merkleRoot, leader, shred.signature>> \in validSignatures
 
 \* Create a new shred
 CreateShred(slot, sliceIdx, shredIdx, isLast, root, data, path, sig) ==
@@ -124,18 +121,31 @@ GetShredsWithRoot(merkleRoot) ==
     {shred \in shreds : shred.merkleRoot = merkleRoot}
 
 \* Check if we have enough shreds to potentially reconstruct a slice
-\* (assuming we need some minimum number GAMMA)
 HasSufficientShreds(slot, sliceIndex, merkleRoot) ==
     LET relevantShreds == {shred \in shreds : 
                             /\ shred.slot = slot
                             /\ shred.sliceIndex = sliceIndex
                             /\ shred.merkleRoot = merkleRoot
                             /\ VerifyShredMerklePath(shred)}
-    IN Cardinality(relevantShreds) >= 1  \* Placeholder - would use actual GAMMA threshold
+    IN Cardinality(relevantShreds) >= GAMMA
 
 \* Initialize system
 Init ==
-    shreds = {}
+    /\ shreds = {}
+    /\ validMerklePaths = {}  \* Start with empty set of valid paths
+    /\ validSignatures = {}   \* Start with empty set of valid signatures
+    /\ leaderSchedule \in [Slots -> Nodes]
+
+\* Establish valid cryptographic material (simulates correct signatures/paths)
+EstablishValidCrypto ==
+    \E data \in ShredData, path \in MerklePaths, idx \in ShredIndices, root \in MerkleRoots,
+       slot \in Slots, sliceIdx \in SliceIndices, isLast \in BOOLEAN, 
+       node \in Nodes, sig \in Signatures :
+        \/ /\ validMerklePaths' = validMerklePaths \union {<<data, path, idx, root>>}
+           /\ UNCHANGED <<shreds, validSignatures, leaderSchedule>>
+        \/ /\ node = leaderSchedule[slot]  \* Only the leader can create valid signatures
+           /\ validSignatures' = validSignatures \union {<<slot, sliceIdx, isLast, root, node, sig>>}
+           /\ UNCHANGED <<shreds, validMerklePaths, leaderSchedule>>
 
 \* Add a new shred to the system
 AddShred(shred) ==
@@ -145,22 +155,33 @@ AddShred(shred) ==
     /\ FitsInUDPDatagram(shred)
     /\ ~\E existing \in shreds : SamePosition(shred, existing)  \* No duplicates at same position
     /\ shreds' = shreds \union {shred}
+    /\ UNCHANGED <<validMerklePaths, validSignatures, leaderSchedule>>
 
 \* Next state relation
 Next ==
-    \E slot \in Slots, sliceIdx \in SliceIndices, shredIdx \in ShredIndices,
-       isLast \in BOOLEAN, root \in MerkleRoots, data \in ShredData,
-       path \in MerklePaths, sig \in Signatures :
-        LET newShred == CreateShred(slot, sliceIdx, shredIdx, isLast, root, data, path, sig)
-        IN AddShred(newShred)
+    \/ EstablishValidCrypto
+    \/ \E slot \in Slots, sliceIdx \in SliceIndices, shredIdx \in ShredIndices,
+          isLast \in BOOLEAN, root \in MerkleRoots, data \in ShredData,
+          path \in MerklePaths, sig \in Signatures :
+           LET newShred == CreateShred(slot, sliceIdx, shredIdx, isLast, root, data, path, sig)
+           IN AddShred(newShred)
 
 \* Specification
 Spec == Init /\ [][Next]_vars
+
+\* State constraint for model checking
+StateConstraint ==
+    /\ Cardinality(shreds) <= 2
+    /\ Cardinality(validMerklePaths) <= 3
+    /\ Cardinality(validSignatures) <= 3
 
 \* Type invariant
 TypeOK ==
     /\ shreds \subseteq Shred
     /\ \A shred \in shreds : IsValidShred(shred)
+    /\ validMerklePaths \subseteq (ShredData \X MerklePaths \X ShredIndices \X MerkleRoots)
+    /\ validSignatures \subseteq (Slots \X SliceIndices \X BOOLEAN \X MerkleRoots \X Nodes \X Signatures)
+    /\ leaderSchedule \in [Slots -> Nodes]
 
 \* Safety Properties
 
@@ -174,9 +195,7 @@ ValidShredPreservation ==
 \* Property: No duplicate shreds at same position
 NoDuplicatePositions ==
     \A shred1, shred2 \in shreds :
-        /\ shred1 # shred2
-        /\ SamePosition(shred1, shred2) =>
-            FALSE  \* This should never happen
+        shred1 # shred2 => ~SamePosition(shred1, shred2)
 
 \* Property: Shreds from correct leaders have valid signatures
 CorrectLeaderSignatures ==
