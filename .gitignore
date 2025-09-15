@@ -2,8 +2,6 @@
 *.old
 *.out
 states/
-MC.tla
-MC.cfg
 
 # Test files
 test.*
