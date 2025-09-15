@@ -80,7 +80,7 @@ ByzantineStakeOK ==
 \* ============================================================================
 
 Init ==
-    /\ validators = [v \in Validators |-> InitValidatorState(v)]
+    /\ validators = [v \in Validators |-> AddState(InitValidatorState(v), 1, "ParentReady")]
     /\ blocks = {GenesisBlock}
     /\ messages = {}
     /\ byzantineNodes = IF ByzantineCount = 0 THEN {}
@@ -127,10 +127,11 @@ GenerateCertificateAction(v, slot) ==
     /\ slot \in Slots
     /\ slot <= MaxSlot
     /\ LET pool == validators[v].pool
-           cert == GenerateCertificate(pool, slot)
-       IN /\ cert # {}
-          /\ messages' = messages \union {cert}
-          /\ validators' = [validators EXCEPT ![v].pool = StoreCertificate(validators[v].pool, cert)]
+           certs == GenerateCertificate(pool, slot)
+       IN /\ certs # {}
+          /\ LET cert == CHOOSE c \in certs : TRUE
+             IN /\ messages' = messages \union {cert}
+                /\ validators' = [validators EXCEPT ![v].pool = StoreCertificate(validators[v].pool, cert)]
     /\ UNCHANGED <<blocks, byzantineNodes, time, finalized>>
 
 (***************************************************************************
@@ -191,9 +192,111 @@ ProposeBlock(leader, slot, parent) ==
  ***************************************************************************)
 AdvanceTime ==
     /\ time' = time + 1
-    /\ \A v \in CorrectNodes :
-       validators' = [validators EXCEPT ![v] = AdvanceClock(validators[v], time')]
+    /\ validators' = [w \in Validators |->
+                        IF w \in CorrectNodes
+                        THEN AdvanceClock(validators[w], time')
+                        ELSE validators[w]]
     /\ UNCHANGED <<blocks, messages, byzantineNodes, finalized>>
+
+(***************************************************************************
+ * DELIVER VOTE
+ * When: A vote exists in the message set
+ * Effect: Store the vote in every validator's pool and remove from messages
+ ***************************************************************************)
+DeliverVote ==
+    /\ \E vote \in messages : vote \in Vote
+    /\ LET vmsg == CHOOSE vv \in messages : vv \in Vote
+       IN /\ messages' = messages \ {vmsg}
+          /\ validators' = [w \in Validators |->
+                               [validators[w] EXCEPT
+                                   !.pool = StoreVote(@, vmsg)]]
+    /\ UNCHANGED <<blocks, byzantineNodes, time, finalized>>
+
+(***************************************************************************
+ * DELIVER CERTIFICATE
+ * When: A certificate exists in the message set
+ * Effect: Store the certificate in every validator's pool and remove it
+ ***************************************************************************)
+DeliverCertificate ==
+    /\ \E cert \in messages : cert \in Certificate
+    /\ LET cmsg == CHOOSE cc \in messages : cc \in Certificate
+       IN /\ messages' = messages \ {cmsg}
+          /\ validators' = [w \in Validators |->
+                               [validators[w] EXCEPT
+                                   !.pool = StoreCertificate(@, cmsg)]]
+    /\ UNCHANGED <<blocks, byzantineNodes, time, finalized>>
+
+(***************************************************************************
+ * BROADCAST LOCAL VOTE
+ * When: A validator has cast a vote locally
+ * Effect: Enqueue that vote into the network messages for dissemination
+ ***************************************************************************)
+BroadcastLocalVote ==
+    /\ \E v \in CorrectNodes, s \in 1..MaxSlot :
+         LET localVotes == validators[v].pool.votes[s][v]
+         IN localVotes # {}
+    /\ LET vSel == CHOOSE vv \in CorrectNodes :
+                      \E s \in 1..MaxSlot : validators[vv].pool.votes[s][vv] # {}
+           sSel == CHOOSE ss \in 1..MaxSlot : validators[vSel].pool.votes[ss][vSel] # {}
+           vt == CHOOSE x \in validators[vSel].pool.votes[sSel][vSel] : TRUE
+       IN messages' = messages \union {vt}
+    /\ UNCHANGED <<validators, blocks, byzantineNodes, time, finalized>>
+
+(***************************************************************************
+ * EVENT: BLOCK NOTARIZED
+ * When: Pool has a notarization certificate for a block
+ * Effect: Set BlockNotarized state and try to cast FinalVote
+ ***************************************************************************)
+EmitBlockNotarized ==
+    /\ \E v \in CorrectNodes, b \in blocks :
+         /\ b.slot \in 1..MaxSlot
+         /\ ShouldEmitBlockNotarized(validators[v].pool, b.slot, b.hash)
+         /\ validators' = [validators EXCEPT ![v] =
+                               HandleBlockNotarized(@, b.slot, b.hash)]
+    /\ UNCHANGED <<blocks, messages, byzantineNodes, time, finalized>>
+
+(***************************************************************************
+ * EVENT: SAFE TO NOTAR (fallback)
+ * When: SafeToNotar predicate holds for a block we didn't initially vote for
+ * Effect: TrySkipWindow and cast NotarFallbackVote
+ ***************************************************************************)
+EmitSafeToNotar ==
+    /\ \E v \in CorrectNodes, s \in 1..MaxSlot, b \in blocks :
+         /\ b.slot = s
+         /\ LET alreadyVoted == HasState(validators[v], s, "Voted")
+                votedForB == VotedForBlock(validators[v], s, b.hash)
+            IN CanEmitSafeToNotar(validators[v].pool, s, b.hash, alreadyVoted, votedForB)
+         /\ validators' = [validators EXCEPT ![v] = HandleSafeToNotar(@, s, b.hash)]
+    /\ UNCHANGED <<blocks, messages, byzantineNodes, time, finalized>>
+
+(***************************************************************************
+ * EVENT: SAFE TO SKIP (fallback)
+ * When: SafeToSkip predicate holds for a slot we haven't skipped
+ * Effect: TrySkipWindow and cast SkipFallbackVote
+ ***************************************************************************)
+EmitSafeToSkip ==
+    /\ \E v \in CorrectNodes, s \in 1..MaxSlot :
+         /\ LET alreadyVoted == HasState(validators[v], s, "Voted")
+                votedSkip == 
+                    \E vt \in GetVotesForSlot(validators[v].pool, s) :
+                        /\ vt.validator = v
+                        /\ vt.type = "SkipVote"
+            IN CanEmitSafeToSkip(validators[v].pool, s, alreadyVoted, votedSkip)
+         /\ validators' = [validators EXCEPT ![v] = HandleSafeToSkip(@, s)]
+    /\ UNCHANGED <<blocks, messages, byzantineNodes, time, finalized>>
+
+(***************************************************************************
+ * EVENT: PARENT READY
+ * When: First slot of a window and prior slot is certified (and gaps skipped)
+ * Effect: Set ParentReady and schedule timeouts for the window
+ ***************************************************************************)
+EmitParentReady ==
+    /\ \E v \in CorrectNodes, s \in 1..MaxSlot, p \in blocks :
+         /\ IsFirstSlotOfWindow(s)
+         /\ p.slot + 1 = s
+         /\ ShouldEmitParentReady(validators[v].pool, s, p.hash, p.slot)
+         /\ validators' = [validators EXCEPT ![v] = HandleParentReady(@, s, p.hash)]
+    /\ UNCHANGED <<blocks, messages, byzantineNodes, time, finalized>>
 
 \* ============================================================================
 \* NEXT STATE RELATION
@@ -206,6 +309,9 @@ Next ==
     \/ \E v \in Validators, b \in blocks : FinalizeBlock(v, b)
     \/ \E v \in byzantineNodes : ByzantineAction(v)
     \/ \E l \in Validators, s \in 1..MaxSlot, p \in blocks : ProposeBlock(l, s, p)
+    \/ DeliverVote
+    \/ DeliverCertificate
+    \/ BroadcastLocalVote
     \/ AdvanceTime
 
 \* ============================================================================
@@ -215,6 +321,11 @@ Next ==
 \* Fairness: Ensure progress
 Fairness ==
     /\ WF_vars(AdvanceTime)
+    /\ WF_vars(DeliverVote)
+    /\ WF_vars(DeliverCertificate)
+    /\ WF_vars(BroadcastLocalVote)
+    /\ WF_vars(\E l \in Validators, s \in 1..MaxSlot, p \in blocks : ProposeBlock(l, s, p))
+    /\ WF_vars(\E v \in Validators, s \in 1..MaxSlot : GenerateCertificateAction(v, s))
     /\ \A v \in CorrectNodes : WF_vars(\E b \in blocks : ReceiveBlock(v, b))
 
 Spec == Init /\ [][Next]_vars /\ Fairness

@@ -144,7 +144,8 @@ Leader(slot) ==
 
 \* Get the first slot of the window containing 'slot'
 FirstSlotOfWindow(slot) ==
-    (slot \div WindowSize) * WindowSize
+    IF slot = 0 THEN 0
+    ELSE ((slot - 1) \div WindowSize) * WindowSize + 1
 
 \* Check if this slot is the first in its window
 IsFirstSlotOfWindow(slot) ==

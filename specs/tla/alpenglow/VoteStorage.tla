@@ -116,11 +116,18 @@ CanStoreCertificate(pool, cert) ==
     LET 
         slot == cert.slot
         existing == pool.certificates[slot]
+        NotarTypes == {"NotarizationCert", "NotarFallbackCert", "FastFinalizationCert"}
     IN
-        ~\E c \in existing : 
-            /\ c.type = cert.type
-            /\ (cert.type \in {"SkipCert", "FinalizationCert"} \/ 
-                c.blockHash = cert.blockHash)
+        CASE cert.type \in {"SkipCert", "FinalizationCert"} ->
+            \* At most one SkipCert and one FinalizationCert per slot
+            ~\E c \in existing : c.type = cert.type
+
+        [] cert.type \in NotarTypes ->
+            /\ ~\E c \in existing : c.type = cert.type /\ c.blockHash = cert.blockHash
+            /\ \A c \in existing :
+                  c.type \in NotarTypes => c.blockHash = cert.blockHash
+
+        [] OTHER -> FALSE
 
 \* Store a certificate in the pool
 StoreCertificate(pool, cert) ==
@@ -180,21 +187,21 @@ GenerateCertificate(pool, slot) ==
         \* Find blocks that have votes
         notarBlocks == {vote.blockHash : vote \in {vt \in votes : vt.type = "NotarVote"}}
     IN
-        \* Try each certificate type in order of priority
+        \* Try each certificate type in order of priority, return a set (0 or 1)
         IF notarBlocks # {} THEN
             LET block == CHOOSE b \in notarBlocks : TRUE
             IN
                 IF CanCreateFastFinalizationCert(votes, slot, block) THEN
-                    CreateFastFinalizationCert(votes, slot, block)
+                    {CreateFastFinalizationCert(votes, slot, block)}
                 ELSE IF CanCreateNotarizationCert(votes, slot, block) THEN
-                    CreateNotarizationCert(votes, slot, block)
+                    {CreateNotarizationCert(votes, slot, block)}
                 ELSE IF CanCreateNotarFallbackCert(votes, slot, block) THEN
-                    CreateNotarFallbackCert(votes, slot, block)
+                    {CreateNotarFallbackCert(votes, slot, block)}
                 ELSE {}
         ELSE IF CanCreateSkipCert(votes, slot) THEN
-            CreateSkipCert(votes, slot)
+            {CreateSkipCert(votes, slot)}
         ELSE IF CanCreateFinalizationCert(votes, slot) THEN
-            CreateFinalizationCert(votes, slot)
+            {CreateFinalizationCert(votes, slot)}
         ELSE {}
 
 \* ============================================================================
