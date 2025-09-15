@@ -114,6 +114,7 @@ ProcessTimeout(v, slot) ==
     /\ v \in CorrectNodes
     /\ slot \in Slots
     /\ slot <= MaxSlot
+    /\ ~HasState(validators[v], slot, "Voted")
     /\ validators' = [validators EXCEPT ![v] = HandleTimeout(validators[v], slot)]
     /\ UNCHANGED <<blocks, messages, byzantineNodes, time, finalized>>
 
@@ -130,7 +131,11 @@ GenerateCertificateAction(v, slot) ==
            certs == GenerateCertificate(pool, slot)
        IN /\ certs # {}
           /\ LET cert == CHOOSE c \in certs : TRUE
-             IN /\ messages' = messages \union {cert}
+                 needsBroadcast == 
+                   \/ cert \notin messages
+                   \/ (\E w \in Validators : CanStoreCertificate(validators[w].pool, cert))
+             IN /\ needsBroadcast
+                /\ messages' = messages \union {cert}
                 /\ validators' = [validators EXCEPT ![v].pool = StoreCertificate(validators[v].pool, cert)]
     /\ UNCHANGED <<blocks, byzantineNodes, time, finalized>>
 
@@ -239,7 +244,10 @@ BroadcastLocalVote ==
                       \E s \in 1..MaxSlot : validators[vv].pool.votes[s][vv] # {}
            sSel == CHOOSE ss \in 1..MaxSlot : validators[vSel].pool.votes[ss][vSel] # {}
            vt == CHOOSE x \in validators[vSel].pool.votes[sSel][vSel] : TRUE
-       IN messages' = messages \union {vt}
+       IN 
+          /\ vt \notin messages
+          /\ \E w \in Validators : vt \notin validators[w].pool.votes[vt.slot][vt.validator]
+          /\ messages' = messages \union {vt}
     /\ UNCHANGED <<validators, blocks, byzantineNodes, time, finalized>>
 
 (***************************************************************************
