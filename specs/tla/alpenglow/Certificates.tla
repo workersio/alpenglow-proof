@@ -1,19 +1,13 @@
 ---------------------------- MODULE Certificates ----------------------------
 (***************************************************************************
  * CERTIFICATE GENERATION AND STAKE AGGREGATION FOR ALPENGLOW
- * 
- * This module handles the creation of certificates from votes, implementing
- * the stake counting rules and threshold requirements.
- * 
- * MAPS TO WHITEPAPER:
- * - Definition 11, Table 6: Certificate types and thresholds
- * - Definition 12: Vote storage and stake counting rules
- * - Definition 13: Certificate generation and uniqueness
- * 
- * KEY SAFETY PROPERTIES:
- * - Fast path requires 80% stake (one-round finalization)
- * - Slow path requires 60% stake (two-round finalization)
- * - Each validator counted ONCE per slot (even with multiple votes)
+ *
+ * Implements the threshold logic from Whitepaper §2.4 (Definition 11,
+ * Table 6) together with the stake-counting rules of Definition 12.
+ *  - Fast finalization: ≥80% stake on `NotarVote`
+ *  - Notarization / fallback / skip / slow finalization: ≥60%
+ * Each validator contributes stake at most once per slot, matching the
+ * "count-once" constraint discussed in §2.4.
  ***************************************************************************)
 
 EXTENDS Naturals, FiniteSets, Messages

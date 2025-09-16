@@ -1,21 +1,13 @@
 ---------------------------- MODULE VoteStorage ----------------------------
 (***************************************************************************
  * VOTE AND CERTIFICATE STORAGE (POOL) FOR ALPENGLOW
- * 
- * This module implements the Pool data structure that stores votes and
- * certificates with specific multiplicity rules. It also handles event
- * generation for the consensus state machine.
- * 
- * MAPS TO WHITEPAPER:
- * - Definition 12: Vote storage multiplicity rules
- * - Definition 13: Certificate storage and uniqueness
- * - Definition 15: Pool events (BlockNotarized, ParentReady)
- * - Definition 16: Fallback events (SafeToNotar, SafeToSkip)
- * 
- * KEY SAFETY PROPERTIES:
- * - Only ONE initial vote (notar or skip) per validator per slot
- * - Up to 3 notar-fallback votes allowed per validator
- * - At most one certificate of each type per slot/block
+ *
+ * Direct transcription of the Pool rules from Whitepaper §2.4:
+ *  - Definition 12: vote multiplicity constraints
+ *  - Definition 13: certificate storage & uniqueness
+ *  - Definitions 15–16: emitted events that drive Votor
+ * The Pool acts as the interface between vote dissemination and the
+ * Votor state machine.
  ***************************************************************************)
 
 EXTENDS Naturals, FiniteSets, Messages, Blocks, Certificates
@@ -184,25 +176,31 @@ MaxNotarStake(pool, slot) ==
 \* Try to generate a certificate from current votes
 GenerateCertificate(pool, slot) ==
     LET votes == GetVotesForSlot(pool, slot)
-        \* Find blocks that have votes
         notarBlocks == {vote.blockHash : vote \in {vt \in votes : vt.type = "NotarVote"}}
-    IN
-        \* Try each certificate type in order of priority, return a set (0 or 1)
-        IF notarBlocks # {} THEN
-            LET block == CHOOSE b \in notarBlocks : TRUE
-            IN
-                IF CanCreateFastFinalizationCert(votes, slot, block) THEN
-                    {CreateFastFinalizationCert(votes, slot, block)}
-                ELSE IF CanCreateNotarizationCert(votes, slot, block) THEN
-                    {CreateNotarizationCert(votes, slot, block)}
-                ELSE IF CanCreateNotarFallbackCert(votes, slot, block) THEN
-                    {CreateNotarFallbackCert(votes, slot, block)}
-                ELSE {}
-        ELSE IF CanCreateSkipCert(votes, slot) THEN
-            {CreateSkipCert(votes, slot)}
-        ELSE IF CanCreateFinalizationCert(votes, slot) THEN
-            {CreateFinalizationCert(votes, slot)}
-        ELSE {}
+        BlockCertFor(block) ==
+            IF CanCreateFastFinalizationCert(votes, slot, block) THEN
+                {
+                    CreateFastFinalizationCert(votes, slot, block),
+                    CreateNotarizationCert(votes, slot, block),
+                    CreateNotarFallbackCert(votes, slot, block)
+                }
+            ELSE IF CanCreateNotarizationCert(votes, slot, block) THEN
+                {
+                    CreateNotarizationCert(votes, slot, block),
+                    CreateNotarFallbackCert(votes, slot, block)
+                }
+            ELSE IF CanCreateNotarFallbackCert(votes, slot, block) THEN
+                {CreateNotarFallbackCert(votes, slot, block)}
+            ELSE {}
+        blockCerts ==
+            UNION {BlockCertFor(block) : block \in notarBlocks}
+        skipCert == IF CanCreateSkipCert(votes, slot)
+                     THEN {CreateSkipCert(votes, slot)}
+                     ELSE {}
+        finalCert == IF CanCreateFinalizationCert(votes, slot)
+                      THEN {CreateFinalizationCert(votes, slot)}
+                      ELSE {}
+    IN blockCerts \cup skipCert \cup finalCert
 
 \* ============================================================================
 \* CERTIFICATE QUERIES
@@ -271,13 +269,19 @@ ShouldEmitParentReady(pool, slot, parentHash, parentSlot) ==
  * This prevents fast-finalization of a conflicting block (safety).
  * Effect: Enables casting notar-fallback vote for block b.
  ***************************************************************************)
-CanEmitSafeToNotar(pool, slot, blockHash, alreadyVoted, votedForBlock) ==
+CanEmitSafeToNotar(pool, slot, blockHash, parentHash, alreadyVoted, votedForBlock) ==
     /\ alreadyVoted      \* Must have voted in slot
     /\ ~votedForBlock    \* But not for this block
     /\ LET notar == NotarStake(pool, slot, blockHash)
            skip == SkipStake(pool, slot)
-       IN \/ MeetsThreshold(notar, 40)
-          \/ (MeetsThreshold(skip + notar, 60) /\ MeetsThreshold(notar, 20))
+           parentSlot == IF slot = 0 THEN 0 ELSE slot - 1
+           parentReady ==
+                IF IsFirstSlotOfWindow(slot)
+                THEN TRUE
+                ELSE parentSlot \in Slots /\ HasNotarFallbackCert(pool, parentSlot, parentHash)
+       IN parentReady /\
+          (MeetsThreshold(notar, 40)
+           \/ (MeetsThreshold(skip + notar, 60) /\ MeetsThreshold(notar, 20)))
 
 (***************************************************************************
  * Event: SafeToSkip - DEFINITION 16 (Fallback events) - Page 22:

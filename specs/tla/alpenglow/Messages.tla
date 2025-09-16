@@ -1,18 +1,11 @@
 ---------------------------- MODULE Messages ----------------------------
 (***************************************************************************
  * MESSAGE TYPES FOR ALPENGLOW CONSENSUS PROTOCOL
- * 
- * This module defines all vote and certificate message types used in the
- * Alpenglow consensus protocol.
- * 
- * MAPS TO WHITEPAPER:
- * - Definition 11, Table 5: Five vote types
- * - Definition 11, Table 6: Five certificate types
- * 
- * KEY CONCEPTS:
- * - Dual voting paths: Fast (80% stake) vs Slow (60% stake)
- * - Vote types enable different consensus mechanisms
- * - Certificates are aggregated votes that prove agreement
+ *
+ * Encodes the voting and certification objects enumerated in Whitepaper
+ * §2.4 (Definition 11, Tables 5–6). Each constructor mirrors the notation
+ * `NotarVote`, `SkipVote`, etc., so later modules can reason about the
+ * fast (≥80%) and slow (≥60%) finalization paths.
  ***************************************************************************)
 
 EXTENDS Naturals, FiniteSets

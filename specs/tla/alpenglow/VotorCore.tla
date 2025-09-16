@@ -1,19 +1,13 @@
 ---------------------------- MODULE VotorCore ----------------------------
 (***************************************************************************
  * VOTOR VOTING STATE MACHINE FOR ALPENGLOW
- * 
- * This module implements the core voting logic from Algorithms 1-2 and
- * Definition 18 of the Alpenglow whitepaper.
- * 
- * MAPS TO WHITEPAPER:
- * - Algorithm 1: Event loop (lines 1-25)
- * - Algorithm 2: Helper functions (lines 1-30)
- * - Definition 18: Votor state objects
- * 
- * KEY CONCEPTS:
- * - Validators maintain state per slot (Voted, VotedNotar, BadWindow, etc.)
- * - Events trigger state transitions (Block arrival, Timeout, SafeToNotar)
- * - Dual paths run concurrently (fast 80% vs slow 60%)
+ *
+ * Encodes the event loop and helper logic of Whitepaper §2.4:
+ *  - Algorithm 1 (lines 1–25) – event handlers
+ *  - Algorithm 2 (lines 1–30) – helper predicates and data updates
+ *  - Definition 18 – per-slot state objects
+ * This module keeps the formal model aligned with the pseudocode by
+ * replaying the same guard conditions (timeouts, fallback votes, etc.).
  ***************************************************************************)
 
 EXTENDS Naturals, FiniteSets, Sequences, TLC, 
@@ -55,6 +49,7 @@ StateObject == {
 ValidatorState == [
     id: Validators,                                  \* Validator identifier
     state: [Slots -> SUBSET StateObject],           \* State flags per slot
+    parentReady: [Slots -> BlockHashes \cup {NoBlock}], \* Parent hash per slot
     pendingBlocks: [Slots -> SUBSET Block],         \* Blocks to retry
     pool: PoolState,                                \* Vote/certificate storage
     clock: Nat,                                     \* Local clock
@@ -65,6 +60,7 @@ ValidatorState == [
 InitValidatorState(validatorId) == [
     id |-> validatorId,
     state |-> [s \in Slots |-> {}],
+    parentReady |-> [s \in Slots |-> NoBlock],
     pendingBlocks |-> [s \in Slots |-> {}],
     pool |-> InitPool,
     clock |-> 0,
@@ -95,11 +91,11 @@ VotedForBlock(validator, slot, blockHash) ==
 \* ============================================================================
 
 (***************************************************************************
- * Try to vote for a block. Conditions:
- * 1. Haven't voted yet in this slot
- * 2. Either:
- *    a) First slot of window AND ParentReady
- *    b) Not first slot AND voted for parent in previous slot
+ * Try to vote for a block. Mirrors Whitepaper Algorithm 2 (lines 7–17):
+ * 1. No prior vote in this slot
+ * 2. Either
+ *    a) first slot AND `ParentReady` for the indicated parent, or
+ *    b) later slot AND notarized the parent in slot s-1
  ***************************************************************************)
 
 TryNotar(validator, block) ==
@@ -110,7 +106,9 @@ TryNotar(validator, block) ==
         
         canVote == 
             /\ ~HasState(validator, slot, "Voted")
-            /\ \/ (isFirstSlot /\ HasState(validator, slot, "ParentReady"))
+            /\ \/ (isFirstSlot
+                    /\ HasState(validator, slot, "ParentReady")
+                    /\ validator.parentReady[slot] = block.parent)
                \/ (~isFirstSlot /\ parentSlot \in Slots /\ 
                    VotedForBlock(validator, parentSlot, block.parent))
     IN
@@ -129,10 +127,9 @@ TryNotar(validator, block) ==
 \* ============================================================================
 
 (***************************************************************************
- * Vote to finalize a notarized block. Conditions:
- * 1. Block is notarized (certificate exists)
- * 2. We voted to notarize this block
- * 3. Not in BadWindow state
+ * Vote to finalize a notarized block. Mirrors Whitepaper Algorithm 2
+ * (lines 18–21): requires notarization, our own notar vote, and no
+ * fallback activity in the window (`BadWindow`).
  ***************************************************************************)
 
 TryFinal(validator, slot, blockHash) ==
@@ -153,8 +150,8 @@ TryFinal(validator, slot, blockHash) ==
 \* ============================================================================
 
 (***************************************************************************
- * Skip all unvoted slots in the window. 
- * Called on timeout or when safe to skip.
+ * Skip all unvoted slots in the window, per Whitepaper Algorithm 2
+ * (lines 22–27). Triggered by timeouts or fallback events.
  ***************************************************************************)
 
 TrySkipWindow(validator, slot) ==
@@ -180,101 +177,7 @@ TrySkipWindow(validator, slot) ==
         ELSE validator
 
 \* ============================================================================
-\* EVENT HANDLERS (Algorithm 1)
-\* ============================================================================
-
-(***************************************************************************
- * Handle Block event (Algorithm 1, lines 1-5)
- * When: New block arrives
- * Action: Try to vote for it or store as pending
- ***************************************************************************)
-
-HandleBlock(validator, block) ==
-    LET slot == block.slot
-        tryResult == TryNotar(validator, block)
-    IN
-        IF tryResult # validator THEN
-            tryResult  \* Successfully voted
-        ELSE IF ~HasState(validator, slot, "Voted") THEN
-            \* Store as pending to retry later
-            [validator EXCEPT !.pendingBlocks[slot] = 
-                validator.pendingBlocks[slot] \union {block}]
-        ELSE validator
-
-(***************************************************************************
- * Handle Timeout event (Algorithm 1, lines 6-8)
- * When: Slot timer expires
- * Action: Skip the slot if haven't voted
- ***************************************************************************)
-
-HandleTimeout(validator, slot) ==
-    IF ~HasState(validator, slot, "Voted") THEN
-        TrySkipWindow(validator, slot)
-    ELSE validator
-
-(***************************************************************************
- * Handle BlockNotarized event (Algorithm 1, lines 9-11)
- * When: Pool gets notarization certificate
- * Action: Try to finalize the block
- ***************************************************************************)
-
-HandleBlockNotarized(validator, slot, blockHash) ==
-    LET newValidator == AddState(validator, slot, "BlockNotarized")
-    IN TryFinal(newValidator, slot, blockHash)
-
-(***************************************************************************
- * Handle ParentReady event (Algorithm 1, lines 12-15)
- * When: Ready to start new leader window
- * Action: Set timeouts for all slots in window
- ***************************************************************************)
-
-HandleParentReady(validator, slot, parentHash) ==
-    LET newValidator == AddState(validator, slot, "ParentReady")
-        windowSlots == WindowSlots(slot)
-        \* Set timeouts for all slots in window
-        RECURSIVE SetTimeouts(_,_)
-        SetTimeouts(val, slots) ==
-            IF slots = {} THEN val
-            ELSE
-                LET s == CHOOSE x \in slots : TRUE
-                    timeout == val.clock + DeltaTimeout + ((s - slot + 1) * DeltaBlock)
-                IN SetTimeouts([val EXCEPT !.timeouts[s] = timeout], slots \ {s})
-    IN SetTimeouts(newValidator, windowSlots \cap Slots)
-
-(***************************************************************************
- * Handle SafeToNotar event (Algorithm 1, lines 16-20)
- * When: Safe to cast notar-fallback vote
- * Action: Skip window and cast notar-fallback
- ***************************************************************************)
-
-HandleSafeToNotar(validator, slot, blockHash) ==
-    LET skipResult == TrySkipWindow(validator, slot)
-    IN
-        IF ~HasState(skipResult, slot, "ItsOver") THEN
-            LET vote == CreateNotarFallbackVote(skipResult.id, slot, blockHash)
-                newValidator == AddState(skipResult, slot, "BadWindow")
-                poolWithVote == StoreVote(newValidator.pool, vote)
-            IN [newValidator EXCEPT !.pool = poolWithVote]
-        ELSE skipResult
-
-(***************************************************************************
- * Handle SafeToSkip event (Algorithm 1, lines 21-25)
- * When: Safe to cast skip-fallback vote
- * Action: Skip window and cast skip-fallback
- ***************************************************************************)
-
-HandleSafeToSkip(validator, slot) ==
-    LET skipResult == TrySkipWindow(validator, slot)
-    IN
-        IF ~HasState(skipResult, slot, "ItsOver") THEN
-            LET vote == CreateSkipFallbackVote(skipResult.id, slot)
-                newValidator == AddState(skipResult, slot, "BadWindow")
-                poolWithVote == StoreVote(newValidator.pool, vote)
-            IN [newValidator EXCEPT !.pool = poolWithVote]
-        ELSE skipResult
-
-\* ============================================================================
-\* CHECK PENDING BLOCKS (Algorithm 1, lines 28-30)
+\* CHECK PENDING BLOCKS (Whitepaper Algorithm 1, lines 28–30)
 \* ============================================================================
 
 CheckPendingBlocks(validator) ==
@@ -290,6 +193,103 @@ CheckPendingBlocks(validator) ==
                            newVal == TryNotar(val, block)
                        IN CheckSlots(newVal, slots \ {s})
     IN CheckSlots(validator, {s \in Slots : validator.pendingBlocks[s] # {}})
+
+\* ============================================================================
+\* EVENT HANDLERS (Algorithm 1)
+\* ============================================================================
+
+(***************************************************************************
+ * Handle Block event (Whitepaper Algorithm 1, lines 1–5).
+ * On delivery we attempt to notarize immediately; otherwise retain as
+ * pending until prerequisites (parent readiness) hold.
+ ***************************************************************************)
+
+HandleBlock(validator, block) ==
+    LET slot == block.slot
+        tryResult == TryNotar(validator, block)
+    IN
+        IF tryResult # validator THEN
+            CheckPendingBlocks(tryResult)  \* Successfully voted; re-evaluate pending
+        ELSE IF ~HasState(validator, slot, "Voted") THEN
+            \* Store as pending to retry later
+            [validator EXCEPT !.pendingBlocks[slot] = 
+                validator.pendingBlocks[slot] \union {block}]
+        ELSE validator
+
+(***************************************************************************
+ * Handle Timeout event (Whitepaper Algorithm 1, lines 6–8).
+ * On timer expiry the validator casts skip votes for all slots still
+ * lacking initial votes.
+ ***************************************************************************)
+
+HandleTimeout(validator, slot) ==
+    LET cleared == [validator EXCEPT !.timeouts[slot] = 0]
+    IN IF ~HasState(cleared, slot, "Voted") THEN
+           TrySkipWindow(cleared, slot)
+       ELSE cleared
+
+(***************************************************************************
+ * Handle BlockNotarized event (Whitepaper Algorithm 1, lines 9–11).
+ * Marks the slot as notarized and attempts to cast the slow-path
+ * finalization vote.
+ ***************************************************************************)
+
+HandleBlockNotarized(validator, slot, blockHash) ==
+    LET newValidator == AddState(validator, slot, "BlockNotarized")
+    IN TryFinal(newValidator, slot, blockHash)
+
+(***************************************************************************
+ * Handle ParentReady event (Whitepaper Algorithm 1, lines 12–15).
+ * Records the parent hash for the first slot of the window, schedules all
+ * timeouts, and re-checks pending blocks that might now be safe.
+ ***************************************************************************)
+
+HandleParentReady(validator, slot, parentHash) ==
+    LET newValidator == AddState(validator, slot, "ParentReady")
+        withParent == [newValidator EXCEPT !.parentReady[slot] = parentHash]
+        windowSlots == WindowSlots(slot)
+        \* Set timeouts for all slots in window
+        RECURSIVE SetTimeouts(_,_)
+        SetTimeouts(val, slots) ==
+            IF slots = {} THEN val
+            ELSE
+                LET s == CHOOSE x \in slots : TRUE
+                    timeout == val.clock + DeltaTimeout + ((s - slot + 1) * DeltaBlock)
+                IN SetTimeouts([val EXCEPT !.timeouts[s] = timeout], slots \ {s})
+        withTimeouts == SetTimeouts(withParent, windowSlots \cap Slots)
+    IN CheckPendingBlocks(withTimeouts)
+
+(***************************************************************************
+ * Handle SafeToNotar event (Whitepaper Algorithm 1, lines 16–20).
+ * After verifying Definition 16 conditions, emits skip votes for any
+ * missed slots and casts the notar-fallback vote.
+ ***************************************************************************)
+
+HandleSafeToNotar(validator, slot, blockHash) ==
+    LET skipResult == TrySkipWindow(validator, slot)
+    IN
+        IF ~HasState(skipResult, slot, "ItsOver") THEN
+            LET vote == CreateNotarFallbackVote(skipResult.id, slot, blockHash)
+                newValidator == AddState(skipResult, slot, "BadWindow")
+                poolWithVote == StoreVote(newValidator.pool, vote)
+            IN [newValidator EXCEPT !.pool = poolWithVote]
+        ELSE skipResult
+
+(***************************************************************************
+ * Handle SafeToSkip event (Whitepaper Algorithm 1, lines 21–25).
+ * Similar to the notar fallback but issues skip-fallback votes once
+ * Definition 16’s inequality is met.
+ ***************************************************************************)
+
+HandleSafeToSkip(validator, slot) ==
+    LET skipResult == TrySkipWindow(validator, slot)
+    IN
+        IF ~HasState(skipResult, slot, "ItsOver") THEN
+            LET vote == CreateSkipFallbackVote(skipResult.id, slot)
+                newValidator == AddState(skipResult, slot, "BadWindow")
+                poolWithVote == StoreVote(newValidator.pool, vote)
+            IN [newValidator EXCEPT !.pool = poolWithVote]
+        ELSE skipResult
 
 \* ============================================================================
 \* CLOCK AND TIMEOUT MANAGEMENT
@@ -316,6 +316,7 @@ AdvanceClock(validator, newTime) ==
 ValidatorStateOK(validator) ==
     /\ validator.id \in Validators
     /\ validator.state \in [Slots -> SUBSET StateObject]
+    /\ validator.parentReady \in [Slots -> BlockHashes \cup {NoBlock}]
     /\ validator.pendingBlocks \in [Slots -> SUBSET Block]
     /\ PoolTypeOK(validator.pool)
     /\ validator.clock \in Nat

@@ -1,19 +1,11 @@
 ---------------------------- MODULE Blocks ----------------------------
 (***************************************************************************
  * BLOCK STRUCTURE AND RELATIONSHIPS FOR ALPENGLOW
- * 
- * This module defines the block data structure and the blockchain DAG
- * (Directed Acyclic Graph) relationships.
- * 
- * MAPS TO WHITEPAPER:
- * - Definition 3: Block structure
- * - Definition 4: Block hash
- * - Definition 5: Ancestor and descendant relationships
- * 
- * KEY CONCEPTS:
- * - Blocks form a chain through parent-child links
- * - Each slot can have at most one finalized block
- * - Leader windows group consecutive slots under one leader
+ *
+ * Implements the data model described in Whitepaper §2.1 (Definitions 3–5)
+ * and the leader-window machinery from §2.7 (Algorithms 3–4). The focus is
+ * on expressing parent/ancestor relationships and the VRF-derived leader
+ * schedule that remains constant across each window.
  ***************************************************************************)
 
 EXTENDS Naturals, FiniteSets, Messages
@@ -23,12 +15,14 @@ EXTENDS Naturals, FiniteSets, Messages
 \* ============================================================================
 
 CONSTANTS
-    GenesisHash,    \* Special hash for the genesis (first) block
-    WindowSize      \* Number of consecutive slots per leader window
+    GenesisHash,     \* Special hash for the genesis (first) block
+    WindowSize,      \* Number of consecutive slots per leader window
+    LeaderSchedule   \* Stake-weighted leader map provided by VRF schedule
 
 ASSUME
     /\ GenesisHash \in BlockHashes
-    /\ WindowSize \in Nat \ {0}  \* Window size must be positive
+    /\ WindowSize \in Nat \ {0}  \* Window size must be positive (§2.7)
+    /\ LeaderSchedule \in [Slots -> Validators]  \* VRF output (§1.1)
 
 \* ============================================================================
 \* BLOCK STRUCTURE (Definition 3 from whitepaper)
@@ -140,7 +134,7 @@ InSameChain(b1, b2, allBlocks) ==
 
 \* Deterministic leader assignment (abstraction of VRF in real protocol)
 Leader(slot) ==
-    CHOOSE v \in Validators : TRUE  \* Simplified - would use VRF
+    LeaderSchedule[slot]
 
 \* Get the first slot of the window containing 'slot'
 FirstSlotOfWindow(slot) ==
@@ -150,6 +144,10 @@ FirstSlotOfWindow(slot) ==
 \* Check if this slot is the first in its window
 IsFirstSlotOfWindow(slot) ==
     slot = FirstSlotOfWindow(slot)
+
+ASSUME LeaderScheduleWindowConsistency ==
+    \A s \in Slots : LeaderSchedule[s] = LeaderSchedule[FirstSlotOfWindow(s)]
+        \* Leaders stay fixed across window (§2.7, lines 700-760)
 
 \* Get all slots in the same window as 'slot'
 WindowSlots(slot) ==
