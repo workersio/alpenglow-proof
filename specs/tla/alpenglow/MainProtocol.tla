@@ -339,6 +339,7 @@ EmitBlockNotarized ==
     /\ \E v \in CorrectNodes, b \in blocks :
          /\ b.slot \in 1..MaxSlot
          /\ ShouldEmitBlockNotarized(validators[v].pool, b.slot, b.hash)
+         /\ ~HasState(validators[v], b.slot, "BlockNotarized")
          /\ validators' = [validators EXCEPT ![v] =
                                HandleBlockNotarized(@, b.slot, b.hash)]
     /\ UNCHANGED <<blocks, messages, byzantineNodes, time, finalized, blockAvailability>>
@@ -354,6 +355,7 @@ EmitSafeToNotar ==
          /\ LET alreadyVoted == HasState(validators[v], s, "Voted")
                 votedForB == VotedForBlock(validators[v], s, b.hash)
             IN CanEmitSafeToNotar(validators[v].pool, s, b.hash, b.parent, alreadyVoted, votedForB)
+         /\ ~HasState(validators[v], s, "BadWindow")
          /\ validators' = [validators EXCEPT ![v] = HandleSafeToNotar(@, s, b.hash)]
     /\ UNCHANGED <<blocks, messages, byzantineNodes, time, finalized, blockAvailability>>
 
@@ -369,6 +371,7 @@ EmitSafeToSkip ==
                         /\ vt.validator = v
                         /\ vt.type = "SkipVote"
             IN CanEmitSafeToSkip(validators[v].pool, s, alreadyVoted, votedSkip)
+         /\ ~HasState(validators[v], s, "BadWindow")
          /\ validators' = [validators EXCEPT ![v] = HandleSafeToSkip(@, s)]
     /\ UNCHANGED <<blocks, messages, byzantineNodes, time, finalized, blockAvailability>>
 
@@ -381,6 +384,7 @@ EmitParentReady ==
          /\ IsFirstSlotOfWindow(s)
          /\ p.slot + 1 = s
          /\ ShouldEmitParentReady(validators[v].pool, s, p.hash, p.slot)
+         /\ ~HasState(validators[v], s, "ParentReady")
          /\ validators' = [validators EXCEPT ![v] = HandleParentReady(@, s, p.hash)]
     /\ UNCHANGED <<blocks, messages, byzantineNodes, time, finalized, blockAvailability>>
 
