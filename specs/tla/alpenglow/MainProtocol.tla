@@ -163,10 +163,10 @@ ByzantineAction(v) ==
     /\ UNCHANGED <<validators, blocks, byzantineNodes, time, finalized, blockAvailability>>
 
 (***************************************************************************
- * PROPOSE BLOCK — Whitepaper §2.7 (Algorithm 3)
- * Leader builds a new block for its slot and marks it locally available.
+ * HONEST PROPOSE BLOCK — Whitepaper §2.7 (Algorithm 3)
+ * Correct leader builds a new block for its slot and stores it locally.
  ***************************************************************************)
-ProposeBlock(leader, slot, parent) ==
+HonestProposeBlock(leader, slot, parent) ==
     /\ leader = Leader(slot)
     /\ leader \in CorrectNodes
     /\ parent \in blocks
@@ -182,6 +182,33 @@ ProposeBlock(leader, slot, parent) ==
        ]
        IN /\ blocks' = blocks \union {newBlock}
           /\ blockAvailability' = [blockAvailability EXCEPT ![leader] = @ \union {newBlock}]
+          /\ UNCHANGED <<validators, messages, byzantineNodes, time, finalized>>
+
+(***************************************************************************
+ * BYZANTINE PROPOSE BLOCK — models equivocation/withholding by leaders
+ * flagged Byzantine (§2.2, Example 44). They may mint multiple blocks for
+ * the same slot and share them with any subset of validators.
+ ***************************************************************************)
+ByzantineProposeBlock(leader, slot, parent) ==
+    /\ leader = Leader(slot)
+    /\ leader \in byzantineNodes
+    /\ parent \in blocks
+    /\ slot > parent.slot
+    /\ slot <= MaxSlot
+    /\ Cardinality(blocks) < MaxBlocks
+    /\ LET newBlock == [
+           slot |-> slot,
+           hash |-> CHOOSE h \in BlockHashes :
+                    h \notin {b.hash : b \in blocks},
+           parent |-> parent.hash,
+           leader |-> leader
+       ]
+       IN /\ blocks' = blocks \union {newBlock}
+          /\ \E targets \in SUBSET Validators :
+                blockAvailability' =
+                    [w \in Validators |->
+                        IF w \in targets THEN blockAvailability[w] \union {newBlock}
+                        ELSE blockAvailability[w]]
           /\ UNCHANGED <<validators, messages, byzantineNodes, time, finalized>>
 
 (***************************************************************************
@@ -321,7 +348,8 @@ Next ==
     \/ \E v \in Validators, s \in 1..MaxSlot : GenerateCertificateAction(v, s)
     \/ \E v \in Validators, b \in blocks : FinalizeBlock(v, b)
     \/ \E v \in byzantineNodes : ByzantineAction(v)
-    \/ \E l \in Validators, s \in 1..MaxSlot, p \in blocks : ProposeBlock(l, s, p)
+    \/ \E l \in Validators, s \in 1..MaxSlot, p \in blocks : HonestProposeBlock(l, s, p)
+    \/ \E l \in Validators, s \in 1..MaxSlot, p \in blocks : ByzantineProposeBlock(l, s, p)
     \/ DeliverVote
     \/ DeliverCertificate
     \/ BroadcastLocalVote
@@ -339,7 +367,7 @@ Fairness ==
     /\ WF_vars(DeliverVote)
     /\ WF_vars(DeliverCertificate)
     /\ WF_vars(BroadcastLocalVote)
-    /\ WF_vars(\E l \in Validators, s \in 1..MaxSlot, p \in blocks : ProposeBlock(l, s, p))
+    /\ WF_vars(\E l \in Validators, s \in 1..MaxSlot, p \in blocks : HonestProposeBlock(l, s, p))
     /\ WF_vars(\E v \in Validators, s \in 1..MaxSlot : GenerateCertificateAction(v, s))
     /\ WF_vars(\E b \in blocks : RotorDisseminate(b))
     /\ \A v \in CorrectNodes : WF_vars(\E b \in blocks : ReceiveBlock(v, b))
