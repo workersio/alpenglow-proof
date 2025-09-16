@@ -56,6 +56,18 @@ vars == <<validators, blocks, messages, byzantineNodes, time, finalized, blockAv
 \* Get correct (non-Byzantine) validators
 CorrectNodes == Validators \ byzantineNodes
 
+\* Relays chosen by Rotor that are correct
+RotorCorrectRelays(relays) == relays \cap CorrectNodes
+
+\* Definition 6 (§2.2): Rotor succeeds if at least \gamma correct relays participate
+EnoughCorrectRelays(relays) == Cardinality(RotorCorrectRelays(relays)) >= RotorGamma
+
+\* Definition 19 & Algorithm 4: certificates prompting block repair
+NeedsBlockRepair(pool, block) ==
+    LET slot == block.slot
+        hash == block.hash
+    IN HasNotarizationCert(pool, slot, hash) \/ HasNotarFallbackCert(pool, slot, hash)
+
 \* Check if we're after GST (network is stable)
 AfterGST == time >= GST
 
@@ -224,10 +236,27 @@ AdvanceTime ==
     /\ UNCHANGED <<blocks, messages, byzantineNodes, finalized, blockAvailability>>
 
 (***************************************************************************
- * ROTOR DISSEMINATION — Whitepaper §2.2 (Rotor)
- * Advances block availability using the stake-weighted sampling abstraction.
+ * ROTOR DISSEMINATION (SUCCESS) — Whitepaper §2.2, Definition 6
+ * Rotor succeeds once a correct leader samples ≥ γ correct relays.
  ***************************************************************************)
-RotorDisseminate(block) ==
+RotorDisseminateSuccess(block) ==
+    /\ block \in blocks
+    /\ block.leader \in CorrectNodes
+    /\ LET needers == {v \in Validators : block \notin blockAvailability[v]}
+           nextSlot == IF block.slot + 1 <= MaxSlot THEN block.slot + 1 ELSE block.slot
+           nextLeader == Leader(nextSlot)
+           relays == RotorSelect(block, needers, nextLeader)
+       IN /\ needers # {}
+          /\ relays # {}
+          /\ EnoughCorrectRelays(relays)
+          /\ blockAvailability' = [w \in Validators |-> blockAvailability[w] \union {block}]
+          /\ UNCHANGED <<validators, blocks, messages, byzantineNodes, time, finalized>>
+
+(***************************************************************************
+ * ROTOR DISSEMINATION (FAILURE) — Either the leader is Byzantine or fewer
+ * than γ correct relays participate, so only the sampled relays learn the block.
+ ***************************************************************************)
+RotorDisseminateFailure(block) ==
     /\ block \in blocks
     /\ LET needers == {v \in Validators : block \notin blockAvailability[v]}
            nextSlot == IF block.slot + 1 <= MaxSlot THEN block.slot + 1 ELSE block.slot
@@ -235,11 +264,28 @@ RotorDisseminate(block) ==
            relays == RotorSelect(block, needers, nextLeader)
        IN /\ needers # {}
           /\ relays # {}
+          /\ (block.leader \in byzantineNodes \/ ~EnoughCorrectRelays(relays))
           /\ blockAvailability' = [w \in Validators |->
                                         IF w \in relays
                                         THEN blockAvailability[w] \union {block}
                                         ELSE blockAvailability[w]]
           /\ UNCHANGED <<validators, blocks, messages, byzantineNodes, time, finalized>>
+
+
+(***************************************************************************
+ * REPAIR — Whitepaper §2.8 (Algorithm 4)
+ * Fetch a notarized block from any node that already stores it.
+ *************************************************************************)
+RepairBlock(v, block, supplier) ==
+    /\ v \in CorrectNodes
+    /\ block \in blocks
+    /\ block \notin blockAvailability[v]
+    /\ NeedsBlockRepair(validators[v].pool, block)
+    /\ supplier \in Validators
+    /\ block \in blockAvailability[supplier]
+    /\ blockAvailability' = [blockAvailability EXCEPT ![v] = @ \union {block}]
+    /\ UNCHANGED <<validators, blocks, messages, byzantineNodes, time, finalized>>
+
 
 (***************************************************************************
  * DELIVER VOTE — Dissemination layer for Definition 12 constraints
@@ -353,7 +399,9 @@ Next ==
     \/ DeliverVote
     \/ DeliverCertificate
     \/ BroadcastLocalVote
-    \/ \E b \in blocks : RotorDisseminate(b)
+    \/ \E b \in blocks : RotorDisseminateSuccess(b)
+    \/ \E b \in blocks : RotorDisseminateFailure(b)
+    \/ \E v \in Validators, b \in blocks, s \in Validators : RepairBlock(v, b, s)
     \/ AdvanceTime
 
 \* ============================================================================
@@ -369,7 +417,8 @@ Fairness ==
     /\ WF_vars(BroadcastLocalVote)
     /\ WF_vars(\E l \in Validators, s \in 1..MaxSlot, p \in blocks : HonestProposeBlock(l, s, p))
     /\ WF_vars(\E v \in Validators, s \in 1..MaxSlot : GenerateCertificateAction(v, s))
-    /\ WF_vars(\E b \in blocks : RotorDisseminate(b))
+    /\ WF_vars(\E b \in blocks : RotorDisseminateSuccess(b))
+    /\ WF_vars(\E v \in Validators, b \in blocks, s \in Validators : RepairBlock(v, b, s))
     /\ \A v \in CorrectNodes : WF_vars(\E b \in blocks : ReceiveBlock(v, b))
 
 Spec == Init /\ [][Next]_vars /\ Fairness

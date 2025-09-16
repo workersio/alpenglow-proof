@@ -12,12 +12,14 @@ EXTENDS Naturals, FiniteSets, Certificates
 
 CONSTANTS
     RotorFanout,          \* Number of relays contacted per dissemination step
-    RotorMinRelayStake    \* Minimum total stake covered by a relay set
+    RotorMinRelayStake,   \* Minimum total stake covered by a relay set
+    RotorGamma            \* Minimum number of correct relays required for success
 
 ASSUME
     /\ RotorFanout \in Nat \ {0}
     /\ RotorMinRelayStake \in Nat \ {0}
     /\ RotorMinRelayStake <= TotalStake
+    /\ RotorGamma \in Nat \ {0}
 
 (***************************************************************************
  * RotorSelect(block, needers, nextLeader)
