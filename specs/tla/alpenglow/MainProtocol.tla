@@ -351,13 +351,28 @@ Spec == Init /\ [][Next]_vars /\ Fairness
 \* ============================================================================
 
 (***************************************************************************
- * MAIN SAFETY INVARIANT (Theorem 1 from whitepaper)
- * If two correct nodes finalize blocks, they must be in the same chain
+ * MAIN SAFETY INVARIANT (Whitepaper §2.9, Theorem 1): finalized blocks form
+ * a single chain of ancestry.
  ***************************************************************************)
 SafetyInvariant ==
     \A v1, v2 \in CorrectNodes :
     \A b1 \in finalized[v1], b2 \in finalized[v2] :
         (b1.slot <= b2.slot) => IsAncestor(b1, b2, blocks)
+
+(***************************************************************************
+ * No conflicting finalization (Corollary of Theorem 1): if two validators
+ * finalize blocks in the same slot, they must be identical.
+ ***************************************************************************)
+NoConflictingFinalization ==
+    \A v1, v2 \in CorrectNodes :
+    \A b1 \in finalized[v1], b2 \in finalized[v2] :
+        (b1.slot = b2.slot) => b1.hash = b2.hash
+
+(***************************************************************************
+ * Chain consistency under <20% Byzantine stake — restates Theorem 1 using
+ * the paper's resilience assumption (Assumption 1).
+ ***************************************************************************)
+ChainConsistency == SafetyInvariant
 
 (***************************************************************************
  * LEMMA 20: Vote uniqueness
@@ -397,16 +412,17 @@ FinalizedImpliesNotarized ==
             /\ cert.blockHash = b.hash
 
 (***************************************************************************
- * No conflicting certificates
- * Can't have certificates for different blocks in same slot
+ * Certificate uniqueness / non-equivocation (Definition 13): validators
+ * never assemble two certificates of the same type that point to different
+ * blocks in the same slot.
  ***************************************************************************)
-NoConflictingCerts ==
+CertificateNonEquivocation ==
     \A v \in CorrectNodes :
     \A slot \in 1..MaxSlot :
         LET pool == validators[v].pool
         IN \A c1, c2 \in pool.certificates[slot] :
             (c1.type = c2.type /\ 
-             c1.type \in {"NotarizationCert", "NotarFallbackCert"}) =>
+             c1.type \in {"NotarizationCert", "NotarFallbackCert", "FastFinalizationCert"}) =>
             c1.blockHash = c2.blockHash
 
 \* ============================================================================
@@ -456,10 +472,12 @@ TypeInvariant ==
 Invariant ==
     /\ TypeInvariant
     /\ SafetyInvariant
+    /\ NoConflictingFinalization
+    /\ ChainConsistency
     /\ VoteUniqueness
     /\ UniqueNotarization
     /\ FinalizedImpliesNotarized
-    /\ NoConflictingCerts
+    /\ CertificateNonEquivocation
     /\ ByzantineStakeOK
 
 \* ============================================================================
