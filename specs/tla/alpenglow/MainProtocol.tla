@@ -393,6 +393,10 @@ Next ==
     \/ \E v \in Validators, s \in 1..MaxSlot : ProcessTimeout(v, s)
     \/ \E v \in Validators, s \in 1..MaxSlot : GenerateCertificateAction(v, s)
     \/ \E v \in Validators, b \in blocks : FinalizeBlock(v, b)
+    \/ EmitBlockNotarized
+    \/ EmitSafeToNotar
+    \/ EmitSafeToSkip
+    \/ EmitParentReady
     \/ \E v \in byzantineNodes : ByzantineAction(v)
     \/ \E l \in Validators, s \in 1..MaxSlot, p \in blocks : HonestProposeBlock(l, s, p)
     \/ \E l \in Validators, s \in 1..MaxSlot, p \in blocks : ByzantineProposeBlock(l, s, p)
@@ -415,6 +419,10 @@ Fairness ==
     /\ WF_vars(DeliverVote)
     /\ WF_vars(DeliverCertificate)
     /\ WF_vars(BroadcastLocalVote)
+    /\ WF_vars(EmitBlockNotarized)
+    /\ WF_vars(EmitSafeToNotar)
+    /\ WF_vars(EmitSafeToSkip)
+    /\ WF_vars(EmitParentReady)
     /\ WF_vars(\E l \in Validators, s \in 1..MaxSlot, p \in blocks : HonestProposeBlock(l, s, p))
     /\ WF_vars(\E v \in Validators, s \in 1..MaxSlot : GenerateCertificateAction(v, s))
     /\ WF_vars(\E b \in blocks : RotorDisseminateSuccess(b))
