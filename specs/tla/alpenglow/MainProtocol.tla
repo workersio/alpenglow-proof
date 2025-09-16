@@ -568,6 +568,8 @@ Invariant ==
     /\ FinalizedImpliesNotarized
     /\ CertificateNonEquivocation
     /\ ByzantineStakeOK
+    /\ \A v \in Validators : MultiplicityRulesRespected(validators[v].pool)
+    /\ \A v \in Validators : CertificateUniqueness(validators[v].pool)
 
 \* ============================================================================
 \* STATE CONSTRAINTS (For bounded model checking)
