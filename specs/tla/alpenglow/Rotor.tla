@@ -41,4 +41,10 @@ RotorSelect(block, needers, nextLeader) ==
             /\ (nextLeader \in needers => nextLeader \in sample)
             /\ CalculateStake(sample) >= RotorMinRelayStake
 
+\* The constraints above encode the qualitative requirements in §2.2:
+\*  - at least one relay forwards the block when someone still needs it;
+\*  - the next leader is prioritised (fast handoff);
+\*  - only a bounded number of relays send in each step (fanout);
+\*  - the chosen set covers enough stake to remain resilient to faults.
+
 =============================================================================

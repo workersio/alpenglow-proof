@@ -2,12 +2,13 @@
 (***************************************************************************
  * VOTOR VOTING STATE MACHINE FOR ALPENGLOW
  *
- * Encodes the event loop and helper logic of Whitepaper §2.4:
- *  - Algorithm 1 (lines 1–25) – event handlers
- *  - Algorithm 2 (lines 1–30) – helper predicates and data updates
- *  - Definition 18 – per-slot state objects
- * This module keeps the formal model aligned with the pseudocode by
- * replaying the same guard conditions (timeouts, fallback votes, etc.).
+ * Implements the state machine described in Whitepaper §2.4. Readers can
+ * cross-reference the pseudocode directly:
+ *   • Definition 18 — what each slot remembers (`ParentReady`, `Voted`, ...).
+ *   • Algorithm 1 — event handlers (`Block`, `Timeout`, `SafeToNotar`, ...).
+ *   • Algorithm 2 — helper procedures (`TRYNOTAR`, `TRYSKIPWINDOW`, ...).
+ * Every guard here matches the corresponding line in the pseudocode, so the
+ * behaviour is easy to follow even without deep TLA+ knowledge.
  ***************************************************************************)
 
 EXTENDS Naturals, FiniteSets, Sequences, TLC, 
@@ -44,6 +45,9 @@ StateObject == {
     "ItsOver",          \* Cast finalization vote, done with slot
     "BadWindow"         \* Cast skip or fallback vote
 }
+
+\* These flags are exactly the items listed in Definition 18 and let us track
+\* where each slot sits in the voting process.
 
 \* Validator state structure
 ValidatorState == [

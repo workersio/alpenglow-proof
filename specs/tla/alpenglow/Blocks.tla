@@ -2,10 +2,13 @@
 (***************************************************************************
  * BLOCK STRUCTURE AND RELATIONSHIPS FOR ALPENGLOW
  *
- * Implements the data model described in Whitepaper §2.1 (Definitions 3–5)
- * and the leader-window machinery from §2.7 (Algorithms 3–4). The focus is
- * on expressing parent/ancestor relationships and the VRF-derived leader
- * schedule that remains constant across each window.
+ * This module formalises the block and chain model from the Alpenglow
+ * whitepaper:
+ *   • §2.1 Definitions 3–5 — block contents, hashes, ancestor relations.
+ *   • §2.7 and Algorithm 3 — leader windows and VRF leader schedule.
+ * Readers unfamiliar with TLA+ can think of this file as defining the
+ * "data types" for blocks together with helper predicates used by the
+ * higher-level protocol.
  ***************************************************************************)
 
 EXTENDS Naturals, FiniteSets, Messages
@@ -15,9 +18,9 @@ EXTENDS Naturals, FiniteSets, Messages
 \* ============================================================================
 
 CONSTANTS
-    GenesisHash,     \* Special hash for the genesis (first) block
-    WindowSize,      \* Number of consecutive slots per leader window
-    LeaderSchedule   \* Stake-weighted leader map provided by VRF schedule
+    GenesisHash,     \* Hash of the genesis block (§2.1)
+    WindowSize,      \* Number of consecutive slots per leader window (§2.7)
+    LeaderSchedule   \* VRF-based leader map announced each epoch (§1.1)
 
 ASSUME
     /\ GenesisHash \in BlockHashes
@@ -43,6 +46,9 @@ Block == [
     leader: Validators
 ]
 
+\* Definition 3: every block records its creation slot, unique hash,
+\* parent hash, and the leader that proposed it.
+
 \* The very first block in the chain (has no real parent)
 GenesisBlock == [
     slot |-> 0,
@@ -50,6 +56,8 @@ GenesisBlock == [
     parent |-> GenesisHash,  \* Genesis is its own parent
     leader |-> CHOOSE v \in Validators : TRUE  \* Arbitrary leader
 ]
+
+\* Definition 4 states that the genesis block is a self-parented placeholder.
 
 \* ============================================================================
 \* BLOCK VALIDATION
@@ -63,11 +71,16 @@ IsValidBlock(b) ==
     /\ b.leader \in Validators
     /\ b.slot > 0 => b.parent # b.hash  \* Non-genesis blocks can't self-reference
 
+\* Definition 4 requires non-genesis blocks to reference a distinct parent.
+
 \* Check if two blocks conflict (same slot, different hash)
 \* IMPORTANT: This shouldn't happen if the protocol works correctly!
 ConflictingBlocks(b1, b2) ==
     /\ b1.slot = b2.slot     \* Same slot
     /\ b1.hash # b2.hash     \* Different blocks!
+
+\* Convenience predicate used in safety proofs (Lemma 24) to express
+\* "two distinct blocks for the same slot".
 
 \* Check if parent-child relationship is valid
 ValidParentChild(parent, child) ==
@@ -136,6 +149,9 @@ InSameChain(b1, b2, allBlocks) ==
 Leader(slot) ==
     LeaderSchedule[slot]
 
+\* Whitepaper §1.1 and §2.7: each slot has a pre-announced leader chosen
+\* via a stake-weighted VRF.
+
 \* Get the first slot of the window containing 'slot'
 FirstSlotOfWindow(slot) ==
     IF slot = 0 THEN 0
@@ -145,9 +161,15 @@ FirstSlotOfWindow(slot) ==
 IsFirstSlotOfWindow(slot) ==
     slot = FirstSlotOfWindow(slot)
 
-ASSUME LeaderScheduleWindowConsistency ==
+LeaderScheduleWindowConsistency ==
     \A s \in Slots : LeaderSchedule[s] = LeaderSchedule[FirstSlotOfWindow(s)]
         \* Leaders stay fixed across window (§2.7, lines 700-760)
+
+ASSUME LeaderScheduleWindowConsistency
+
+\* Algorithm 3 lets a leader produce several consecutive slots (a "window").
+\* These helpers compute the starting slot and enforce that the same leader
+\* applies to every slot in that window.
 
 \* Get all slots in the same window as 'slot'
 WindowSlots(slot) ==
@@ -155,6 +177,8 @@ WindowSlots(slot) ==
     IN {s \in Slots : 
         /\ s >= first 
         /\ s < first + WindowSize}
+
+\* Returns the set of slot numbers owned by the leader of `slot`.
 
 \* ============================================================================
 \* CHAIN OPERATIONS

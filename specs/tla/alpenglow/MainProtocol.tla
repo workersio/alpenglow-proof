@@ -2,12 +2,12 @@
 (***************************************************************************
  * MAIN ALPENGLOW CONSENSUS PROTOCOL SPECIFICATION
  *
- * Orchestrates all modules from Whitepaper §2:
- *  - §2.3 (Blokstor) & §2.4 (Votor) actions
- *  - §2.2 (Rotor) for data availability
- *  - §2.9 safety (Theorem 1) and §2.10 liveness (Theorem 2)
- * The structure mirrors the paper: state variables, transition actions,
- * fairness, and invariants.
+ * This is the “glue” module: it combines the data model and Votor logic
+ * into a full protocol, following the order of presentation in Whitepaper
+ * §2. Readers can match each action to the narrative:
+ *   • §2.3 Blokstor events (`ReceiveBlock`, `EmitParentReady`, ...)
+ *   • §2.4 Voting actions (`ProcessTimeout`, `GenerateCertificate`, ...)
+ *   • §2.9 Safety invariants (Theorem 1) and §2.10 Liveness (Theorem 2)
  ***************************************************************************)
 
 EXTENDS Naturals, FiniteSets, Sequences, TLC,
@@ -332,7 +332,8 @@ Next ==
 \* SPECIFICATION
 \* ============================================================================
 
-\* Fairness: Ensure progress
+\* Fairness: Whitepaper §2.10 assumes that after GST, honest messages keep
+\* flowing. These weak fairness annotations model that assumption for TLC.
 Fairness ==
     /\ WF_vars(AdvanceTime)
     /\ WF_vars(DeliverVote)

@@ -2,10 +2,9 @@
 (***************************************************************************
  * MESSAGE TYPES FOR ALPENGLOW CONSENSUS PROTOCOL
  *
- * Encodes the voting and certification objects enumerated in Whitepaper
- * §2.4 (Definition 11, Tables 5–6). Each constructor mirrors the notation
- * `NotarVote`, `SkipVote`, etc., so later modules can reason about the
- * fast (≥80%) and slow (≥60%) finalization paths.
+ * Votor exchanges a small family of messages described in Whitepaper §2.4
+ * (Definition 11, Tables 5–6). This file encodes them explicitly so later
+ * modules can reason about which path (fast ≥80% or slow ≥60%) is active.
  ***************************************************************************)
 
 EXTENDS Naturals, FiniteSets
@@ -62,35 +61,38 @@ Vote == [
 \* These functions create properly formatted vote messages
 \* ============================================================================
 
-\* Create a NotarVote: "I approve block 'blockHash' in slot 'slot'"
+\* Definition 11 (Table 5): NotarVote — validator immediately approves
+\* block `blockHash` for slot `slot`.
 CreateNotarVote(validator, slot, blockHash) ==
     [type |-> "NotarVote",
      validator |-> validator,
      slot |-> slot,
      blockHash |-> blockHash]
 
-\* Create a NotarFallbackVote: "I'll go along with notarizing this block"
+\* Definition 11: NotarFallbackVote — emitted after SafeToNotar to back
+\* the same block once enough peers voted.
 CreateNotarFallbackVote(validator, slot, blockHash) ==
     [type |-> "NotarFallbackVote",
      validator |-> validator,
      slot |-> slot,
      blockHash |-> blockHash]
 
-\* Create a SkipVote: "Let's skip this slot"
+\* Definition 11: SkipVote — initial vote to skip the slot (no block hash).
 CreateSkipVote(validator, slot) ==
     [type |-> "SkipVote",
      validator |-> validator,
      slot |-> slot,
      blockHash |-> NoBlock]  \* Skip votes don't reference a block
 
-\* Create a SkipFallbackVote: "I'll go along with skipping"
+\* Definition 11: SkipFallbackVote — broadcast after SafeToSkip confirms
+\* the slot cannot be notarized.
 CreateSkipFallbackVote(validator, slot) ==
     [type |-> "SkipFallbackVote",
      validator |-> validator,
      slot |-> slot,
      blockHash |-> NoBlock]
 
-\* Create a FinalVote: "This notarized block should be finalized"
+\* Definition 11: FinalVote — second round of voting used in the 60% path.
 CreateFinalVote(validator, slot) ==
     [type |-> "FinalVote",
      validator |-> validator,
@@ -102,16 +104,18 @@ CreateFinalVote(validator, slot) ==
 \* These help categorize and query votes
 \* ============================================================================
 
-\* Is this a vote to approve a block (notar or notar-fallback)?
+\* Helper predicates mirror terminology in §2.4 so other modules can test
+\* for "approval" vs "skip" votes.
+
+\* Does this vote approve a block (either initial or fallback)?
 IsNotarVote(vote) ==
     vote.type \in {"NotarVote", "NotarFallbackVote"}
 
-\* Is this a vote to skip a slot?
+\* Does this vote skip the slot (initial or fallback)?
 IsSkipVote(vote) ==
     vote.type \in {"SkipVote", "SkipFallbackVote"}
 
-\* Is this an initial vote (first vote a validator casts in a slot)?
-\* IMPORTANT: Validators can only cast ONE initial vote per slot (Lemma 20)
+\* Initial votes are the ones counted once per slot (Definition 12 / Lemma 20).
 IsInitialVote(vote) ==
     vote.type \in {"NotarVote", "SkipVote"}
 
@@ -129,13 +133,9 @@ IsVoteForBlock(vote, blockHash) ==
 \* ============================================================================
 
 (***************************************************************************
- * Certificates are collections of votes that meet stake thresholds:
- * 
- * 1. FastFinalizationCert: ≥80% NotarVotes → instant finalization!
- * 2. NotarizationCert: ≥60% NotarVotes → block is notarized
- * 3. NotarFallbackCert: ≥60% mixed notar votes → fallback notarization
- * 4. SkipCert: ≥60% skip votes → slot is skipped
- * 5. FinalizationCert: ≥60% FinalVotes → slow-path finalization
+ * Certificates are aggregated votes that meet the stake thresholds from
+ * Whitepaper Table 6. Each constructor below corresponds to one row of the
+ * table (fast ≥80%, all others ≥60%).
  ***************************************************************************)
 
 CertificateType == {

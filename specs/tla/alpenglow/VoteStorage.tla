@@ -2,12 +2,10 @@
 (***************************************************************************
  * VOTE AND CERTIFICATE STORAGE (POOL) FOR ALPENGLOW
  *
- * Direct transcription of the Pool rules from Whitepaper §2.4:
- *  - Definition 12: vote multiplicity constraints
- *  - Definition 13: certificate storage & uniqueness
- *  - Definitions 15–16: emitted events that drive Votor
- * The Pool acts as the interface between vote dissemination and the
- * Votor state machine.
+ * Whitepaper §2.4 describes a per-validator "Pool" structure that remembers
+ * votes, emits events, and constructs certificates. This module encodes those
+ * rules so readers can see how raw votes are transformed into notarization,
+ * skip, and finalization certificates.
  ***************************************************************************)
 
 EXTENDS Naturals, FiniteSets, Messages, Blocks, Certificates
@@ -50,7 +48,9 @@ InitPool == [
  * notarization or skip vote per slot"
  ***************************************************************************)
 
-\* Check if we can store a vote according to multiplicity rules
+\* Definition 12: multiplicity limits — exactly one initial vote, up to
+\* three notar fallback votes, etc. This predicate enforces those limits
+\* before adding anything to the Pool.
 CanStoreVote(pool, vote) ==
     LET 
         slot == vote.slot
@@ -79,7 +79,8 @@ CanStoreVote(pool, vote) ==
             
         [] OTHER -> FALSE
 
-\* Store a vote in the pool (returns updated pool)
+\* Definition 12: once the multiplicity check passes we record the vote for
+\* this validator/slot so later stake calculations can see it.
 StoreVote(pool, vote) ==
     IF CanStoreVote(pool, vote) THEN
         LET 
@@ -103,7 +104,8 @@ StoreVote(pool, vote) ==
  * This ensures certificate uniqueness - can't have conflicting certificates!
  ***************************************************************************)
 
-\* Check if we can store a certificate (no duplicate type/slot/block)
+\* Definition 13: only one certificate of a given type is stored for each
+\* slot/block combination. This predicate enforces that uniqueness.
 CanStoreCertificate(pool, cert) ==
     LET 
         slot == cert.slot
@@ -173,7 +175,9 @@ MaxNotarStake(pool, slot) ==
 \* CERTIFICATE GENERATION
 \* ============================================================================
 
-\* Try to generate a certificate from current votes
+\* Definition 13: whenever enough votes are collected we must form the
+\* corresponding certificate(s). This function checks every block with
+\* votes and returns any certificate that can now be assembled.
 GenerateCertificate(pool, slot) ==
     LET votes == GetVotesForSlot(pool, slot)
         notarBlocks == {vote.blockHash : vote \in {vt \in votes : vt.type = "NotarVote"}}
