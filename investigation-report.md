@@ -1,14 +1,16 @@
 # Alpenglow TLA+ Investigation Report
 
 ## 0. TL;DR (Focus Gates)
-- ZWD (No whitepaper drift): Concerns
-- CTU (Correct TLA usage): Pass
+- ZWD (No whitepaper drift): Minor drift
+ - CTU (Correct TLA usage): Pass
 - FCC (Full claim coverage): Concerns
 - Top risks & immediate patches:
   - ZWD-1 (Major, Open): SafeToNotar over-constrained by local block availability. Patch: drop `b \in blockAvailability[v]` from `EmitSafeToNotar` (specs/tla/alpenglow/MainProtocol.tla:351). Whitepaper Definition 16 allows first-slot emission without repair.
   - ZWD-2 (Major, Open): ParentReady incorrectly restricted to immediate predecessor slot (`p.slot + 1 = s`). Patch: remove that guard in `EmitParentReady` (specs/tla/alpenglow/MainProtocol.tla:382). Definition 15 allows earlier notarized parent bridged by skip certs.
   - FCC-11 (Major, Open): Lemma 24 global uniqueness not fully captured (per-node only). Add cross-validator uniqueness covering both Notarization and NotarFallback certificates.
   - FCC-12 (Major, Open): Theorem 2’s per-window finalization liveness not explicitly captured. Add a window-scoped liveness property under stated assumptions (GST, correct window leader, no pre-GST timeouts, Rotor success).
+
+- Note: ZWD-1 was rescinded after cross-checking Definition 10 (Blokstor). See ZWD-1 row (Resolved).
 
 ## 1. Sources Read & Inventory
 - Modules / configs / properties / fairness:
@@ -45,7 +47,7 @@
   - Votes (Notar/NotarFallback/Skip/SkipFallback/Final) → `VoteType` + constructors (specs/tla/alpenglow/Messages.tla:32)
   - Certificates (FastFinalization/Notarization/NotarFallback/Skip/Finalization) → `CertificateType` + constructors (specs/tla/alpenglow/Messages.tla:108)
   - Events (BlockNotarized/ParentReady/SafeToNotar/SafeToSkip) → `ShouldEmitBlockNotarized`, `ShouldEmitParentReady`, `CanEmitSafeToNotar`, `CanEmitSafeToSkip`, plus `Emit*` actions (specs/tla/alpenglow/VoteStorage.tla:250, 261, 276, 299; specs/tla/alpenglow/MainProtocol.tla:338, 382, 351, 366)
-  - Timeout (Definition 17) → scheduled in `HandleParentReady`, processed in `AdvanceClock` (specs/tla/alpenglow/VotorCore.tla:246, 303)
+  - Timeout (Definition 17) → scheduled in `HandleParentReady`, processed in `AdvanceClock` (specs/tla/alpenglow/VotorCore.tla:251, 303)
   - Finalization (Definition 14) → `FinalizeBlock` using `HasFastFinalizationCert`, `HasNotarizationCert`, `HasFinalizationCert` (specs/tla/alpenglow/MainProtocol.tla:154; specs/tla/alpenglow/VoteStorage.tla:232)
   - Rotor/dissemination → `RotorSelect`, `RotorDisseminateSuccess`, `RotorDisseminateFailure` (specs/tla/alpenglow/Rotor.tla:31; specs/tla/alpenglow/MainProtocol.tla:242, 264)
   - Adversary assumption (Assumption 1) → `ByzantineStakeOK` invariant (specs/tla/alpenglow/MainProtocol.tla:79)
@@ -58,7 +60,7 @@
 | ZWD-3 | Definition 12 (storing votes) (alpenglow-whitepaper.md:510–521): first notar or skip; up to 3 notar-fallback; first skip-fallback; first finalization. | `CanStoreVote` enforces caps per type (specs/tla/alpenglow/VoteStorage.tla:36). | Equivalent | — | — | Direct transcription with per-type caps. Status: Resolved. |
 | ZWD-4 | Definition 11/Table 6 thresholds and “count once per slot” (alpenglow-whitepaper.md:510–554). | Threshold checks and constructors (`CanCreate*`, `Create*`, `StakeFromVotes(UniqueValidators(..))`) (specs/tla/alpenglow/Certificates.tla:64, 84). | Equivalent | — | — | Types and thresholds match table exactly. Status: Resolved. |
 | ZWD-5 | Definition 14 (finalization) (alpenglow-whitepaper.md:520–566): slow path finalizes unique notarized block for slot s upon `FinalizationCert`; fast path finalizes block b upon `FastFinalizationCert`. | `FinalizeBlock` matches: fast cert OR (notarization cert for b AND finalization cert for slot) (specs/tla/alpenglow/MainProtocol.tla:154). | Equivalent | — | — | Mirrors both cases. Status: Resolved. |
-| ZWD-6 | Definition 17 (timeout) (alpenglow-whitepaper.md:602–613): Timeout(i) := clock() + Δ_timeout + (i − s + 1)·Δ_block. | Timeout formula set in `HandleParentReady` (specs/tla/alpenglow/VotorCore.tla:260). | Equivalent | — | — | Matches verbatim. Status: Resolved. |
+| ZWD-6 | Definition 17 (timeout) (alpenglow-whitepaper.md:602–613): Timeout(i) := clock() + Δ_timeout + (i − s + 1)·Δ_block. | Timeout formula set in `HandleParentReady` (specs/tla/alpenglow/VotorCore.tla:261). | Equivalent | — | — | Matches verbatim. Status: Resolved. |
 | ZWD-7 | Definition 16 (SafeToSkip) (Page 22): skip(s) + Σ_b notar(b) − max_b notar(b) ≥ 40%. | `CanEmitSafeToSkip` inequality (specs/tla/alpenglow/VoteStorage.tla:299). | Equivalent | — | — | Direct transcription. Status: Resolved. |
 | ZWD-8 | Rotor (§2.2): prioritise next leader, bounded fanout, require ≥γ correct relays for success. | `RotorSelect` includes next leader, caps fanout, enforces min stake; success via `EnoughCorrectRelays` (specs/tla/alpenglow/Rotor.tla:31; specs/tla/alpenglow/MainProtocol.tla:242). | Equivalent | — | — | Encodes qualitative constraints. Status: Resolved. |
 | ZWD-9 | Algorithm 2 (TryNotar) (alpenglow-whitepaper.md:686–695): “or (not firstSlot and VotedNotar(hash_parent) ∈ state[s−1])”. | Non-first-slot guard uses `VotedForBlock(..parent..)`, set by prior notar vote (specs/tla/alpenglow/VotorCore.tla:111). | Equivalent | — | — | Matches pseudocode line 11. Status: Resolved. |
@@ -91,7 +93,7 @@ Findings (CTU-#): None (Pass). Structure follows established patterns; no refact
 | FCC-5 | Lemma 25 (finalized implies notarized) (alpenglow-whitepaper.md:866–873) | Invariant | `FinalizedImpliesNotarized` (specs/tla/alpenglow/MainProtocol.tla:498) | Covered (Resolved) | — | Uses local pool witness. |
 | FCC-6 | Definition 11/Table 6 thresholds (alpenglow-whitepaper.md:510–554) | Typing/structural | `CanCreate*`, `IsValidCertificate` (specs/tla/alpenglow/Certificates.tla:84, 191) | Covered (Resolved) | — | Encoded exactly. |
 | FCC-7 | Assumption 1 (<20% byz) (alpenglow-whitepaper.md:105–109) | Assumption/state constraint | `ByzantineStakeOK` (specs/tla/alpenglow/MainProtocol.tla:79) | Covered (Resolved) | — | Safety/liveness proofs rely on it. |
-| FCC-8 | Definition 17 (timeouts) (alpenglow-whitepaper.md:602–613) | State-update discipline | Timeout formula (specs/tla/alpenglow/VotorCore.tla:260) | Covered (Resolved) | — | Matches formula. |
+| FCC-8 | Definition 17 (timeouts) (alpenglow-whitepaper.md:602–613) | State-update discipline | Timeout formula (specs/tla/alpenglow/VotorCore.tla:261) | Covered (Resolved) | — | Matches formula. |
 | FCC-9 | Definition 15 (events) (alpenglow-whitepaper.md:540–554) | Event guards | `ShouldEmitBlockNotarized`, `ShouldEmitParentReady` (specs/tla/alpenglow/VoteStorage.tla:250, 261) | Covered (Resolved) | — | Matches text. |
 | FCC-10 | Definition 16 (fallback events) (Page 22) | Event guards | `CanEmitSafeToNotar`, `CanEmitSafeToSkip` (specs/tla/alpenglow/VoteStorage.tla:276, 299) | Covered (Resolved) | — | Parent gating for non-first slot encoded. |
 | FCC-11 | Lemma 24 (global scope) | Invariant | — | Missing (Open) | `GlobalNotarizationUniqueness` (see Patches). | Ensures cross-validator uniqueness across Notar types. |
@@ -100,27 +102,7 @@ Findings (CTU-#): None (Pass). Structure follows established patterns; no refact
 
 ## 5. Patches (Minimal & Alignment-Only)
 - ZWD patches:
-  - ZWD-1 (Major, Open): Remove extra local-availability requirement from SafeToNotar emission in `EmitSafeToNotar`.
-    - File: specs/tla/alpenglow/MainProtocol.tla
-    - Before:
-      - `EmitSafeToNotar ==`
-      - `  /\ \E v \in CorrectNodes, s \in 1..MaxSlot, b \in blocks :`
-      - `       /\ b.slot = s`
-      - `       /\ b \in blockAvailability[v]`
-      - `       /\ LET alreadyVoted == HasState(validators[v], s, "Voted")`
-      - `              votedForB == VotedForBlock(validators[v], s, b.hash)`
-      - `          IN CanEmitSafeToNotar(validators[v].pool, s, b.hash, b.parent, alreadyVoted, votedForB)`
-      - `       /\ ~HasState(validators[v], s, "BadWindow")`
-      - `       /\ validators' = [validators EXCEPT ![v] = HandleSafeToNotar(@, s, b.hash)]`
-    - After:
-      - `EmitSafeToNotar ==`
-      - `  /\ \E v \in CorrectNodes, s \in 1..MaxSlot, b \in blocks :`
-      - `       /\ b.slot = s`
-      - `       /\ LET alreadyVoted == HasState(validators[v], s, "Voted")`
-      - `              votedForB == VotedForBlock(validators[v], s, b.hash)`
-      - `          IN CanEmitSafeToNotar(validators[v].pool, s, b.hash, b.parent, alreadyVoted, votedForB)`
-      - `       /\ ~HasState(validators[v], s, "BadWindow")`
-      - `       /\ validators' = [validators EXCEPT ![v] = HandleSafeToNotar(@, s, b.hash)]`
+  - No change needed for SafeToNotar; local availability aligns with Blokstor (Definition 10). 
 
   - ZWD-2 (Major, Open): Remove immediate-predecessor restriction in `EmitParentReady`.
     - File: specs/tla/alpenglow/MainProtocol.tla
@@ -171,4 +153,3 @@ Findings (CTU-#): None (Pass). Structure follows established patterns; no refact
 ## 7. Change Log
 - Pass 1: Inventory, naming map, ZWD/CTU/FCC; identified ZWD-1. Proposed minimal alignment patch.
 - Pass 2: Re-verified all references; added ZWD-2 (ParentReady drift), FCC-11 (global uniqueness) and FCC-12 (window finalization) as open items with minimal patch/property snippets.
-
