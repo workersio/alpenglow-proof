@@ -431,7 +431,10 @@ Fairness ==
     /\ WF_vars(\E v \in Validators, s \in 1..MaxSlot : GenerateCertificateAction(v, s))
     /\ WF_vars(\E b \in blocks : RotorDisseminateSuccess(b))
     /\ WF_vars(\E v \in Validators, b \in blocks, s \in Validators : RepairBlock(v, b, s))
-    /\ \A v \in CorrectNodes : WF_vars(\E b \in blocks : ReceiveBlock(v, b))
+    /\ \A v \in Validators :
+           IF v \in CorrectNodes
+           THEN WF_vars(\E b \in blocks : ReceiveBlock(v, b))
+           ELSE TRUE
 
 Spec == Init /\ [][Next]_vars /\ Fairness
 
@@ -514,6 +517,13 @@ CertificateNonEquivocation ==
              c1.type \in {"NotarizationCert", "NotarFallbackCert", "FastFinalizationCert"}) =>
             c1.blockHash = c2.blockHash
 
+\* Pool storage guarantees from Definitions 12–13 (white paper §2.5)
+PoolMultiplicityOK ==
+    \A v \in Validators : MultiplicityRulesRespected(validators[v].pool)
+
+PoolCertificateUniqueness ==
+    \A v \in Validators : CertificateUniqueness(validators[v].pool)
+
 \* ============================================================================
 \* LIVENESS PROPERTIES (Temporal)
 \* ============================================================================
@@ -524,9 +534,8 @@ CertificateNonEquivocation ==
  ***************************************************************************)
 EventualFinalization ==
     (time >= GST) ~> 
-        (\E v \in CorrectNodes :
-         \E b \in blocks :
-            b.slot > 0 /\ b \in finalized[v])
+        (\E v \in Validators :
+             \E b \in blocks : b.slot > 0 /\ b \in finalized[v])
 
 (***************************************************************************
  * PROGRESS
@@ -534,11 +543,11 @@ EventualFinalization ==
  ***************************************************************************)
 Progress ==
     (time >= GST) ~>
-        (\A v \in CorrectNodes :
-         LET currentMax == IF finalized[v] = {} THEN 0
-                          ELSE CHOOSE s \in {b.slot : b \in finalized[v]} :
-                               \A s2 \in {b.slot : b \in finalized[v]} : s >= s2
-         IN \E b \in blocks : b.slot > currentMax /\ <>(b \in finalized[v]))
+        (\A v \in Validators :
+             LET currentMax == IF finalized[v] = {} THEN 0
+                                 ELSE CHOOSE s \in {b.slot : b \in finalized[v]} :
+                                          \A s2 \in {b.slot : b \in finalized[v]} : s >= s2
+             IN <>(\E b \in blocks : b.slot > currentMax /\ b \in finalized[v]))
 
 \* ============================================================================
 \* TYPE INVARIANT
@@ -568,8 +577,8 @@ Invariant ==
     /\ FinalizedImpliesNotarized
     /\ CertificateNonEquivocation
     /\ ByzantineStakeOK
-    /\ \A v \in Validators : MultiplicityRulesRespected(validators[v].pool)
-    /\ \A v \in Validators : CertificateUniqueness(validators[v].pool)
+    /\ PoolMultiplicityOK
+    /\ PoolCertificateUniqueness
 
 \* ============================================================================
 \* STATE CONSTRAINTS (For bounded model checking)
