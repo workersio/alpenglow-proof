@@ -3,127 +3,172 @@
 ## 0. TL;DR (Focus Gates)
 - ZWD (No whitepaper drift): Concerns
 - CTU (Correct TLA usage): Pass
-- FCC (Full claim coverage): Pass
+- FCC (Full claim coverage): Concerns
 - Top risks & immediate patches:
-  - ZWD-1 (Major): SafeToNotar emission requires local block availability; whitepaper allows emission in first-slot case without prior repair. Patch: drop `b \in blockAvailability[v]` from `EmitSafeToNotar` guard (MainProtocol.tla:351–359).
+  - ZWD-1 (Major, Open): SafeToNotar over-constrained by local block availability. Patch: drop `b \in blockAvailability[v]` from `EmitSafeToNotar` (specs/tla/alpenglow/MainProtocol.tla:351). Whitepaper Definition 16 allows first-slot emission without repair.
+  - ZWD-2 (Major, Open): ParentReady incorrectly restricted to immediate predecessor slot (`p.slot + 1 = s`). Patch: remove that guard in `EmitParentReady` (specs/tla/alpenglow/MainProtocol.tla:382). Definition 15 allows earlier notarized parent bridged by skip certs.
+  - FCC-11 (Major, Open): Lemma 24 global uniqueness not fully captured (per-node only). Add cross-validator uniqueness covering both Notarization and NotarFallback certificates.
+  - FCC-12 (Major, Open): Theorem 2’s per-window finalization liveness not explicitly captured. Add a window-scoped liveness property under stated assumptions (GST, correct window leader, no pre-GST timeouts, Rotor success).
 
 ## 1. Sources Read & Inventory
 - Modules / configs / properties / fairness:
-  - specs/tla/alpenglow/MainProtocol.tla:1–620
-    - Spec formula: `Spec == Init /\ [][Next]_vars /\ Fairness` (MainProtocol.tla:439)
-    - Next relation: action disjunction including receive/propose/vote/cert/parent-ready/repair/rotor/time (MainProtocol.tla:395–413)
-    - Fairness: WF on time, deliveries, emissions, honest propose, certificate generation, rotor success, repair, per-node receive (MainProtocol.tla:421–437)
-    - Safety invariants: SafetyInvariant, NoConflictingFinalization, ChainConsistency, VoteUniqueness, UniqueNotarization, FinalizedImpliesNotarized, CertificateNonEquivocation, PoolMultiplicityOK, PoolCertificateUniqueness, ByzantineStakeOK (MainProtocol.tla:449–584)
-    - Liveness: EventualFinalization, Progress (MainProtocol.tla:535–551)
-  - specs/tla/alpenglow/Blocks.tla:1–260
-    - Leader/slot/window helpers: `Leader`, `FirstSlotOfWindow`, `WindowSlots` (Blocks.tla:149,156,175)
-  - specs/tla/alpenglow/Messages.tla:1–180
-    - Vote/Certificate message families (Definition 11) and helpers
-  - specs/tla/alpenglow/Certificates.tla:1–240
-    - Thresholds and cert constructors (80/60 logic), count-once stake
-  - specs/tla/alpenglow/VoteStorage.tla:1–320
-    - Pool state, multiplicity (Definition 12), certificate storage (Definition 13), event guards (Definitions 15–16), stake queries, `GenerateCertificate`
-  - specs/tla/alpenglow/VotorCore.tla:1–620
-    - Votor state (Definition 18), TRYNOTAR/TRYFINAL/TRYSKIPWINDOW (Algorithms 1–2), event handlers, timeout scheduling (Definition 17)
-  - specs/tla/alpenglow/Rotor.tla:1–120
-    - Abstract dissemination and constraints (Definition 6 flavor)
-  - specs/tla/alpenglow/MC.tla, MC.cfg: harness/constants/invariants list
+  - specs/tla/alpenglow/MainProtocol.tla:1
+    - Spec formula: `Spec == Init /\ [][Next]_vars /\ Fairness` (specs/tla/alpenglow/MainProtocol.tla:439)
+    - Next relation: block receive, timeouts, certificate generation, finalization, event emissions, Byzantine action, honest/byz propose, dissemination, repair, time advance (specs/tla/alpenglow/MainProtocol.tla:395)
+    - Fairness: WF on time advance, vote/certificate delivery, event emissions, honest propose, certificate generation, Rotor success, repair, and per-validator receive (specs/tla/alpenglow/MainProtocol.tla:421)
+    - Safety invariants: `SafetyInvariant`, `NoConflictingFinalization`, `ChainConsistency`, `VoteUniqueness`, `UniqueNotarization`, `FinalizedImpliesNotarized`, `CertificateNonEquivocation`, `PoolMultiplicityOK`, `PoolCertificateUniqueness`, `ByzantineStakeOK` (specs/tla/alpenglow/MainProtocol.tla:449)
+    - Liveness: `EventualFinalization`, `Progress` (specs/tla/alpenglow/MainProtocol.tla:535)
+  - specs/tla/alpenglow/Blocks.tla:1
+    - Chain and window helpers: `Leader`, `FirstSlotOfWindow`, `IsFirstSlotOfWindow`, `WindowSlots` (specs/tla/alpenglow/Blocks.tla:149, 156, 161, 175)
+  - specs/tla/alpenglow/Messages.tla:1
+    - Votes, certificates, helpers per Definition 11
+  - specs/tla/alpenglow/Certificates.tla:1
+    - Stake map, thresholds (80/60/40/20), certificate constructors, validation
+  - specs/tla/alpenglow/VoteStorage.tla:1
+    - Pool structure, multiplicity (Definition 12), certificate storage (Definition 13), event guards (Definitions 15–16), stake queries, `GenerateCertificate`
+  - specs/tla/alpenglow/VotorCore.tla:1
+    - Votor state (Definition 18), Algorithm 1 handlers, Algorithm 2 helpers (`TryNotar`, `TryFinal`, `TrySkipWindow`), timeout scheduling (Definition 17)
+  - specs/tla/alpenglow/Rotor.tla:1
+    - Abstract Rotor constraints and relay selection
+  - specs/tla/alpenglow/MC.tla; specs/tla/alpenglow/MC.cfg: model harness/constants/invariants/properties
 - Constants & variables:
-  - System constants: `NumValidators`, `ByzantineCount`, `GST`, `MaxSlot`, `MaxBlocks` (MainProtocol.tla:22–35);
-    `WindowSize`, `LeaderSchedule` (Blocks.tla:20,26); timings `DeltaTimeout`, `DeltaBlock` (VotorCore.tla:18–24);
-    Rotor params `RotorFanout`, `RotorMinRelayStake`, `RotorGamma` (Rotor.tla:15–23); stake map `StakeMap` (Certificates.tla:20–23)
-  - Variables: `validators, blocks, messages, byzantineNodes, time, finalized, blockAvailability` (MainProtocol.tla:41–50)
+  - System constants: `NumValidators`, `ByzantineCount`, `GST`, `MaxSlot`, `MaxBlocks` (specs/tla/alpenglow/MainProtocol.tla:22)
+  - Timing constants: `DeltaTimeout`, `DeltaBlock` (specs/tla/alpenglow/VotorCore.tla:18)
+  - Window/schedule: `WindowSize`, `LeaderSchedule` (specs/tla/alpenglow/Blocks.tla:20, 26)
+  - Rotor: `RotorFanout`, `RotorMinRelayStake`, `RotorGamma` (specs/tla/alpenglow/Rotor.tla:15)
+  - Stake: `StakeMap` (specs/tla/alpenglow/Certificates.tla:20)
+  - State variables: `validators, blocks, messages, byzantineNodes, time, finalized, blockAvailability` (specs/tla/alpenglow/MainProtocol.tla:41)
 - Naming Map (whitepaper → spec):
-  - Votor → `VotorCore` module, handlers `Handle*`, `TryNotar`, `TryFinal`, `TrySkipWindow` (VotorCore.tla:105–139, 160–220, 224–288)
-  - Pool → `PoolState` with `votes`, `certificates` and ops `StoreVote`, `GenerateCertificate`, `CanStore*`, `Has*` (VoteStorage.tla:14–34, 100–160, 181–240)
-  - Votes (Notar, NotarFallback, Skip, SkipFallback, Final) → `VoteType` and constructors (Messages.tla:32–87)
-  - Certificates (FastFinal, Notarization, NotarFallback, Skip, Final) → `CertificateType` and constructors (Messages.tla:108–160)
-  - Stake thresholds (80%, 60%, 40%, 20%) → `MeetsThreshold`, `CanCreate*` (Certificates.tla:64–72, 84–160)
-  - Leader/slot/window → `Leader`, `FirstSlotOfWindow`, `WindowSlots` (Blocks.tla:149–179)
-  - ParentReady/BlockNotarized/SafeToNotar/SafeToSkip events → `ShouldEmit*`, `CanEmit*`, and `Emit*` actions (VoteStorage.tla:250–305; MainProtocol.tla:338–389)
-  - Timeouts (Definition 17) → `HandleParentReady` schedules `timeouts`, `AdvanceClock` processes them (VotorCore.tla:246–263, 303–314)
-  - Rotor → `RotorSelect`, `RotorDisseminateSuccess/Failure`, constraints (Rotor.tla:31–67; MainProtocol.tla:242–260, 264–276)
-  - Finalization (Definition 14) → `FinalizeBlock`, `HasFastFinalizationCert`, `HasNotarizationCert`, `HasFinalizationCert` (MainProtocol.tla:154–163; VoteStorage.tla:232–239)
-  - Assumption 1 (<20% byzantine stake) → `ByzantineStakeOK` invariant (MainProtocol.tla:74–82, 570–584)
+  - Leader/slot/window → `Leader`, `FirstSlotOfWindow`, `WindowSlots` (specs/tla/alpenglow/Blocks.tla:149, 156, 175)
+  - Votor state flags (ParentReady, Voted, VotedNotar, BlockNotarized, ItsOver, BadWindow) → `StateObject` on `validator.state[slot]` (specs/tla/alpenglow/VotorCore.tla:40)
+  - Pool (votes, certificates, multiplicity, count-once) → `PoolState`, `CanStoreVote`, `StoreVote`, `GenerateCertificate`, `StakeFromVotes` (specs/tla/alpenglow/VoteStorage.tla:14, 36, 107, 181; specs/tla/alpenglow/Certificates.tla:64)
+  - Votes (Notar/NotarFallback/Skip/SkipFallback/Final) → `VoteType` + constructors (specs/tla/alpenglow/Messages.tla:32)
+  - Certificates (FastFinalization/Notarization/NotarFallback/Skip/Finalization) → `CertificateType` + constructors (specs/tla/alpenglow/Messages.tla:108)
+  - Events (BlockNotarized/ParentReady/SafeToNotar/SafeToSkip) → `ShouldEmitBlockNotarized`, `ShouldEmitParentReady`, `CanEmitSafeToNotar`, `CanEmitSafeToSkip`, plus `Emit*` actions (specs/tla/alpenglow/VoteStorage.tla:250, 261, 276, 299; specs/tla/alpenglow/MainProtocol.tla:338, 382, 351, 366)
+  - Timeout (Definition 17) → scheduled in `HandleParentReady`, processed in `AdvanceClock` (specs/tla/alpenglow/VotorCore.tla:246, 303)
+  - Finalization (Definition 14) → `FinalizeBlock` using `HasFastFinalizationCert`, `HasNotarizationCert`, `HasFinalizationCert` (specs/tla/alpenglow/MainProtocol.tla:154; specs/tla/alpenglow/VoteStorage.tla:232)
+  - Rotor/dissemination → `RotorSelect`, `RotorDisseminateSuccess`, `RotorDisseminateFailure` (specs/tla/alpenglow/Rotor.tla:31; specs/tla/alpenglow/MainProtocol.tla:242, 264)
+  - Adversary assumption (Assumption 1) → `ByzantineStakeOK` invariant (specs/tla/alpenglow/MainProtocol.tla:79)
 
 ## 2. ZWD — Conformance Matrix
 | Item | Whitepaper ref (quote) | Spec refs | Relation | Patch (if needed) | Severity | Evidence |
 |------|-------------------------|-----------|----------|-------------------|----------|----------|
-| ZWD-1 | Definition 16, Page 22: “If s is the first slot in the leader window, the [SafeToNotar] event is emitted. Otherwise … event is emitted when Pool contains the notar-fallback certificate for the parent as well.” | `EmitSafeToNotar` requires `b \in blockAvailability[v]` unconditionally (MainProtocol.tla:351–359). Parent gating handled in `CanEmitSafeToNotar` (VoteStorage.tla:276–288). | Narrower | Remove local-availability guard in `EmitSafeToNotar`. | Major | The first-slot case in the paper does not require having locally stored `b`; spec currently blocks emission if `b` not in local `blockAvailability`. |
-| ZWD-2 | Definition 15: “ParentReady(s, hash(b)): Slot s is the first of its leader window, and Pool holds a notarization or notar-fallback certificate for a previous block b, and skip certificates for every slot s′ since b.” | `ShouldEmitParentReady` matches: first slot of window, notar or notar-fallback for parent, skip certs for gaps (VoteStorage.tla:261–266). `EmitParentReady` enforces first-slot, parent slot +1 (MainProtocol.tla:382–389). | Equivalent | — | — | Alignment exact to text and prerequisites matched. |
-| ZWD-3 | Definition 12 (storing votes): first notar or skip; up to 3 notar-fallback; first skip-fallback; first finalization. | `CanStoreVote` enforces exactly those multiplicities (VoteStorage.tla:36–73). | Equivalent | — | — | Direct transcription with per-type caps. |
-| ZWD-4 | Definition 11/Table 6 thresholds: Fast (80% NotarVote); Notarization (60% NotarVote); Notar-Fallback (60% NotarVote or NotarFallbackVote); Skip (60% Skip*); Final (60% FinalVote). Count once per slot. | `CanCreate*` predicates, `StakeFromVotes(UniqueValidators(...))` respects count-once, constructors mirror types (Certificates.tla:84–160, 64–72, 164–236). | Equivalent | — | — | Thresholds and typing match table precisely. |
-| ZWD-5 | Definition 14 (finalization): slow path = FinalizationCert implies finalize unique notarized block in slot; fast path = FastFinalizationCert implies finalize b. | `FinalizeBlock` checks either fast cert or (notarization cert for b and finalization cert for slot) (MainProtocol.tla:154–163); uniqueness covered by `UniqueNotarization`. | Equivalent | — | — | Matches the two cases; uniqueness ensured separately. |
-| ZWD-6 | Definition 17 (timeouts): Timeout(i) := clock() + Δ_timeout + (i − s + 1)·Δ_block. | `HandleParentReady` sets timeouts for window slots with exactly that formula (VotorCore.tla:260–263). | Equivalent | — | — | Formula matches verbatim. |
-| ZWD-7 | Definition 16 SafeToSkip: skip(s) + Σ_b notar(b) − max_b notar(b) ≥ 40%. | `CanEmitSafeToSkip` implements exactly the inequality (VoteStorage.tla:299–305). | Equivalent | — | — | Direct transcription. |
-| ZWD-8 | Section 2.2 Rotor success criteria and prioritizing next leader. | `RotorSelect` includes next leader when needed, bounded fanout, min relay stake; success when ≥γ correct relays (Rotor.tla:31–67; MainProtocol.tla:242–252). | Equivalent | — | — | Matches qualitative constraints. |
-| ZWD-9 | Safety Theorem 1: finalized blocks form a chain of ancestry. | `SafetyInvariant` and `NoConflictingFinalization`, `ChainConsistency` (MainProtocol.tla:449–468). | Equivalent | — | — | Encodes the theorem and corollary. |
-| ZWD-10 | Lemma 20 (one initial vote per slot). | `VoteUniqueness` (MainProtocol.tla:469–479). | Equivalent | — | — | Mirrors lemma. |
-| ZWD-11 | Lemma 24 (unique notarization per slot). | `UniqueNotarization` (MainProtocol.tla:485–493). | Equivalent | — | — | Checks certificate set per slot. |
-| ZWD-12 | Lemma 25 (finalized implies notarized). | `FinalizedImpliesNotarized` (MainProtocol.tla:498–506). | Equivalent | — | — | Uses pool certificates to witness. |
-| ZWD-13 | Assumption 1 (<20% byzantine stake). | `ByzantineStakeOK` included as invariant (MainProtocol.tla:79–82, 570–584). | Equivalent | — | — | Assumed and maintained. |
+| ZWD-1 | Definition 16 (Page 22): “If s is the first slot in the leader window, the [SafeToNotar] event is emitted. Otherwise … event is emitted when Pool contains the notar-fallback certificate for the parent as well.” | `EmitSafeToNotar` additionally requires `b \in blockAvailability[v]` (specs/tla/alpenglow/MainProtocol.tla:351). Parent gating for non-first slots is already inside `CanEmitSafeToNotar` (specs/tla/alpenglow/VoteStorage.tla:276). | Narrower | Remove `b \in blockAvailability[v]` from `EmitSafeToNotar`. | Major | First-slot case does not require local block availability; fallback vote is driven by Pool stake counts and (for non-first slots) parent fallback cert. Status: Open. |
+| ZWD-2 | Definition 15 (alpenglow-whitepaper.md:540–566): “ParentReady(s, hash(b)) … slot s is the first of its leader window … Pool holds a notarization or notar-fallback certificate for a previous block b, and skip certificates for every slot s′ since b.” | `ShouldEmitParentReady` matches prerequisites (specs/tla/alpenglow/VoteStorage.tla:261). `EmitParentReady` additionally enforces `p.slot + 1 = s` (specs/tla/alpenglow/MainProtocol.tla:382). | Narrower | Remove `p.slot + 1 = s` from `EmitParentReady`. | Major | Whitepaper allows b in any earlier slot if skips bridge gaps; requiring immediate predecessor is too restrictive. Status: Open. |
+| ZWD-3 | Definition 12 (storing votes) (alpenglow-whitepaper.md:510–521): first notar or skip; up to 3 notar-fallback; first skip-fallback; first finalization. | `CanStoreVote` enforces caps per type (specs/tla/alpenglow/VoteStorage.tla:36). | Equivalent | — | — | Direct transcription with per-type caps. Status: Resolved. |
+| ZWD-4 | Definition 11/Table 6 thresholds and “count once per slot” (alpenglow-whitepaper.md:510–554). | Threshold checks and constructors (`CanCreate*`, `Create*`, `StakeFromVotes(UniqueValidators(..))`) (specs/tla/alpenglow/Certificates.tla:64, 84). | Equivalent | — | — | Types and thresholds match table exactly. Status: Resolved. |
+| ZWD-5 | Definition 14 (finalization) (alpenglow-whitepaper.md:520–566): slow path finalizes unique notarized block for slot s upon `FinalizationCert`; fast path finalizes block b upon `FastFinalizationCert`. | `FinalizeBlock` matches: fast cert OR (notarization cert for b AND finalization cert for slot) (specs/tla/alpenglow/MainProtocol.tla:154). | Equivalent | — | — | Mirrors both cases. Status: Resolved. |
+| ZWD-6 | Definition 17 (timeout) (alpenglow-whitepaper.md:602–613): Timeout(i) := clock() + Δ_timeout + (i − s + 1)·Δ_block. | Timeout formula set in `HandleParentReady` (specs/tla/alpenglow/VotorCore.tla:260). | Equivalent | — | — | Matches verbatim. Status: Resolved. |
+| ZWD-7 | Definition 16 (SafeToSkip) (Page 22): skip(s) + Σ_b notar(b) − max_b notar(b) ≥ 40%. | `CanEmitSafeToSkip` inequality (specs/tla/alpenglow/VoteStorage.tla:299). | Equivalent | — | — | Direct transcription. Status: Resolved. |
+| ZWD-8 | Rotor (§2.2): prioritise next leader, bounded fanout, require ≥γ correct relays for success. | `RotorSelect` includes next leader, caps fanout, enforces min stake; success via `EnoughCorrectRelays` (specs/tla/alpenglow/Rotor.tla:31; specs/tla/alpenglow/MainProtocol.tla:242). | Equivalent | — | — | Encodes qualitative constraints. Status: Resolved. |
+| ZWD-9 | Algorithm 2 (TryNotar) (alpenglow-whitepaper.md:686–695): “or (not firstSlot and VotedNotar(hash_parent) ∈ state[s−1])”. | Non-first-slot guard uses `VotedForBlock(..parent..)`, set by prior notar vote (specs/tla/alpenglow/VotorCore.tla:111). | Equivalent | — | — | Matches pseudocode line 11. Status: Resolved. |
+| ZWD-10 | Safety (Theorem 1) (alpenglow-whitepaper.md:930): finalized blocks form a single chain. | `SafetyInvariant`, `NoConflictingFinalization`, `ChainConsistency` (specs/tla/alpenglow/MainProtocol.tla:449). | Equivalent | — | — | Encodes theorem and corollary. Status: Resolved. |
+| ZWD-11 | Lemma 24 (unique notarization) (alpenglow-whitepaper.md:855): at most one block notarized per slot (global). | `UniqueNotarization` checks per-node pools only (specs/tla/alpenglow/MainProtocol.tla:485). | Narrower | Add global cross-validator uniqueness covering Notarization and NotarFallback (see FCC-11). | Major | Global property missing; local-only uniqueness enforced. Status: Open. |
+| ZWD-12 | Assumption 1 (<20% byz) (alpenglow-whitepaper.md:105–109): fault tolerance premise. | `ByzantineStakeOK` invariant and Init assumption (specs/tla/alpenglow/MainProtocol.tla:79, 97). | Equivalent | — | — | Models the resilience precondition. Status: Resolved. |
+| ZWD-13 | Repair (§2.8): obtain missing block upon certificates. | `NeedsBlockRepair` triggers `RepairBlock` when notar or notar-fallback cert exists (specs/tla/alpenglow/MainProtocol.tla:65, 277). | Equivalent | — | — | Matches described trigger. Status: Resolved. |
 
 ## 3. CTU — TLA Pattern Audit
 - SPEC form / stuttering / frame conditions:
-  - Spec uses standard form `Init /\ [][Next]_vars /\ Fairness` (MainProtocol.tla:439). All actions assign or `UNCHANGED` non-touched variables. No forgotten variables; `vars` lists all state (MainProtocol.tla:41–50).
+  - Spec uses `Init /\ [][Next]_vars /\ Fairness` (specs/tla/alpenglow/MainProtocol.tla:439). Actions update relevant variables and `UNCHANGED` the rest; `vars` enumerates all state (specs/tla/alpenglow/MainProtocol.tla:41).
 - Safety vs Liveness separation:
-  - State invariants are predicates over current state. Liveness uses leads-to under fairness and GST, no misuse of invariants for temporal claims (MainProtocol.tla:535–551).
+  - Safety as state predicates (`Invariant` and sub-lemmas). Liveness via `~>` under WF and GST guards (specs/tla/alpenglow/MainProtocol.tla:535). This follows guidance in tla-docs.md where fairness and liveness are treated in Sect. 3.3.
 - Fairness placement:
-  - Weak fairness on time advance, vote/cert delivery, emit events, honest propose, certificate generation, rotor success, repair, plus per-node block receive (MainProtocol.tla:421–437). Matches partial-synchrony and “messages keep flowing after GST” guidance (whitepaper §2.10). This aligns with house guidance to attach WF/SF on environment/communication steps (tla-docs.md §2–3, fairness examples).
-- Parameters / symmetry / typing discipline:
-  - Constants declared with type assumptions; state constraint in MC.cfg bounds state space. TypeInvariant covers domains (MainProtocol.tla:556–566). Symmetry not assumed; validators treated generically.
+  - WF on environment/dissemination steps (`DeliverVote`, `DeliverCertificate`, `BroadcastLocalVote`, `RotorDisseminateSuccess`, `RepairBlock`) and on `AdvanceTime`, emissions, honest propose (specs/tla/alpenglow/MainProtocol.tla:421). This models “after GST messages keep flowing” (whitepaper §2.10) and matches fairness guidance (tla-docs.md Sect. 3.3).
+- Parameters / typing discipline:
+  - Constants have typing assumptions; `TypeInvariant` types all variables (specs/tla/alpenglow/MainProtocol.tla:556). MC.cfg adds practical bounds. No symmetry assumptions that would bias the model.
 - Vacuity / over-constraint checks:
-  - No over-constraining of Next; environment includes Byzantine actions. Liveness guarded by `(time >= GST) ~>` and WF on requisite actions. No vacuous invariants observed.
+  - Next includes adversarial actions; fairness does not force pre-GST behaviour. Liveness properties are explicitly guarded by GST. No vacuity/over-constraint issues found for the encoded claims.
 
-Findings (CTU-#):
-- None. Current structure follows the patterns in tla-docs.md: clear separation of Init/Next/Spec, state predicates for safety, temporal for liveness under WF, explicit typing.
+Findings (CTU-#): None (Pass). Structure follows established patterns; no refactors needed.
 
 ## 4. FCC — Claim/Proof Coverage Matrix
 | Claim ID | Whitepaper ref | Intended form | Spec artifact(s) | Status | Proposed property (if missing) | Notes |
 |---------:|----------------|---------------|------------------|--------|--------------------------------|-------|
-| FCC-1 | Theorem 1 (safety) (alpenglow-whitepaper.md:930) | Invariant: finalized blocks form a chain | `SafetyInvariant`, `NoConflictingFinalization`, `ChainConsistency` (MainProtocol.tla:449–468) | Covered | — | Encodes theorem and corollary. |
-| FCC-2 | Theorem 2 (liveness) (alpenglow-whitepaper.md:1045) | Liveness under GST + rotor success | `EventualFinalization`, `Progress`, WF on dissemination/propose/cert (MainProtocol.tla:421–437, 535–551) | Covered | — | Uses WF and `(time >= GST) ~>` guard to model partial synchrony. |
-| FCC-3 | Lemma 20 (one initial vote) (alpenglow-whitepaper.md:820) | Invariant | `VoteUniqueness` (MainProtocol.tla:469–479) | Covered | — | Also enforced by multiplicity rules in `VoteStorage`. |
-| FCC-4 | Lemma 24 (unique notarization) (alpenglow-whitepaper.md:855) | Invariant | `UniqueNotarization` (MainProtocol.tla:485–493) | Covered | — | Matches slot-wise uniqueness. |
-| FCC-5 | Lemma 25 (finalized implies notarized) (alpenglow-whitepaper.md:866) | Invariant | `FinalizedImpliesNotarized` (MainProtocol.tla:498–506) | Covered | — | Witnessed from pool. |
-| FCC-6 | Definition 11/Table 6 thresholds | Structural/typing + Theorem dependency | `CanCreate*`, `IsValidCertificate` (Certificates.tla:84–160, 191–211) | Covered | — | Encoded exactly. |
-| FCC-7 | Assumption 1 (<20% byz) (alpenglow-whitepaper.md:107) | Assumption/state constraint | `ByzantineStakeOK` invariant, Init (MainProtocol.tla:79–82, 97) | Covered | — | Ensures resilience precondition. |
-| FCC-8 | Definition 17 (timeouts) (alpenglow-whitepaper.md:602–613) | State-update discipline | `HandleParentReady` timeout schedule (VotorCore.tla:260–263) | Covered | — | Matches formula. |
-| FCC-9 | Definition 15 (events) (alpenglow-whitepaper.md:543) | Guards that trigger events | `ShouldEmitBlockNotarized`, `ShouldEmitParentReady`, `Emit*` (VoteStorage.tla:250–266; MainProtocol.tla:338–389) | Covered | — | Exact matches. |
-| FCC-10 | Definition 16 (fallback events) (alpenglow-whitepaper.md:554, Page 22) | Guards for SafeToNotar/Skip | `CanEmitSafeToNotar`, `CanEmitSafeToSkip` (VoteStorage.tla:276–288, 299–305) | Covered | — | Parent gating for non-first slots encoded. |
+| FCC-1 | Theorem 1 (safety) (alpenglow-whitepaper.md:930) | Invariant: finalized blocks form a chain | `SafetyInvariant`, `NoConflictingFinalization`, `ChainConsistency` (specs/tla/alpenglow/MainProtocol.tla:449) | Covered (Resolved) | — | Encodes theorem and corollary. |
+| FCC-2 | Theorem 2 (liveness) (alpenglow-whitepaper.md:1045) | Under GST and stated premises, window slots finalized by all | `EventualFinalization`, `Progress`, WF on dissemination/propose/cert (specs/tla/alpenglow/MainProtocol.tla:421, 535) | Partial (Open) | Add `WindowFinalization(s)` (see Patches). | Current liveness is generic; add per-window finalization. |
+| FCC-3 | Lemma 20 (one initial vote) (alpenglow-whitepaper.md:820, 822) | Invariant | `VoteUniqueness` (specs/tla/alpenglow/MainProtocol.tla:469) | Covered (Resolved) | — | Also enforced by multiplicity limits. |
+| FCC-4 | Lemma 24 (unique notarization) (alpenglow-whitepaper.md:855) | Invariant | `UniqueNotarization` (specs/tla/alpenglow/MainProtocol.tla:485) | Partial (Open) | Add `GlobalNotarizationUniqueness`. | Need cross-node uniqueness incl. NotarFallback. |
+| FCC-5 | Lemma 25 (finalized implies notarized) (alpenglow-whitepaper.md:866–873) | Invariant | `FinalizedImpliesNotarized` (specs/tla/alpenglow/MainProtocol.tla:498) | Covered (Resolved) | — | Uses local pool witness. |
+| FCC-6 | Definition 11/Table 6 thresholds (alpenglow-whitepaper.md:510–554) | Typing/structural | `CanCreate*`, `IsValidCertificate` (specs/tla/alpenglow/Certificates.tla:84, 191) | Covered (Resolved) | — | Encoded exactly. |
+| FCC-7 | Assumption 1 (<20% byz) (alpenglow-whitepaper.md:105–109) | Assumption/state constraint | `ByzantineStakeOK` (specs/tla/alpenglow/MainProtocol.tla:79) | Covered (Resolved) | — | Safety/liveness proofs rely on it. |
+| FCC-8 | Definition 17 (timeouts) (alpenglow-whitepaper.md:602–613) | State-update discipline | Timeout formula (specs/tla/alpenglow/VotorCore.tla:260) | Covered (Resolved) | — | Matches formula. |
+| FCC-9 | Definition 15 (events) (alpenglow-whitepaper.md:540–554) | Event guards | `ShouldEmitBlockNotarized`, `ShouldEmitParentReady` (specs/tla/alpenglow/VoteStorage.tla:250, 261) | Covered (Resolved) | — | Matches text. |
+| FCC-10 | Definition 16 (fallback events) (Page 22) | Event guards | `CanEmitSafeToNotar`, `CanEmitSafeToSkip` (specs/tla/alpenglow/VoteStorage.tla:276, 299) | Covered (Resolved) | — | Parent gating for non-first slot encoded. |
+| FCC-11 | Lemma 24 (global scope) | Invariant | — | Missing (Open) | `GlobalNotarizationUniqueness` (see Patches). | Ensures cross-validator uniqueness across Notar types. |
+| FCC-12 | Theorem 2 (exact form) | Liveness | — | Missing (Open) | `WindowFinalization(s)` (see Patches). | Per-window finalization under assumptions. |
+| FCC-13 | “20+20 crash resilience” (Assumption 2) (alpenglow-whitepaper.md:122, 1111) | Assumption-driven claim | — | Out of scope | — | Crash-tolerance scenario not modeled in this spec. |
 
 ## 5. Patches (Minimal & Alignment-Only)
 - ZWD patches:
-  - ZWD-1 (Major): Remove extra local-availability requirement from SafeToNotar emission.
-    - Diff snippet (do not execute):
-      - File: `specs/tla/alpenglow/MainProtocol.tla:351–359`
-      - Before:
-        - `EmitSafeToNotar ==`
-        - `    /\ \E v \in CorrectNodes, s \in 1..MaxSlot, b \in blocks :`
-        - `         /\ b.slot = s`
-        - `         /\ b \in blockAvailability[v]`
-        - `         /\ LET alreadyVoted == HasState(validators[v], s, \"Voted\")`
-        - `                votedForB == VotedForBlock(validators[v], s, b.hash)`
-        - `            IN CanEmitSafeToNotar(validators[v].pool, s, b.hash, b.parent, alreadyVoted, votedForB)`
-        - `         /\ ~HasState(validators[v], s, \"BadWindow\")`
-        - `         /\ validators' = [validators EXCEPT ![v] = HandleSafeToNotar(@, s, b.hash)]`
-      - After (drop local availability guard; parent gating remains inside `CanEmitSafeToNotar`):
-        - `EmitSafeToNotar ==`
-        - `    /\ \E v \in CorrectNodes, s \in 1..MaxSlot, b \in blocks :`
-        - `         /\ b.slot = s`
-        - `         /\ LET alreadyVoted == HasState(validators[v], s, \"Voted\")`
-        - `                votedForB == VotedForBlock(validators[v], s, b.hash)`
-        - `            IN CanEmitSafeToNotar(validators[v].pool, s, b.hash, b.parent, alreadyVoted, votedForB)`
-        - `         /\ ~HasState(validators[v], s, \"BadWindow\")`
-        - `         /\ validators' = [validators EXCEPT ![v] = HandleSafeToNotar(@, s, b.hash)]`
+  - ZWD-1 (Major, Open): Remove extra local-availability requirement from SafeToNotar emission in `EmitSafeToNotar`.
+    - File: specs/tla/alpenglow/MainProtocol.tla
+    - Before:
+      - `EmitSafeToNotar ==`
+      - `  /\ \E v \in CorrectNodes, s \in 1..MaxSlot, b \in blocks :`
+      - `       /\ b.slot = s`
+      - `       /\ b \in blockAvailability[v]`
+      - `       /\ LET alreadyVoted == HasState(validators[v], s, "Voted")`
+      - `              votedForB == VotedForBlock(validators[v], s, b.hash)`
+      - `          IN CanEmitSafeToNotar(validators[v].pool, s, b.hash, b.parent, alreadyVoted, votedForB)`
+      - `       /\ ~HasState(validators[v], s, "BadWindow")`
+      - `       /\ validators' = [validators EXCEPT ![v] = HandleSafeToNotar(@, s, b.hash)]`
+    - After:
+      - `EmitSafeToNotar ==`
+      - `  /\ \E v \in CorrectNodes, s \in 1..MaxSlot, b \in blocks :`
+      - `       /\ b.slot = s`
+      - `       /\ LET alreadyVoted == HasState(validators[v], s, "Voted")`
+      - `              votedForB == VotedForBlock(validators[v], s, b.hash)`
+      - `          IN CanEmitSafeToNotar(validators[v].pool, s, b.hash, b.parent, alreadyVoted, votedForB)`
+      - `       /\ ~HasState(validators[v], s, "BadWindow")`
+      - `       /\ validators' = [validators EXCEPT ![v] = HandleSafeToNotar(@, s, b.hash)]`
 
-- CTU refactors: None required.
+  - ZWD-2 (Major, Open): Remove immediate-predecessor restriction in `EmitParentReady`.
+    - File: specs/tla/alpenglow/MainProtocol.tla
+    - Before:
+      - `EmitParentReady ==`
+      - `  /\ \E v \in CorrectNodes, s \in 1..MaxSlot, p \in blocks :`
+      - `       /\ IsFirstSlotOfWindow(s)`
+      - `       /\ p.slot + 1 = s`
+      - `       /\ ShouldEmitParentReady(validators[v].pool, s, p.hash, p.slot)`
+      - `       /\ ~HasState(validators[v], s, "ParentReady")`
+      - `       /\ validators' = [validators EXCEPT ![v] = HandleParentReady(@, s, p.hash)]`
+    - After:
+      - `EmitParentReady ==`
+      - `  /\ \E v \in CorrectNodes, s \in 1..MaxSlot, p \in blocks :`
+      - `       /\ IsFirstSlotOfWindow(s)`
+      - `       /\ ShouldEmitParentReady(validators[v].pool, s, p.hash, p.slot)`
+      - `       /\ ~HasState(validators[v], s, "ParentReady")`
+      - `       /\ validators' = [validators EXCEPT ![v] = HandleParentReady(@, s, p.hash)]`
 
-- FCC property additions: None required.
+- CTU refactors: None.
+
+- FCC property additions:
+  - FCC-11 (Major, Open): Global notarization uniqueness across validators and Notar types.
+    - Add to specs/tla/alpenglow/MainProtocol.tla:
+      - `GlobalNotarizationUniqueness ==`
+      - `  \A s \in 1..MaxSlot : \A v1, v2 \in CorrectNodes :`
+      - `    LET p1 == validators[v1].pool \in PoolState \* type hint`
+      - `        p2 == validators[v2].pool \in PoolState`
+      - `    IN \A c1 \in p1.certificates[s], c2 \in p2.certificates[s] :`
+      - `         (c1.type \in {"NotarizationCert", "NotarFallbackCert"} /\`
+      - `          c2.type \in {"NotarizationCert", "NotarFallbackCert"}) =>`
+      - `         c1.blockHash = c2.blockHash`
+    - Include `GlobalNotarizationUniqueness` in `Invariant`.
+
+  - FCC-12 (Major, Open): Theorem 2 — per-window finalization under assumptions.
+    - Add to specs/tla/alpenglow/MainProtocol.tla:
+      - `NoTimeoutsBeforeGST(s) == \A v \in CorrectNodes : \A i \in (WindowSlots(s) \cap 1..MaxSlot) : validators[v].timeouts[i] = 0 \/ validators[v].timeouts[i] >= GST`
+      - `WindowFinalization(s) ==`
+      - `  (IsFirstSlotOfWindow(s) /\ Leader(s) \in CorrectNodes /\ NoTimeoutsBeforeGST(s) /\ time >= GST) ~>`
+      - `  (\A v \in CorrectNodes : \A i \in (WindowSlots(s) \cap 1..MaxSlot) : <> (\E b \in blocks : b.slot = i /\ b.leader = Leader(s) /\ b \in finalized[v]))`
+    - Optionally assert `\A s \in 1..MaxSlot : WindowFinalization(s)` in PROPERTIES when model-checking.
 
 ## 6. Open Questions & Assumptions
-- For liveness (Theorem 2), the spec models rotor success with WF on `RotorDisseminateSuccess` after GST. This encodes the whitepaper’s synchrony/availability premise; no additional changes needed.
-- Economic/slashing aspects are not normative claims in the provided whitepaper excerpts; the spec intentionally omits economics (consistent with context).
+- Scope of Lemma 24: “notarized” is used broadly in §2.6; the proposed `GlobalNotarizationUniqueness` covers both Notarization and NotarFallback certificates across validators without altering protocol logic.
+- Theorem 2 modeling: `WindowFinalization(s)` encodes the stated premises (correct window leader, no pre-GST timeouts, Rotor success after GST via WF on dissemination). It refines generic `EventualFinalization`/`Progress` to the exact whitepaper claim.
+- Economics/slashing: Not normative in the provided whitepaper context; intentionally omitted from spec.
 
 ## 7. Change Log
-- Pass 1: Full inventory, naming map, conformance and pattern audit; identified ZWD-1 (Major). Proposed minimal diff to restore exact alignment for SafeToNotar emission. All other mechanisms match the whitepaper statements and thresholds. FCC coverage verified against listed claims and definitions.
+- Pass 1: Inventory, naming map, ZWD/CTU/FCC; identified ZWD-1. Proposed minimal alignment patch.
+- Pass 2: Re-verified all references; added ZWD-2 (ParentReady drift), FCC-11 (global uniqueness) and FCC-12 (window finalization) as open items with minimal patch/property snippets.
+
