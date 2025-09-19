@@ -253,8 +253,8 @@ NextDisseminationDelay(sample, nextLeader) == IF nextLeader \in sample THEN 0 EL
  ***************************************************************************)
 RotorSelectSound(block, needers, nextLeader) ==
     LET sel == RotorSelect(block, needers, nextLeader)
-    IN sel = {} /\ needers # {} => ~RotorSelectionPossible(block, needers, nextLeader)
-       \/ (sel # {} /\ StructuralOK(sel, needers, nextLeader))
+    IN (sel # {} => StructuralOK(sel, needers, nextLeader))
+       /\ (needers # {} /\ ~RotorBinAssignmentPossible(block, needers, nextLeader) => sel = {})
 
 (***************************************************************************
  * Commentary mapping to Whitepaper
