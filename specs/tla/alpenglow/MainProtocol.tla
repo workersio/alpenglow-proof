@@ -60,7 +60,7 @@ CorrectNodes == Validators \ byzantineNodes
 RotorCorrectRelays(relays) == relays \cap CorrectNodes
 
 \* Definition 6 (§2.2): Rotor succeeds if at least \gamma correct relays participate
-EnoughCorrectRelays(relays) == Cardinality(RotorCorrectRelays(relays)) >= RotorGamma
+EnoughCorrectRelays(relays) == Cardinality(RotorCorrectRelays(relays)) >= GammaDataShreds
 
 \* Definition 19 & Algorithm 4: certificates prompting block repair
 NeedsBlockRepair(pool, block) ==
