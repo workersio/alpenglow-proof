@@ -91,9 +91,7 @@ Init ==
                         IN AddState(withParent, 1, "ParentReady")]
     /\ blocks = {GenesisBlock}
     /\ messages = {}
-    /\ byzantineNodes = IF ByzantineCount = 0 THEN {}
-                        ELSE CHOOSE S \in SUBSET Validators : 
-                             Cardinality(S) = ByzantineCount
+    /\ byzantineNodes \in {S \in SUBSET Validators : Cardinality(S) = ByzantineCount}
     /\ ByzantineStakeOK
     /\ time = 0
     /\ finalized = [v \in Validators |-> {}]
