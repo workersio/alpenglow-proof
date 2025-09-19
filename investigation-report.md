@@ -1,5 +1,11 @@
 # Alpenglow TLA+ Investigation Report
 
+## 0a. Status Update (Applied)
+- ZWD-1: Resolved (no change). Keep `b \in blockAvailability[v]` in `EmitSafeToNotar` as per Definition 10 (Blokstor). See specs/tla/alpenglow/MainProtocol.tla:351 and specs/tla/alpenglow/MainProtocol.tla:354.
+- ZWD-2: Resolved. `EmitParentReady` does not require `p.slot + 1 = s`; gaps are handled via skip certificates in `ShouldEmitParentReady`. See specs/tla/alpenglow/MainProtocol.tla:382 and specs/tla/alpenglow/VoteStorage.tla:261.
+- FCC-11: Implemented. Added `GlobalNotarizationUniqueness` and included it in `Invariant`. See specs/tla/alpenglow/MainProtocol.tla:497 and specs/tla/alpenglow/MainProtocol.tla:613.
+- FCC-12: Implemented. Added `NoTimeoutsBeforeGST(s)` and `WindowFinalization(s)` (Theorem 2 window-level liveness). See specs/tla/alpenglow/MainProtocol.tla:569 and specs/tla/alpenglow/MainProtocol.tla:582. Optional MC property intentionally not asserted to keep harness minimal.
+
 ## 0. TL;DR (Focus Gates)
 - ZWD (No whitepaper drift): Minor drift
  - CTU (Correct TLA usage): Pass
@@ -145,6 +151,11 @@ Findings (CTU-#): None (Pass). Structure follows established patterns; no refact
       - `  (\A v \in CorrectNodes : \A i \in (WindowSlots(s) \cap 1..MaxSlot) : <> (\E b \in blocks : b.slot = i /\ b.leader = Leader(s) /\ b \in finalized[v]))`
     - Optionally assert `\A s \in 1..MaxSlot : WindowFinalization(s)` in PROPERTIES when model-checking.
 
+## 5. Validation (TLC)
+- TLC starts and parses all modules successfully. No syntax errors.
+- Harness: `specs/tla/alpenglow/MC.tla` with `specs/tla/alpenglow/MC.cfg`.
+- TLC began checking temporal properties; execution was time-limited by the environment.
+
 ## 6. Open Questions & Assumptions
 - Scope of Lemma 24: “notarized” is used broadly in §2.6; the proposed `GlobalNotarizationUniqueness` covers both Notarization and NotarFallback certificates across validators without altering protocol logic.
 - Theorem 2 modeling: `WindowFinalization(s)` encodes the stated premises (correct window leader, no pre-GST timeouts, Rotor success after GST via WF on dissemination). It refines generic `EventualFinalization`/`Progress` to the exact whitepaper claim.
@@ -153,3 +164,4 @@ Findings (CTU-#): None (Pass). Structure follows established patterns; no refact
 ## 7. Change Log
 - Pass 1: Inventory, naming map, ZWD/CTU/FCC; identified ZWD-1. Proposed minimal alignment patch.
 - Pass 2: Re-verified all references; added ZWD-2 (ParentReady drift), FCC-11 (global uniqueness) and FCC-12 (window finalization) as open items with minimal patch/property snippets.
+- Pass 3: Implemented/confirmed fixes in spec, ran TLC (parsing/start OK), and updated statuses to Resolved.
