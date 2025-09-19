@@ -382,7 +382,6 @@ EmitSafeToSkip ==
 EmitParentReady ==
     /\ \E v \in CorrectNodes, s \in 1..MaxSlot, p \in blocks :
          /\ IsFirstSlotOfWindow(s)
-         /\ p.slot + 1 = s
          /\ ShouldEmitParentReady(validators[v].pool, s, p.hash, p.slot)
          /\ ~HasState(validators[v], s, "ParentReady")
          /\ validators' = [validators EXCEPT ![v] = HandleParentReady(@, s, p.hash)]
@@ -492,6 +491,20 @@ UniqueNotarization ==
         IN Cardinality(notarBlocks) <= 1
 
 (***************************************************************************
+ * LEMMA 24 (global form): cross-validator notarization uniqueness
+ * Both notarization and notar-fallback certificates agree on a block hash.
+ *************************************************************************)
+GlobalNotarizationUniqueness ==
+    \A s \in 1..MaxSlot :
+        \A v1, v2 \in CorrectNodes :
+            LET p1 == validators[v1].pool
+                p2 == validators[v2].pool
+            IN \A c1 \in p1.certificates[s], c2 \in p2.certificates[s] :
+                   (c1.type \in {"NotarizationCert", "NotarFallbackCert"} /\
+                    c2.type \in {"NotarizationCert", "NotarFallbackCert"}) =>
+                   c1.blockHash = c2.blockHash
+
+(***************************************************************************
  * LEMMA 25: Finalized implies notarized
  * Every finalized block was first notarized
  ***************************************************************************)
@@ -549,6 +562,29 @@ Progress ==
                                           \A s2 \in {b.slot : b \in finalized[v]} : s >= s2
              IN <>(\E b \in blocks : b.slot > currentMax /\ b \in finalized[v]))
 
+(***************************************************************************
+ * THEOREM 2 (window-level liveness)
+ * Under stated premises, every slot in the window gets finalized.
+ *************************************************************************)
+NoTimeoutsBeforeGST(s) ==
+    \A v \in CorrectNodes :
+        \A i \in (WindowSlots(s) \cap 1..MaxSlot) :
+            validators[v].timeouts[i] = 0 \/ validators[v].timeouts[i] >= GST
+
+WindowFinalizedState(s) ==
+    \A v \in CorrectNodes :
+        \A i \in (WindowSlots(s) \cap 1..MaxSlot) :
+            \E b \in blocks :
+                /\ b.slot = i
+                /\ b.leader = Leader(s)
+                /\ b \in finalized[v]
+
+WindowFinalization(s) ==
+    (IsFirstSlotOfWindow(s) /\ Leader(s) \in CorrectNodes /\ NoTimeoutsBeforeGST(s) /\ time >= GST) ~>
+        WindowFinalizedState(s)
+
+\* Window liveness properties (if any) are defined in the MC harness.
+
 \* ============================================================================
 \* TYPE INVARIANT
 \* ============================================================================
@@ -574,6 +610,7 @@ Invariant ==
     /\ ChainConsistency
     /\ VoteUniqueness
     /\ UniqueNotarization
+    /\ GlobalNotarizationUniqueness
     /\ FinalizedImpliesNotarized
     /\ CertificateNonEquivocation
     /\ ByzantineStakeOK
