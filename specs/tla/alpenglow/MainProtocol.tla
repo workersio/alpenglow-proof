@@ -60,7 +60,7 @@ CorrectNodes == Validators \ byzantineNodes
 RotorCorrectRelays(relays) == relays \cap CorrectNodes
 
 \* Definition 6 (§2.2): Rotor succeeds if at least \gamma correct relays participate
-EnoughCorrectRelays(relays) == Cardinality(RotorCorrectRelays(relays)) >= RotorGamma
+EnoughCorrectRelays(relays) == Cardinality(RotorCorrectRelays(relays)) >= GammaDataShreds
 
 \* Definition 19 & Algorithm 4: certificates prompting block repair
 NeedsBlockRepair(pool, block) ==
@@ -246,7 +246,8 @@ RotorDisseminateSuccess(block) ==
            relays == RotorSelect(block, needers, nextLeader)
        IN /\ needers # {}
           /\ relays # {}
-          /\ EnoughCorrectRelays(relays)
+          /\ RotorSuccessful(block.leader, relays, CorrectNodes)
+          /\ SliceDelivered([leader |-> block.leader, needers |-> needers], relays, CorrectNodes)
           /\ blockAvailability' = [w \in Validators |-> blockAvailability[w] \union {block}]
           /\ UNCHANGED <<validators, blocks, messages, byzantineNodes, time, finalized>>
 
@@ -262,7 +263,7 @@ RotorDisseminateFailure(block) ==
            relays == RotorSelect(block, needers, nextLeader)
        IN /\ needers # {}
           /\ relays # {}
-          /\ (block.leader \in byzantineNodes \/ ~EnoughCorrectRelays(relays))
+          /\ ~RotorSuccessful(block.leader, relays, CorrectNodes)
           /\ blockAvailability' = [w \in Validators |->
                                         IF w \in relays
                                         THEN blockAvailability[w] \union {block}
@@ -535,6 +536,17 @@ PoolMultiplicityOK ==
 PoolCertificateUniqueness ==
     \A v \in Validators : CertificateUniqueness(validators[v].pool)
 
+(***************************************************************************
+ * ROTOR SELECTION SOUNDNESS
+ * Ensures RotorSelect always respects structural constraints when successful
+ ***************************************************************************)
+RotorSelectSoundness ==
+    \A b \in blocks :
+        LET needers == {v \in Validators : b \notin blockAvailability[v]}
+            nextSlot == IF b.slot + 1 <= MaxSlot THEN b.slot + 1 ELSE b.slot
+            nextLeader == Leader(nextSlot)
+        IN RotorSelectSound(b, needers, nextLeader)
+
 \* ============================================================================
 \* LIVENESS PROPERTIES (Temporal)
 \* ============================================================================
@@ -614,6 +626,7 @@ Invariant ==
     /\ ByzantineStakeOK
     /\ PoolMultiplicityOK
     /\ PoolCertificateUniqueness
+    /\ RotorSelectSoundness
 
 \* ============================================================================
 \* STATE CONSTRAINTS (For bounded model checking)
