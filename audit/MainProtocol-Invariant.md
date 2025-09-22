@@ -1,7 +1,6 @@
-# Audit Report: MainProtocol Invariant
+# Audit Report: Main Protocol Invariant
 
-## 1. Code Under Audit
-
+### 1. Code that you are auditing.
 ```tla
 Invariant ==
     /\ TypeInvariant
@@ -19,61 +18,50 @@ Invariant ==
     /\ RotorSelectSoundness
 ```
 
-## 2. Whitepaper Section and References
+### 2. The whitepaper section and references that the code represents.
 
-The `Invariant` block represents the overall safety properties of the Alpenglow protocol. The most relevant section in the whitepaper is **Section 2.9 Safety**, which introduces the main safety theorem (Theorem 1) and a series of lemmas that build up to it.
+This `Invariant` is the top-level safety property for the entire Alpenglow specification. It combines numerous individual invariants that correspond to a wide range of definitions, lemmas, and theorems throughout the whitepaper, primarily in **Section 2.9 (Safety)** and **Section 2.5 (Pool)**. Its main goal is to assert that all fundamental safety guarantees hold in every reachable state of the model.
 
-- **Theorem 1 (Safety):** "If any correct node finalizes a block b in slot s and any correct node finalizes any block b' in any slot s' >= s, b' is a descendant of b." (Page 32)
+### 3. The reasoning behind the code and what the whitepaper claims.
 
-The `Invariant` is a conjunction of multiple lower-level invariants, each corresponding to a specific safety property or lemma described in the whitepaper.
+The `Invariant` operator combines all the critical safety properties of the system into a single predicate. The TLA+ model checker (TLC) will check that this property holds true in every single state it explores, starting from the `Init` state. If `Invariant` is ever violated, it means a safety property has been broken.
 
-## 3. Reasoning and Analysis
+Each component of the conjunction has been audited separately:
+*   **`TypeInvariant`**: Ensures all state variables have the correct types. (See `audit/TypeInvariant.md`)
+*   **`SafetyInvariant`**: Ensures finalized blocks form a single, non-forking ancestral chain, corresponding to **Theorem 1**. (See `audit/SafetyInvariant.md`)
+*   **`NoConflictingFinalization`**: A corollary of Theorem 1, ensuring two different blocks are never finalized in the same slot. (See `audit/NoConflictingFinalization.md`)
+*   **`ChainConsistency`**: An alias for `SafetyInvariant`, providing a more descriptive name for the core safety guarantee. (See `audit/ChainConsistency.md`)
+*   **`VoteUniqueness`**: Ensures a correct node casts at most one initial vote per slot, corresponding to **Lemma 20**. (See `audit/VoteUniqueness.md`)
+*   **`UniqueNotarization`**: Ensures a correct node's pool contains notarization certificates for at most one block per slot, corresponding to **Lemma 24**. (See `audit/UniqueNotarization.md`)
+*   **`GlobalNotarizationUniqueness`**: Extends `UniqueNotarization` to ensure all correct nodes agree on the same single notarized block per slot. (See `audit/GlobalNotarizationUniqueness.md`)
+*   **`FinalizedImpliesNotarized`**: Ensures any finalized block was first notarized, corresponding to **Lemma 25**. (See `audit/FinalizedImpliesNotarized.md`)
+*   **`CertificateNonEquivocation`**: Ensures a correct node's pool does not contain conflicting certificates of the same type for the same slot, corresponding to **Definition 13**. (See `audit/CertificateNonEquivocation.md`)
+*   **`ByzantineStakeOK`**: Enforces the core assumption that byzantine stake is less than 20%, corresponding to **Assumption 1**. (See `audit/ByzantineStakeOK.md`)
+*   **`PoolMultiplicityOK`**: Ensures vote storage counts in every validator's pool respect the rules of **Definition 12**. (See `audit/PoolMultiplicityOK.md`)
+*   **`PoolCertificateUniqueness`**: Ensures certificate storage in every validator's pool respects the uniqueness rules of **Definition 13**. (See `audit/PoolCertificateUniqueness.md`)
+*   **`RotorSelectSoundness`**: Checks that the Rotor relay selection mechanism is sound. (See `audit/RotorSelectSoundness.md`)
 
-The `Invariant` in `MainProtocol.tla` is the top-level safety property for the model. It is defined as a conjunction of several more specific invariants. This is a standard and effective way to structure TLA+ specifications, as it allows for checking individual properties separately and then combining them to prove the overall system safety.
+### 4. The conclusion of the audit.
 
-Below is a breakdown of each component of the `Invariant` and its relation to the whitepaper:
+The main `Invariant` provides comprehensive safety coverage for the Alpenglow protocol, formalizing the key theorems, lemmas, and definitions from the whitepaper. The individual components are logically sound and, when combined, create a strong assertion about the overall safety of the system.
 
-- **`TypeInvariant`**: (L602 in `MainProtocol.tla`) This is a standard invariant in TLA+ models that ensures all variables remain within their expected types. It does not directly correspond to a specific concept in the whitepaper but is a fundamental part of ensuring model correctness.
+However, the audit of the individual components has revealed two issues that affect the overall integrity of this main `Invariant`:
 
-- **`SafetyInvariant`**: (L447 in `MainProtocol.tla`) This directly corresponds to **Theorem 1** on page 32 of the whitepaper. It asserts that finalized blocks form a single, consistent chain.
+1.  **Major Issue in `RotorSelectSoundness`**: There is a fundamental inconsistency in how Rotor relay selection is checked. The soundness check uses a legacy set-based model (`StructuralOK`) while the feasibility check uses a modern bin-based model (`RotorBinAssignmentPossible`). This makes the `RotorSelectSoundness` invariant unreliable.
+2.  **Minor Issue in `PoolMultiplicityOK`**: There is a slight deviation from the whitepaper's rule for storing initial votes. The spec allows storing one `NotarVote` AND one `SkipVote` from the same validator in the same slot, whereas Definition 12 implies mutual exclusion ("notarization **or** skip vote").
 
-- **`NoConflictingFinalization`**: (L456 in `MainProtocol.tla`) This is a direct corollary of Theorem 1, as stated in the comment in the TLA+ code. It ensures that two different blocks cannot be finalized in the same slot.
+Because the main `Invariant` is a conjunction of all these properties, the issues in the sub-properties mean that the main `Invariant` itself is not as strong or correct as it could be. The `RotorSelectSoundness` issue is particularly concerning as it points to a potential logic error in the specification of a critical component.
 
-- **`ChainConsistency`**: (L465 in `MainProtocol.tla`) This is stated to be equivalent to `SafetyInvariant` and is likely included for clarity, possibly to match the naming in an earlier version of the specification or to emphasize the property under the specific Byzantine stake assumption.
+### 5. Any open questions or concerns.
 
-- **`VoteUniqueness`**: (L471 in `MainProtocol.tla`) This corresponds to **Lemma 20** on page 28 of the whitepaper, which states that correct nodes cast at most one initial vote per slot.
+*   The primary concern is the inconsistent modeling in the Rotor specification. This should be resolved to ensure the model is internally consistent and accurately reflects the intended design.
+*   The secondary concern is the slight deviation in vote multiplicity rules, which could have unintended consequences for the fallback logic under adversarial conditions.
 
-- **`UniqueNotarization`**: (L483 in `MainProtocol.tla`) This corresponds to **Lemma 24** on page 29 of the whitepaper, which ensures that at most one block can be notarized per slot.
+### 6. Any suggestions for improvement.
 
-- **`GlobalNotarizationUniqueness`**: (L496 in `MainProtocol.tla`) This is a stronger, global version of `UniqueNotarization`, ensuring that all correct nodes agree on the notarized block for a given slot. This is also discussed in the context of Lemma 24.
+The suggestions from the individual audit reports are summarized here:
 
-- **`FinalizedImpliesNotarized`**: (L510 in `MainProtocol.tla`) This corresponds to **Lemma 25** on page 30 of the whitepaper, which states that a block must be notarized before it can be finalized.
+*   **High Priority:** Refactor the `Rotor.tla` module to **consistently use the bin-based model** for all checks related to relay selection, including updating `RotorSelectSound` to use `StructuralBinOK`.
+*   **Medium Priority:** Update the `CanStoreVote` predicate in `VoteStorage.tla` to enforce **mutual exclusion** between `NotarVote` and `SkipVote` from the same validator in the same slot, to align perfectly with Definition 12.
 
-- **`CertificateNonEquivocation`**: (L523 in `MainProtocol.tla`) This relates to the properties of certificates as described in **Definition 13** on page 20. It ensures a validator doesn't create conflicting certificates for the same slot and type.
-
-- **`ByzantineStakeOK`**: (L80 in `MainProtocol.tla`) This invariant checks that the total stake of byzantine nodes is less than 20%, which is **Assumption 1** on page 4 of the whitepaper.
-
-- **`PoolMultiplicityOK`** and **`PoolCertificateUniqueness`**: (L533-L536 in `MainProtocol.tla`) These invariants relate to the properties of the `Pool` data structure, as described in **Section 2.5 Pool** (page 20), particularly Definitions 12 and 13. They ensure that votes and certificates are stored correctly.
-
-- **`RotorSelectSoundness`**: (L543 in `MainProtocol.tla`) This invariant ensures that the `RotorSelect` function behaves correctly, as described in **Section 2.2 Rotor** and **Section 3.1 Smart Sampling**.
-
-## 4. Conclusion
-
-The `Invariant` block in `MainProtocol.tla` is a comprehensive and well-structured representation of the safety properties of the Alpenglow protocol as described in the whitepaper. It correctly combines all the necessary sub-invariants to ensure the overall safety of the system. The naming of the sub-invariants is clear and maps well to the concepts and lemmas in the whitepaper.
-
-## 5. Open Questions or Concerns
-
-- The `ChainConsistency` invariant is currently defined as being identical to `SafetyInvariant`. While this is not incorrect, it might be worth clarifying in the comments why it is included as a separate item in the main `Invariant`. Is it for historical reasons, or to make it easier to check a property with a specific name?
-
-## 6. Suggestions for Improvement
-
-- While the comments in `MainProtocol.tla` are generally good, adding a brief, one-line comment next to each sub-invariant in the main `Invariant` block could improve readability for someone new to the specification. For example:
-
-```tla
-Invariant ==
-    /\ TypeInvariant                \* Variables have the correct types
-    /\ SafetyInvariant              \* Finalized blocks form a single chain (Theorem 1)
-    /\ NoConflictingFinalization    \* No two different blocks finalized in the same slot
-    ...
-```
-This would provide a quick reference without needing to navigate to the definition of each invariant.
+Fixing these two issues would resolve the identified discrepancies and significantly strengthen the correctness guarantee provided by the main `Invariant`.
