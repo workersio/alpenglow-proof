@@ -1,7 +1,6 @@
-# Audit Report for CertificateNonEquivocation
+# Audit Report: CertificateNonEquivocation
 
-## 1. Code Under Audit
-
+### 1. Code that you are auditing.
 ```tla
 CertificateNonEquivocation ==
     \A v \in CorrectNodes :
@@ -13,33 +12,36 @@ CertificateNonEquivocation ==
             c1.blockHash = c2.blockHash
 ```
 
-## 2. Whitepaper Section and References
+### 2. The whitepaper section and references that the code represents.
 
-*   **Whitepaper Section:** §2.5 Pool, specifically Definition 13.
-*   **Definition 13 (certificates):** "A single (received or constructed) certificate of each type corresponding to the given block/slot is stored in Pool."
-*   **Whitepaper Section:** §2.9 Safety, Lemma 24: Unique notarization.
-*   **Lemma 24:** "At most one block can be notarized in a given slot."
-*   **Whitepaper Section:** §2.9 Safety, Lemma 21 (fast-finalization property) and Lemma 26 (slow-finalization property). These lemmas imply that if a block is finalized, no other block can be notarized or notarized-fallback in the same slot.
+This property is a direct formalization of the uniqueness rule from **Definition 13 (certificates)** on page 21 of the whitepaper:
 
-## 3. Reasoning and Analysis
+> - A single (received or constructed) certificate of each type corresponding to the given block/slot is stored in Pool.
 
-The TLA+ code `CertificateNonEquivocation` is a safety property that asserts that for any correct node `v` and any slot, if the node's `pool` contains two certificates of the same type (among "NotarizationCert", "NotarFallbackCert", "FastFinalizationCert"), then they must be for the same block (i.e., have the same `blockHash`).
+This property is also a necessary precondition for **Lemma 24** (at most one block can be notarized) and the related safety lemmas (21 and 26) to hold. If a node could hold multiple notarization certificates for different blocks in the same slot, the entire safety argument would collapse.
 
-This directly corresponds to the principle of "non-equivocation" for certificates. A validator should not certify two different blocks for the same purpose in the same slot.
+### 3. The reasoning behind the code and what the whitepaper claims.
 
-The whitepaper's Definition 13 in Section 2.5 states: "A single (received or constructed) certificate of each type corresponding to the given block/slot is stored in Pool." The TLA+ code is a formalization of this rule for the specified certificate types.
+The `CertificateNonEquivocation` property ensures that a validator's local `Pool` remains consistent and does not contain conflicting information. It prevents a situation where a node might certify two different blocks for the same purpose (e.g., notarization) in the same slot.
 
-The property is also a direct consequence of the safety lemmas in Section 2.9. For example, Lemma 24 states that at most one block can be notarized in a given slot. This implies that a correct node cannot have two `NotarizationCert`s for different blocks in the same slot. The `CertificateNonEquivocation` property extends this to `NotarFallbackCert` and `FastFinalizationCert`.
+The TLA+ code formalizes this rule precisely:
+1.  It iterates through each `CorrectNode` `v` and each `slot`.
+2.  It then considers every pair of certificates, `c1` and `c2`, from that validator's pool for that specific slot.
+3.  The `=>` (implication) is key. The left-hand side checks if the two certificates are of the *same type* and if that type is one of the notarization-family certificates (`NotarizationCert`, `NotarFallbackCert`, `FastFinalizationCert`).
+4.  If the left-hand side is true, the right-hand side asserts that the certificates *must* be for the same block (`c1.blockHash = c2.blockHash`).
 
-## 4. Conclusion
+This logic correctly captures the "single certificate of each type" rule from Definition 13. The property is enforced operationally by the `CanStoreCertificate` predicate in `VoteStorage.tla`, which prevents a validator from storing a certificate that would violate this uniqueness constraint. This invariant then verifies that this enforcement is always successful and the property holds in every reachable state.
 
-The TLA+ code `CertificateNonEquivocation` correctly and accurately represents the non-equivocation property for certificates as described in the Alpenglow whitepaper. It is a crucial safety property that prevents a validator from creating or accepting conflicting certificates, which is essential for the overall safety of the consensus protocol. The code aligns with Definition 13 and is a necessary condition for the safety lemmas (21, 24, 26) to hold.
+The property correctly excludes `SkipCert` and `FinalizationCert` from the block hash check, as these certificate types are not associated with a specific block hash (their `blockHash` field is `NoBlock`).
 
-## 5. Open Questions or Concerns
+### 4. The conclusion of the audit.
 
-*   The property is defined for `CorrectNodes`. This is appropriate for a safety property, as we are concerned with the behavior of non-faulty nodes. However, it's important to ensure that the overall system remains safe even when byzantine nodes equivocate. The safety proofs in the whitepaper (Section 2.9) seem to cover this, but it's worth keeping in mind.
-*   The property only covers `NotarizationCert`, `NotarFallbackCert`, and `FastFinalizationCert`. It does not cover `SkipCert` or `FinalizationCert`. This is because `SkipCert` and `FinalizationCert` do not have a `blockHash` associated with them (it's `NoBlock`). This is consistent with the whitepaper.
+The `CertificateNonEquivocation` TLA+ property is a **correct and accurate** formalization of the certificate uniqueness rule from Definition 13 of the Alpenglow whitepaper. It is a crucial safety property that prevents a validator from creating or accepting conflicting certificates, which is essential for the overall safety of the consensus protocol. The audit finds no correctness issues with this code.
 
-## 6. Suggestions for Improvement
+### 5. Any open questions or concerns.
 
-The code is clear and concise. No improvements are suggested.
+None.
+
+### 6. Any suggestions for improvement.
+
+None. The property is well-defined and correctly implements the intended constraint.

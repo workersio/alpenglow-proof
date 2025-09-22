@@ -1,8 +1,6 @@
+# Audit Report: UniqueNotarization
 
-# Audit Report for UniqueNotarization
-
-## 1. Code Under Audit
-
+### 1. Code that you are auditing.
 ```tla
 UniqueNotarization ==
     \A v \in CorrectNodes :
@@ -14,43 +12,42 @@ UniqueNotarization ==
         IN Cardinality(notarBlocks) <= 1
 ```
 
-## 2. Whitepaper Section and References
+### 2. The whitepaper section and references that the code represents.
 
-This TLA+ code corresponds to **Lemma 24** in the Alpenglow whitepaper (page 29).
+This property directly corresponds to **Lemma 24** in Section 2.9 (page 29) of the whitepaper:
 
-**Lemma 24:** At most one block can be notarized in a given slot.
+> **Lemma 24.** At most one block can be notarized in a given slot.
 
-The proof of this lemma in the whitepaper relies on:
-*   **Definition 11:** which specifies that a "Notarization Cert." requires >= 60% of the stake.
-*   **Assumption 1:** Byzantine nodes control less than 20% of the stake.
-*   **Lemma 23:** If correct nodes with more than 40% of stake cast notarization votes for block `b`, no other block can be notarized in the same slot.
-*   **Lemma 20:** A correct node exclusively casts only one notarization vote or skip vote per slot.
+The proof of this lemma relies on Lemma 23 and ultimately on Lemma 20 (vote uniqueness), which I audited previously.
 
-## 3. Reasoning and Analysis
+### 3. The reasoning behind the code and what the whitepaper claims.
 
-The TLA+ property `UniqueNotarization` formalizes Lemma 24 by asserting a critical safety invariant. Let's break down the TLA+ code and connect it to the whitepaper's claims.
+The `UniqueNotarization` property is a crucial safety guarantee that prevents forks at the notarization stage. It ensures that for any given slot, the protocol cannot notarize two different blocks.
 
-*   `\A v \in CorrectNodes`: This iterates over all correct (non-Byzantine) nodes. The property must hold for every honest participant in the network.
-*   `\A slot \in 1..MaxSlot`: This iterates over all possible slots in the model. The property must hold for every slot.
-*   `LET pool == validators[v].pool`: Each validator maintains a local `pool` of votes and certificates, as described in Section 2.5 of the whitepaper.
-*   `notarCerts == {c \in pool.certificates[slot] : c.type = "NotarizationCert"}`: This line filters the certificates in the pool for a specific `slot` to find all certificates of type `NotarizationCert`. This directly corresponds to the "Notarization Cert." mentioned in Table 6 of the whitepaper.
-*   `notarBlocks == {c.blockHash : c \in notarCerts}`: This extracts the set of unique block hashes from the notarization certificates found in the previous step.
-*   `IN Cardinality(notarBlocks) <= 1`: This is the core assertion. It states that the number of unique block hashes that have been notarized in a given slot, from the perspective of a correct node, must be less than or equal to one.
+The whitepaper's reasoning is as follows:
+1.  To notarize a block, votes from ≥60% of the stake are required (Definition 11/Table 6).
+2.  Since byzantine nodes control <20% of the stake (Assumption 1), at least 40% of the stake for any notarization must come from correct nodes.
+3.  If two different blocks were notarized in the same slot, it would require two sets of notarization votes, each from ≥60% of the stake. This would imply an overlap of at least 20% of the stake voting for both blocks.
+4.  Given the byzantine stake, this overlap must contain correct nodes.
+5.  However, this would violate Lemma 20, which states that a correct node can only cast one initial vote (notarization or skip) per slot.
 
-The TLA+ code correctly models the claim in Lemma 24. If this property holds, it means that no correct node will ever observe two different blocks being notarized in the same slot. This is a cornerstone of the protocol's safety, preventing forks at the notarization stage.
+The TLA+ code formalizes the *outcome* of this reasoning:
+1.  It iterates through each `CorrectNode` `v` and each `slot`.
+2.  `LET pool == validators[v].pool`: It examines the local pool of the validator.
+3.  `notarCerts == {c \in pool.certificates[slot] : c.type = "NotarizationCert"}`: It filters the certificates in the pool for the given slot to find all `NotarizationCert`s.
+4.  `notarBlocks == {c.blockHash : c \in notarCerts}`: It extracts the set of unique block hashes from these notarization certificates.
+5.  `IN Cardinality(notarBlocks) <= 1`: This is the core assertion. It checks that the set of notarized block hashes for that slot contains at most one element.
 
-The reasoning in the whitepaper is that for a block to be notarized, it needs 60% of the stake. Since less than 20% of the stake is Byzantine, at least 40% of the stake must come from correct nodes. If two different blocks were notarized in the same slot, it would imply that some correct nodes voted for both, which is forbidden by Lemma 20 (vote uniqueness). The TLA+ property checks the *outcome* of this logic: that at the end of the day, a correct node's pool never contains notarization certificates for two different blocks in the same slot.
+This logic correctly verifies that no single correct node ever observes two different blocks being notarized in the same slot. While the property is checked on a per-node basis, the `GlobalNotarizationUniqueness` property (which I will likely audit later) extends this to ensure all correct nodes agree on the *same* single notarized block.
 
-## 4. Conclusion of the Audit
+### 4. The conclusion of the audit.
 
-The TLA+ property `UniqueNotarization` is a correct and accurate formalization of Lemma 24 from the Alpenglow whitepaper. It is a critical safety property that helps ensure the overall safety of the protocol. The implementation of this check in the TLA+ model is sound and directly reflects the intended behavior described in the whitepaper.
+The `UniqueNotarization` TLA+ property is a **correct and accurate** formalization of the safety guarantee described in Lemma 24 of the Alpenglow whitepaper. It correctly models the principle that at most one block can be notarized per slot from the perspective of a single correct node. The audit finds no correctness issues with this code.
 
-## 5. Open Questions or Concerns
+### 5. Any open questions or concerns.
 
-None. The property is clear and its implementation is straightforward.
+None.
 
-## 6. Suggestions for Improvement
+### 6. Any suggestions for improvement.
 
-The property `UniqueNotarization` is scoped to a single validator's pool (`\A v \in CorrectNodes`). While this is a valid and important check, the whitepaper also implies a stronger, global property. The `MainProtocol.tla` file already includes a `GlobalNotarizationUniqueness` property which asserts this stronger guarantee across all correct nodes. It would be beneficial to explicitly link the audit of `UniqueNotarization` to `GlobalNotarizationUniqueness` and explain how they work together to prove the overall safety claim.
-
-Specifically, `UniqueNotarization` ensures that a single node doesn't get confused, while `GlobalNotarizationUniqueness` ensures that different nodes don't have conflicting views of what's notarized. Both are necessary.
+None. The property is clear and directly maps to the corresponding lemma in the whitepaper.

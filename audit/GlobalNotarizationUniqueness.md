@@ -1,7 +1,6 @@
 # Audit Report: GlobalNotarizationUniqueness
 
-## 1. Code Under Audit
-
+### 1. Code that you are auditing. 
 ```tla
 GlobalNotarizationUniqueness ==
     \A s \in 1..MaxSlot :
@@ -14,41 +13,33 @@ GlobalNotarizationUniqueness ==
                    c1.blockHash = c2.blockHash
 ```
 
-## 2. Whitepaper Section and References
+### 2. The whitepaper section and references that the code represents.
 
-The TLA+ code `GlobalNotarizationUniqueness` represents a critical safety property of the Alpenglow protocol, as described in the "Solana Alpenglow Consensus" whitepaper (v1.1, July 22, 2025). The most relevant sections are:
+This property is a stronger, global version of **Lemma 24** (page 29). While Lemma 24 states that "at most one block can be notarized in a given slot," this TLA+ property ensures that this uniqueness holds *across all correct nodes*. If node A notarizes block `b1` and node B notarizes a block in the same slot, it must also be `b1`.
 
-*   **Section 2.9: Safety**
-    *   **Lemma 24:** "At most one block can be notarized in a given slot."
-    *   **Lemma 21:** "fast-finalization property"
-    *   **Lemma 26:** "slow-finalization property"
-    *   **Theorem 1 (safety):** "If any correct node finalizes a block b in slot s and any correct node finalizes any block b' in any slot s' >= s, b' is a descendant of b."
+The reasoning is the same as for Lemma 24 but applied globally. For two different blocks to be notarized (or notarized-fallback), it would require two distinct sets of votes, each with >=60% stake. This would require an overlap of >40% of the stake if we consider the byzantine stake is <20%. This means correct nodes would have had to vote for two different blocks in the same slot, which violates **Lemma 20**.
 
-## 3. Reasoning and Analysis
+### 3. The reasoning behind the code and what the whitepaper claims.
 
-The TLA+ property `GlobalNotarizationUniqueness` asserts that for any given slot `s`, if any two correct nodes `v1` and `v2` hold notarization certificates (either `NotarizationCert` or `NotarFallbackCert`), then those certificates must be for the same block hash.
+The `GlobalNotarizationUniqueness` property is a critical safety invariant that prevents forks at the notarization level across the entire network of correct nodes.
 
-The whitepaper, in Section 2.9, provides a detailed proof for this property. The core argument is as follows:
+The TLA+ code formalizes this network-wide agreement:
+1.  It iterates through every `slot` `s`.
+2.  It considers every possible pair of `CorrectNodes`, `v1` and `v2`.
+3.  It examines their respective pools, `p1` and `p2`.
+4.  It then compares every notarization-related certificate (`NotarizationCert` or `NotarFallbackCert`) found in `p1` for slot `s` with every such certificate found in `p2` for the same slot `s`.
+5.  The core assertion `=> c1.blockHash = c2.blockHash` requires that if both nodes have such a certificate for the same slot, the certificates must be for the exact same block hash.
 
-1.  **Notarization Threshold:** To create a `NotarizationCert` or `NotarFallbackCert`, votes from nodes holding at least 60% of the total stake are required (Table 6).
-2.  **Byzantine Stake:** The protocol assumes that byzantine nodes control less than 20% of the stake (Assumption 1).
-3.  **Correct Node Stake:** This implies that for any notarization to occur, correct nodes holding at least 40% of the stake must have voted for it.
-4.  **Exclusive Voting:** Lemma 20 states that a correct node will cast at most one notarization or skip vote per slot. This is enforced by the `Voted` state in the TLA+ model.
+This is a powerful and direct formalization of the idea that the "unique notarized block" is unique not just within one node's pool, but across the entire system of correct nodes. It correctly includes `NotarFallbackCert` in this check, as it also contributes to the notarized status of a block.
 
-If two different blocks, `b1` and `b2`, were notarized in the same slot, it would require two distinct sets of votes, each accounting for at least 60% of the stake. This would necessitate an overlap of at least 20% of the stake voting for both blocks. Given the byzantine assumption, this overlap must contain at least some correct nodes. However, this would contradict the exclusive voting rule (Lemma 20), as a correct node cannot vote for two different blocks in the same slot.
+### 4. The conclusion of the audit.
 
-The TLA+ code accurately captures this logic. It iterates through all slots and all pairs of correct nodes, and for each pair, it checks that any two notarization-related certificates they hold for the same slot must have the same block hash. This is a direct formalization of the uniqueness property described in the whitepaper.
+The `GlobalNotarizationUniqueness` TLA+ property is a **correct and accurate** formalization of the global uniqueness guarantee implied by Lemma 24 and the underlying voting rules of the Alpenglow protocol. It correctly ensures that all correct nodes that observe a notarized block in a given slot will have observed the *same* block, preventing disagreements that could lead to forks. The audit finds no correctness issues with this code.
 
-## 4. Conclusion
+### 5. Any open questions or concerns.
 
-The TLA+ code `GlobalNotarizationUniqueness` correctly and accurately represents the notarization uniqueness property as described in the Alpenglow whitepaper. The property is a direct formalization of Lemma 24 and is a cornerstone of the protocol's overall safety (Theorem 1). The audit finds no discrepancies between the TLA+ specification and the whitepaper's claims in this regard.
+None.
 
-## 5. Open Questions or Concerns
+### 6. Any suggestions for improvement.
 
-*   The property `GlobalNotarizationUniqueness` is a global invariant. It is important to ensure that the model checker (TLC) is configured to check this invariant on all reachable states. The provided context does not include the TLC configuration file, but this is a crucial step for verification.
-*   The property relies on the correctness of the `CorrectNodes` definition and the byzantine node model. Any errors in how byzantine behavior is modeled could potentially invalidate the verification of this property.
-
-## 6. Suggestions for Improvement
-
-*   The property could be made even more explicit by also checking that there are no conflicting `FastFinalizationCert`s, although this is implicitly covered by the logic (a `FastFinalizationCert` implies a `NotarizationCert`).
-*   Consider adding a complementary property that checks for the liveness of notarization, i.e., that a block that should be notarized eventually is. This is a liveness property and would require a different kind of temporal logic expression (e.g., using `[]<>` - eventually always).
+None. The property is well-specified and crucial for ensuring global safety.
