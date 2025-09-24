@@ -329,12 +329,12 @@ BroadcastLocalVote ==
  ***************************************************************************)
 EmitBlockNotarized ==
     /\ \E v \in CorrectNodes, b \in blocks :
-         /\ b.slot \in 1..MaxSlot
+         /\ b.slot \in (Slots \cap 1..MaxSlot)
          /\ ShouldEmitBlockNotarized(validators[v].pool, b.slot, b.hash)
          /\ ~HasState(validators[v], b.slot, "BlockNotarized")
          /\ validators' = [validators EXCEPT ![v] =
                                HandleBlockNotarized(@, b.slot, b.hash)]
-    /\ UNCHANGED <<blocks, messages, byzantineNodes, time, finalized, blockAvailability>>
+    /\ UNCHANGED <<blocks, messages, byzantineNodes, time, finalized, blockAvailability>> \* Finalization votes broadcasted by BroadcastLocalVote
 
 (***************************************************************************
  * EVENT: SAFE TO NOTAR — Definition 16 (fallback branch)
@@ -617,6 +617,15 @@ TypeInvariant ==
     /\ blockAvailability \in [Validators -> SUBSET blocks]
     /\ \A v \in Validators : ValidatorStateOK(validators[v])
 
+(***************************************************************************
+ * Implied invariant: if BlockNotarized is in the state, a certificate exists.
+ * This is checked to catch regressions.
+ ***************************************************************************)
+BlockNotarizedImpliesCert ==
+    \A v \in CorrectNodes, s \in 1..MaxSlot :
+        (\E b \in blocks : b.slot = s /\ "BlockNotarized" \in validators[v].state[s]) =>
+        (\E b \in blocks : b.slot = s /\ HasNotarizationCert(validators[v].pool, s, b.hash))
+
 \* ============================================================================
 \* MAIN INVARIANT (Combines all safety properties)
 \* ============================================================================
@@ -637,6 +646,7 @@ Invariant ==
     /\ PoolCertificateUniqueness
     /\ RotorSelectSoundness
     /\ TimeoutsInFuture
+    /\ BlockNotarizedImpliesCert
 
 \* ============================================================================
 \* STATE CONSTRAINTS (For bounded model checking)
