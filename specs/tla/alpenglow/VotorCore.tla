@@ -35,6 +35,7 @@ ASSUME
  * - BlockNotarized(h): Pool holds notarization cert for h
  * - ItsOver: Cast finalization vote, no more votes in slot
  * - BadWindow: Cast skip or fallback vote
+ * - BlockSeen: First Block(...) event consumed for this slot
  ***************************************************************************)
 
 StateObject == {
@@ -43,7 +44,8 @@ StateObject == {
     "VotedNotar",       \* Cast notarization vote for specific block
     "BlockNotarized",   \* Pool has notarization certificate
     "ItsOver",          \* Cast finalization vote, done with slot
-    "BadWindow"         \* Cast skip or fallback vote
+    "BadWindow",        \* Cast skip or fallback vote
+    "BlockSeen"         \* First Block(...) event consumed for this slot
 }
 
 \* These flags are exactly the items listed in Definition 18 and let us track
@@ -228,7 +230,9 @@ HandleBlock(validator, block) ==
 
 HandleTimeout(validator, slot) ==
     LET cleared == [validator EXCEPT !.timeouts[slot] = 0]
-    IN IF ~HasState(cleared, slot, "Voted") THEN
+    IN IF HasState(cleared, slot, "ItsOver") THEN
+           cleared
+       ELSE IF ~HasState(cleared, slot, "Voted") THEN
            TrySkipWindow(cleared, slot)
        ELSE cleared
 

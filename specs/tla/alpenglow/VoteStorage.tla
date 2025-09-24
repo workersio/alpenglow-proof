@@ -93,18 +93,18 @@ StoreVote(pool, vote) ==
         pool  \* Don't store if multiplicity rules violated
 
 \* ============================================================================
-\* CERTIFICATE STORAGE (Definition 13)
+\* CERTIFICATE STORAGE (Definition 13, Whitepaper page 21)
 \* ============================================================================
 
 (***************************************************************************
- * CRITICAL RULE from Definition 13:
+ * CRITICAL RULE from Definition 13 (Whitepaper page 21):
  * "A single certificate of each type corresponding to the given block/slot
  * is stored in Pool"
  * 
  * This ensures certificate uniqueness - can't have conflicting certificates!
  ***************************************************************************)
 
-\* Definition 13: only one certificate of a given type is stored for each
+\* Definition 13 (Whitepaper page 21): only one certificate of a given type is stored for each
 \* slot/block combination. This predicate enforces that uniqueness.
 CanStoreCertificate(pool, cert) ==
     LET 
@@ -175,7 +175,7 @@ MaxNotarStake(pool, slot) ==
 \* CERTIFICATE GENERATION
 \* ============================================================================
 
-\* Definition 13: whenever enough votes are collected we must form the
+\* Definition 13 (Whitepaper page 21): whenever enough votes are collected we must form the
 \* corresponding certificate(s). This function checks every block with
 \* votes and returns any certificate that can now be assembled.
 GenerateCertificate(pool, slot) ==
@@ -320,8 +320,7 @@ PoolTypeOK(pool) ==
 MultiplicityRulesRespected(pool) ==
     \A s \in Slots, v \in Validators :
         LET votes == pool.votes[s][v]
-        IN /\ Cardinality({vt \in votes : vt.type = "NotarVote"}) <= 1
-           /\ Cardinality({vt \in votes : vt.type = "SkipVote"}) <= 1
+        IN /\ Cardinality({vt \in votes : vt.type \in {"NotarVote", "SkipVote"}}) <= 1
            /\ Cardinality({vt \in votes : vt.type = "NotarFallbackVote"}) <= 3
            /\ Cardinality({vt \in votes : vt.type = "SkipFallbackVote"}) <= 1
            /\ Cardinality({vt \in votes : vt.type = "FinalVote"}) <= 1

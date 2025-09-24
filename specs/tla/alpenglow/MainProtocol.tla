@@ -6,7 +6,8 @@
  * into a full protocol, following the order of presentation in Whitepaper
  * §2. Readers can match each action to the narrative:
  *   • §2.3 Blokstor events (`ReceiveBlock`, `EmitParentReady`, ...)
- *   • §2.4 Voting actions (`ProcessTimeout`, `GenerateCertificate`, ...)
+ *   • §2.4 Voting actions and timeout handling
+ *       (timeouts via `AdvanceTime` → `AdvanceClock`, `GenerateCertificate`, ...)
  *   • §2.9 Safety invariants (Theorem 1) and §2.10 Liveness (Theorem 2)
  ***************************************************************************)
 
@@ -33,6 +34,7 @@ ASSUME
     /\ GST \in Nat
     /\ MaxSlot \in Nat \ {0}
     /\ MaxBlocks \in Nat \ {0}
+    /\ Cardinality(Validators) = NumValidators
 
 \* ============================================================================
 \* SYSTEM STATE VARIABLES
@@ -60,13 +62,16 @@ CorrectNodes == Validators \ byzantineNodes
 RotorCorrectRelays(relays) == relays \cap CorrectNodes
 
 \* Definition 6 (§2.2): Rotor succeeds if at least \gamma correct relays participate
-EnoughCorrectRelays(relays) == Cardinality(RotorCorrectRelays(relays)) >= GammaDataShreds
+EnoughCorrectRelays(leader, relays) == RotorSuccessful(leader, relays, CorrectNodes)
 
 \* Definition 19 & Algorithm 4: certificates prompting block repair
+\* Include fast-finalization cert to future-proof fast-only implementations.
 NeedsBlockRepair(pool, block) ==
     LET slot == block.slot
         hash == block.hash
-    IN HasNotarizationCert(pool, slot, hash) \/ HasNotarFallbackCert(pool, slot, hash)
+    IN HasFastFinalizationCert(pool, slot, hash)
+       \/ HasNotarizationCert(pool, slot, hash)
+       \/ HasNotarFallbackCert(pool, slot, hash)
 
 \* Check if we're after GST (network is stable)
 AfterGST == time >= GST
@@ -89,6 +94,9 @@ Init ==
                         LET base == InitValidatorState(v)
                             withParent == [base EXCEPT !.parentReady[1] = GenesisHash]
                         IN AddState(withParent, 1, "ParentReady")]
+    \* Genesis bootstrapping: slot 1 is considered ParentReady by fiat to seed
+    \* the first leader window (consistent with Definition 15). This avoids
+    \* requiring an explicit genesis certificate while preserving semantics.
     /\ blocks = {GenesisBlock}
     /\ messages = {}
     /\ byzantineNodes \in {S \in SUBSET Validators : Cardinality(S) = ByzantineCount}
@@ -104,17 +112,30 @@ Init ==
 (***************************************************************************
  * RECEIVE BLOCK — Whitepaper Algorithm 1 (line 1 "Block")
  * Consume a Rotor-delivered block and invoke Votor's TRYNOTAR path.
+ * Notes:
+ * - Event exactness: model only the first Block(...) per slot per validator
+ *   (whitepaper “first complete block”). Subsequent deliveries for the same
+ *   slot are ignored via the BlockSeen flag.
+ * - Broadcast decoupling: this action only updates local validator state;
+ *   broadcasting of votes/certificates occurs in separate actions
+ *   (BroadcastLocalVote, DeliverVote, DeliverCertificate).
  ***************************************************************************)
 ReceiveBlock(v, block) ==
     /\ v \in CorrectNodes
     /\ block \in blocks
+    /\ IsValidBlock(block)
     /\ block \in blockAvailability[v]
-    /\ validators' = [validators EXCEPT ![v] = HandleBlock(validators[v], block)]
+    /\ ~HasState(validators[v], block.slot, "BlockSeen")
+    /\ validators' = [validators EXCEPT ![v] =
+                         AddState(HandleBlock(validators[v], block), block.slot, "BlockSeen")]
     /\ UNCHANGED <<blocks, messages, byzantineNodes, time, finalized, blockAvailability>>
 
 (***************************************************************************
  * GENERATE CERTIFICATE — Definition 13 (certificate construction)
  * Aggregates qualifying votes and broadcasts the resulting certificate.
+ * Note: We broadcast if either (a) the certificate is new to `messages`
+ * or (b) some validator can still store it in their Pool. This abstracts
+ * the whitepaper's "store then broadcast" flow (Def. 13, p. 21).
  ***************************************************************************)
 GenerateCertificateAction(v, slot) ==
     /\ v \in CorrectNodes
@@ -122,17 +143,21 @@ GenerateCertificateAction(v, slot) ==
     /\ slot <= MaxSlot
     /\ LET pool == validators[v].pool
            certs == GenerateCertificate(pool, slot)
-           candidates == {c \in certs :
-                             \/ c \notin messages
-                             \/ (\E w \in Validators : CanStoreCertificate(validators[w].pool, c))}
+          candidates == {c \in certs :
+                             /\ c \notin messages
+                             /\ (\E w \in Validators : CanStoreCertificate(validators[w].pool, c))
+                             /\ CanStoreCertificate(validators[v].pool, c)}
        IN /\ candidates # {}
-          /\ LET cert == CHOOSE c \in candidates : TRUE
+          /\ LET cert ==
+                    IF (\E c \in candidates : c.type = "NotarizationCert")
+                    THEN CHOOSE c \in candidates : c.type = "NotarizationCert"
+                    ELSE CHOOSE c \in candidates : TRUE
              IN /\ messages' = messages \union {cert}
                 /\ validators' = [validators EXCEPT ![v].pool = StoreCertificate(validators[v].pool, cert)]
     /\ UNCHANGED <<blocks, byzantineNodes, time, finalized, blockAvailability>>
 
-(***************************************************************************
- * FINALIZE BLOCK — Definition 14 (fast vs slow finalization)
+ (***************************************************************************
+ * FINALIZE BLOCK — Definition 14 (fast vs slow finalization, p. 21)
  * Finalizes on 80% fast certificates or 60% notar + final votes.
  ***************************************************************************)
 FinalizeBlock(v, block) ==
@@ -159,17 +184,24 @@ ByzantineAction(v) ==
         /\ messages' = messages \union {vote}
     /\ UNCHANGED <<validators, blocks, byzantineNodes, time, finalized, blockAvailability>>
 
-(***************************************************************************
- * HONEST PROPOSE BLOCK — Whitepaper §2.7 (Algorithm 3)
+ (***************************************************************************
+ * HONEST PROPOSE BLOCK (strict) — Whitepaper §2.7 (Algorithm 3)
  * Correct leader builds a new block for its slot and stores it locally.
+ * For the first slot of a window, require ParentReady to have been emitted
+ * (Def. 15, p. 21). This is a stricter gating than the optimistic variant.
  ***************************************************************************)
 HonestProposeBlock(leader, slot, parent) ==
     /\ leader = Leader(slot)
     /\ leader \in CorrectNodes
     /\ parent \in blocks
+    /\ slot \in Slots
     /\ slot > parent.slot
     /\ slot <= MaxSlot
     /\ Cardinality(blocks) < MaxBlocks
+    \* Parent readiness discipline (Def. 15, p. 21) for first slots of windows.
+    \* Genesis (slot = 1) is pre-initialised with ParentReady in Init.
+    /\ IsFirstSlotOfWindow(slot)
+        => HasState(validators[leader], slot, "ParentReady")
     /\ LET newBlock == [
            slot |-> slot,
            hash |-> CHOOSE h \in BlockHashes : 
@@ -177,7 +209,39 @@ HonestProposeBlock(leader, slot, parent) ==
            parent |-> parent.hash,
            leader |-> leader
        ]
-       IN /\ blocks' = blocks \union {newBlock}
+       IN \* Hint: ExtendsChain(newBlock, blocks)
+          /\ IsValidBlock(newBlock)
+          /\ blocks' = blocks \union {newBlock}
+          /\ blockAvailability' = [blockAvailability EXCEPT ![leader] = @ \union {newBlock}]
+          /\ UNCHANGED <<validators, messages, byzantineNodes, time, finalized>>
+
+(***************************************************************************
+ * HONEST PROPOSE BLOCK (optimistic) — Algorithm 3
+ * Optional modeling variant: allow building at the first slot of a window
+ * as soon as the ParentReady condition holds (without waiting for the
+ * event state to be emitted). Disabled in Next by default — included here
+ * for comparison with the strict gating variant above.
+ ***************************************************************************)
+HonestProposeBlockOptimistic(leader, slot, parent) ==
+    /\ leader = Leader(slot)
+    /\ leader \in CorrectNodes
+    /\ parent \in blocks
+    /\ slot \in Slots
+    /\ slot > parent.slot
+    /\ slot <= MaxSlot
+    /\ Cardinality(blocks) < MaxBlocks
+    \* Parent readiness check via predicate (Def. 15, p. 21) for first slots
+    /\ IsFirstSlotOfWindow(slot)
+        => ShouldEmitParentReady(validators[leader].pool, slot, parent.hash, parent.slot)
+    /\ LET newBlock == [
+           slot |-> slot,
+           hash |-> CHOOSE h \in BlockHashes :
+                    h \notin {b.hash : b \in blocks},
+           parent |-> parent.hash,
+           leader |-> leader
+       ]
+       IN /\ IsValidBlock(newBlock)
+          /\ blocks' = blocks \union {newBlock}
           /\ blockAvailability' = [blockAvailability EXCEPT ![leader] = @ \union {newBlock}]
           /\ UNCHANGED <<validators, messages, byzantineNodes, time, finalized>>
 
@@ -215,6 +279,11 @@ ByzantineProposeBlock(leader, slot, parent) ==
  * Bumps global time and runs timeout processing on each validator.
  * Only `CorrectNodes` advance their clocks, as Byzantine nodes are unconstrained
  * by the protocol rules and their behavior is modeled separately.
+ *
+ * Time model note (Def. 17): `time` is the absolute clock used to schedule
+ * timeouts. `AdvanceTime` sets each correct validator's `clock := time'` and
+ * calls `AdvanceClock`, so timeouts scheduled in `HandleParentReady` against
+ * `validator.clock` are compared against the same global base.
  ***************************************************************************)
 AdvanceTime ==
     /\ time' = time + 1
@@ -226,7 +295,7 @@ AdvanceTime ==
 
 (***************************************************************************
  * ROTOR DISSEMINATION (SUCCESS) — Whitepaper §2.2, Definition 6
- * Rotor succeeds once a correct leader samples ≥ γ correct relays.
+ * Rotor succeeds once a correct leader samples ≥ γ correct relays (p. 20–22).
  ***************************************************************************)
 RotorDisseminateSuccess(block) ==
     /\ block \in blocks
@@ -271,7 +340,7 @@ RepairBlock(v, block, supplier) ==
     /\ block \in blocks
     /\ block \notin blockAvailability[v]
     /\ NeedsBlockRepair(validators[v].pool, block)
-    /\ supplier \in Validators
+    /\ supplier \in CorrectNodes
     /\ block \in blockAvailability[supplier]
     /\ blockAvailability' = [blockAvailability EXCEPT ![v] = @ \union {block}]
     /\ UNCHANGED <<validators, blocks, messages, byzantineNodes, time, finalized>>
@@ -325,7 +394,7 @@ BroadcastLocalVote ==
 
 (***************************************************************************
  * EVENT: BLOCK NOTARIZED — Definition 15
- * Emits `BlockNotarized` when the Pool holds a notarization certificate.
+ * Emits `BlockNotarized` when the Pool holds a notarization certificate (p. 21).
  ***************************************************************************)
 EmitBlockNotarized ==
     /\ \E v \in CorrectNodes, b \in blocks :
@@ -336,9 +405,10 @@ EmitBlockNotarized ==
                                HandleBlockNotarized(@, b.slot, b.hash)]
     /\ UNCHANGED <<blocks, messages, byzantineNodes, time, finalized, blockAvailability>> \* Finalization votes broadcasted by BroadcastLocalVote
 
-(***************************************************************************
- * EVENT: SAFE TO NOTAR — Definition 16 (fallback branch)
+ (***************************************************************************
+ * EVENT: SAFE TO NOTAR — Definition 16 (fallback branch, p. 21)
  * Checks the fallback inequality and issues notar-fallback votes.
+ * Formula: notar(b) ≥ 40% OR (skip(s)+notar(b) ≥ 60% AND notar(b) ≥ 20%).
  ***************************************************************************)
 EmitSafeToNotar ==
     /\ \E v \in CorrectNodes, s \in 1..MaxSlot, b \in blocks :
@@ -351,9 +421,10 @@ EmitSafeToNotar ==
          /\ validators' = [validators EXCEPT ![v] = HandleSafeToNotar(@, s, b.hash)]
     /\ UNCHANGED <<blocks, messages, byzantineNodes, time, finalized, blockAvailability>>
 
-(***************************************************************************
- * EVENT: SAFE TO SKIP — Definition 16 (skip branch)
+ (***************************************************************************
+ * EVENT: SAFE TO SKIP — Definition 16 (skip branch, p. 22)
  * Emits skip-fallback votes once the pooled skip stake is large enough.
+ * Formula: skip(s) + Σ notar(b) − max notar(b) ≥ 40%.
  ***************************************************************************)
 EmitSafeToSkip ==
     /\ \E v \in CorrectNodes, s \in 1..MaxSlot :
@@ -370,8 +441,8 @@ EmitSafeToSkip ==
          /\ validators' = [validators EXCEPT ![v] = HandleSafeToSkip(@, s)]
     /\ UNCHANGED <<blocks, messages, byzantineNodes, time, finalized, blockAvailability>>
 
-(***************************************************************************
- * EVENT: PARENT READY — Definition 15 (ParentReady signal)
+ (***************************************************************************
+ * EVENT: PARENT READY — Definition 15 (ParentReady signal, p. 21)
  * Marks the first slot in a leader window when predecessors are certified.
  ***************************************************************************)
 EmitParentReady ==
@@ -396,6 +467,9 @@ Next ==
     \/ EmitSafeToSkip
     \/ EmitParentReady
     \/ \E v \in byzantineNodes : ByzantineAction(v)
+    \* Note: `ProcessTimeout` is handled via `AdvanceTime` -> `AdvanceClock`.
+    \* The optional optimistic proposer variant is defined as
+    \* `HonestProposeBlockOptimistic` and not enabled by default.
     \/ \E l \in Validators, s \in 1..MaxSlot, p \in blocks : HonestProposeBlock(l, s, p)
     \/ \E l \in Validators, s \in 1..MaxSlot, p \in blocks : ByzantineProposeBlock(l, s, p)
     \/ DeliverVote
@@ -403,7 +477,7 @@ Next ==
     \/ BroadcastLocalVote
     \/ \E b \in blocks : RotorDisseminateSuccess(b)
     \/ \E b \in blocks : RotorDisseminateFailure(b)
-    \/ \E v \in Validators, b \in blocks, s \in Validators : RepairBlock(v, b, s)
+    \/ \E v \in Validators, b \in blocks, supplier \in Validators : RepairBlock(v, b, supplier)
     \/ AdvanceTime
 
 \* ============================================================================
@@ -427,7 +501,7 @@ Fairness ==
     /\ WF_vars(IF AfterGST THEN (\E v \in Validators, s \in 1..MaxSlot : GenerateCertificateAction(v, s)) ELSE UNCHANGED vars)
     /\ WF_vars(IF AfterGST THEN (\E v \in Validators, b \in blocks : FinalizeBlock(v, b)) ELSE UNCHANGED vars)
     /\ WF_vars(IF AfterGST THEN (\E b \in blocks : RotorDisseminateSuccess(b)) ELSE UNCHANGED vars)
-    /\ WF_vars(IF AfterGST THEN (\E v \in Validators, b \in blocks, s \in Validators : RepairBlock(v, b, s)) ELSE UNCHANGED vars)
+    /\ WF_vars(IF AfterGST THEN (\E v \in Validators, b \in blocks, supplier \in Validators : RepairBlock(v, b, supplier)) ELSE UNCHANGED vars)
     /\ \A v \in Validators :
            IF v \in CorrectNodes
            THEN WF_vars(IF AfterGST THEN (\E b \in blocks : ReceiveBlock(v, b)) ELSE UNCHANGED vars)
@@ -529,6 +603,17 @@ CertificateNonEquivocation ==
             c1.blockHash = c2.blockHash
 
 (***************************************************************************
+ * Honest non-equivocation (semantic constraint)
+ * For any correct leader and any slot, there is at most one proposed block
+ * with that (leader, slot) pair present in the global `blocks` set.
+ ***************************************************************************)
+HonestNonEquivocation ==
+    \A l \in CorrectNodes :
+    \A s \in 1..MaxSlot :
+        LET bs == {b \in blocks : b.leader = l /\ b.slot = s}
+        IN Cardinality(bs) <= 1
+
+(***************************************************************************
  * TRANSIT CERTIFICATES VALID
  * All in-flight certificates are valid.
  ***************************************************************************)
@@ -591,9 +676,9 @@ Progress ==
  * THEOREM 2 (window-level liveness)
  * Under stated premises, every slot in the window gets finalized.
  *************************************************************************)
-NoTimeoutsBeforeGST(s) ==
+NoTimeoutsBeforeGST(startSlot) ==
     \A v \in CorrectNodes :
-        \A i \in (WindowSlots(s) \cap 1..MaxSlot) :
+        \A i \in (WindowSlots(startSlot) \cap 1..MaxSlot) :
             validators[v].timeouts[i] = 0 \/ validators[v].timeouts[i] >= GST
 
 WindowFinalizedState(s) ==
@@ -657,6 +742,7 @@ Invariant ==
     /\ GlobalNotarizationUniqueness
     /\ FinalizedImpliesNotarized
     /\ CertificateNonEquivocation
+    /\ HonestNonEquivocation
     /\ TransitCertificatesValid
     /\ ByzantineStakeOK
     /\ PoolMultiplicityOK
