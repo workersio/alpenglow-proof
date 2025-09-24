@@ -101,3 +101,26 @@ Overall, the abstraction matches the whitepaper’s intent for modelling Byzanti
 - Network delivery of votes: `specs/tla/alpenglow/MainProtocol.tla:336`
 - Stake calculations and resilience assumption check: `specs/tla/alpenglow/Certificates.tla:26`, `specs/tla/alpenglow/MainProtocol.tla:80`
 
+**Changes Made**
+
+Based on the suggestions for improvement, the following changes have been made to `specs/tla/alpenglow/MainProtocol.tla`:
+
+1.  **Explicit Slot Bound:** Added the condition `/\ vote.slot <= MaxSlot` to the `ByzantineAction` to ensure that Byzantine votes are only created for slots within the model's bounds. This improves model hygiene by reducing the state space.
+2.  **Comment Added:** Added a comment to the `ByzantineAction` to reference the adversary model in the whitepaper (Whitepaper §1.5), improving traceability.
+
+The updated `ByzantineAction` is as follows:
+
+```tla
+(***************************************************************************
+ * BYZANTINE ACTION — captures Assumption 1 adversarial behaviour (Whitepaper §1.5)
+ * Allows arbitrary vote injection by validators flagged Byzantine.
+ ***************************************************************************)
+ByzantineAction(v) ==
+    /\ v \in byzantineNodes
+    /\ \E vote \in Vote :
+        /\ IsValidVote(vote)
+        /\ vote.validator = v
+        /\ vote.slot <= MaxSlot
+        /\ messages' = messages \union {vote}
+    /\ UNCHANGED <<validators, blocks, byzantineNodes, time, finalized, blockAvailability>>
+```

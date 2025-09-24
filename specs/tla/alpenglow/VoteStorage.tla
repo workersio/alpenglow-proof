@@ -57,13 +57,13 @@ CanStoreVote(pool, vote) ==
         validator == vote.validator
         existingVotes == pool.votes[slot][validator]
     IN
-        CASE vote.type = "NotarVote" -> 
-            \* Can only store if no NotarVote exists yet
-            ~\E v \in existingVotes : v.type = "NotarVote"
-            
+        CASE vote.type = "NotarVote" ->
+            \* Can only store if no initial vote (Notar or Skip) exists yet
+            ~\E v \in existingVotes : v.type \in {"NotarVote", "SkipVote"}
+
         [] vote.type = "SkipVote" ->
-            \* Can only store if no SkipVote exists yet
-            ~\E v \in existingVotes : v.type = "SkipVote"
+            \* Can only store if no initial vote (Notar or Skip) exists yet
+            ~\E v \in existingVotes : v.type \in {"NotarVote", "SkipVote"}
             
         [] vote.type = "NotarFallbackVote" ->
             \* Can store up to 3 notar-fallback votes

@@ -113,20 +113,6 @@ ReceiveBlock(v, block) ==
     /\ UNCHANGED <<blocks, messages, byzantineNodes, time, finalized, blockAvailability>>
 
 (***************************************************************************
- * PROCESS TIMEOUT — Definition 17 & Algorithm 1 (line 6)
- * Fires when the scheduled deadline elapses, producing skip votes.
- ***************************************************************************)
-ProcessTimeout(v, slot) ==
-    /\ v \in CorrectNodes
-    /\ slot \in Slots
-    /\ slot <= MaxSlot
-    /\ validators[v].timeouts[slot] > 0
-    /\ time >= validators[v].timeouts[slot]
-    /\ ~HasState(validators[v], slot, "Voted")
-    /\ validators' = [validators EXCEPT ![v] = HandleTimeout(validators[v], slot)]
-    /\ UNCHANGED <<blocks, messages, byzantineNodes, time, finalized, blockAvailability>>
-
-(***************************************************************************
  * GENERATE CERTIFICATE — Definition 13 (certificate construction)
  * Aggregates qualifying votes and broadcasts the resulting certificate.
  ***************************************************************************)
@@ -161,14 +147,15 @@ FinalizeBlock(v, block) ==
     /\ UNCHANGED <<validators, blocks, messages, byzantineNodes, time, blockAvailability>>
 
 (***************************************************************************
- * BYZANTINE ACTION — captures Assumption 1 adversarial behaviour
+ * BYZANTINE ACTION — captures Assumption 1 adversarial behaviour (Whitepaper §1.5)
  * Allows arbitrary vote injection by validators flagged Byzantine.
  ***************************************************************************)
 ByzantineAction(v) ==
     /\ v \in byzantineNodes
-    /\ \E vote \in Vote : 
+    /\ \E vote \in Vote :
         /\ IsValidVote(vote)
         /\ vote.validator = v
+        /\ vote.slot <= MaxSlot
         /\ messages' = messages \union {vote}
     /\ UNCHANGED <<validators, blocks, byzantineNodes, time, finalized, blockAvailability>>
 
@@ -196,13 +183,15 @@ HonestProposeBlock(leader, slot, parent) ==
 
 (***************************************************************************
  * BYZANTINE PROPOSE BLOCK — models equivocation/withholding by leaders
- * flagged Byzantine (§2.2, Example 44). They may mint multiple blocks for
- * the same slot and share them with any subset of validators.
+ * flagged Byzantine (Whitepaper §2.2, §2.7, Assumption 1). They may mint
+ * multiple blocks for the same slot (equivocation) and share them with any
+ * subset of validators (withholding, modeled via Blokstor in §2.3).
  ***************************************************************************)
 ByzantineProposeBlock(leader, slot, parent) ==
     /\ leader = Leader(slot)
     /\ leader \in byzantineNodes
     /\ parent \in blocks
+    /\ slot \in Slots
     /\ slot > parent.slot
     /\ slot <= MaxSlot
     /\ Cardinality(blocks) < MaxBlocks
@@ -214,16 +203,18 @@ ByzantineProposeBlock(leader, slot, parent) ==
            leader |-> leader
        ]
        IN /\ blocks' = blocks \union {newBlock}
-          /\ \E targets \in SUBSET Validators :
+          /\ \E recipients \in SUBSET Validators :
                 blockAvailability' =
                     [w \in Validators |->
-                        IF w \in targets THEN blockAvailability[w] \union {newBlock}
+                        IF w \in recipients THEN blockAvailability[w] \union {newBlock}
                         ELSE blockAvailability[w]]
           /\ UNCHANGED <<validators, messages, byzantineNodes, time, finalized>>
 
 (***************************************************************************
  * ADVANCE TIME — Implements the partial-synchrony model (§1.5, Def. 17)
  * Bumps global time and runs timeout processing on each validator.
+ * Only `CorrectNodes` advance their clocks, as Byzantine nodes are unconstrained
+ * by the protocol rules and their behavior is modeled separately.
  ***************************************************************************)
 AdvanceTime ==
     /\ time' = time + 1
@@ -291,8 +282,8 @@ RepairBlock(v, block, supplier) ==
  * Removes a vote from the network set and stores it in each Pool.
  ***************************************************************************)
 DeliverVote ==
-    /\ \E vote \in messages : vote \in Vote
-    /\ LET vmsg == CHOOSE vv \in messages : vv \in Vote
+    /\ \E vote \in messages : vote \in Vote /\ IsValidVote(vote)
+    /\ LET vmsg == CHOOSE vv \in messages : vv \in Vote /\ IsValidVote(vv)
        IN /\ messages' = messages \ {vmsg}
           /\ validators' = [w \in Validators |->
                                [validators[w] EXCEPT
@@ -304,8 +295,8 @@ DeliverVote ==
  * Propagates certificates to every validator’s Pool.
  ***************************************************************************)
 DeliverCertificate ==
-    /\ \E cert \in messages : cert \in Certificate
-    /\ LET cmsg == CHOOSE cc \in messages : cc \in Certificate
+    /\ \E cert \in messages : cert \in Certificate /\ IsValidCertificate(cert)
+    /\ LET cmsg == CHOOSE cc \in messages : cc \in Certificate /\ IsValidCertificate(cc)
        IN /\ messages' = messages \ {cmsg}
           /\ validators' = [w \in Validators |->
                                [validators[w] EXCEPT
@@ -315,6 +306,8 @@ DeliverCertificate ==
 (***************************************************************************
  * BROADCAST LOCAL VOTE — pushes locally stored votes into the network
  * Ensures eventual delivery assumed in §2.4 (“broadcast to all other nodes”).
+ * This action disseminates self-votes, modeling the “rebroadcast own votes”
+ * guidance from §2.10 and the “broadcast ... vote” steps in Algorithms 1-2.
  ***************************************************************************)
 BroadcastLocalVote ==
     /\ \E v \in CorrectNodes, s \in 1..MaxSlot :
@@ -392,7 +385,6 @@ EmitParentReady ==
 
 Next ==
     \/ \E v \in Validators, b \in blocks : ReceiveBlock(v, b)
-    \/ \E v \in Validators, s \in 1..MaxSlot : ProcessTimeout(v, s)
     \/ \E v \in Validators, s \in 1..MaxSlot : GenerateCertificateAction(v, s)
     \/ \E v \in Validators, b \in blocks : FinalizeBlock(v, b)
     \/ EmitBlockNotarized
@@ -418,20 +410,20 @@ Next ==
 \* flowing. These weak fairness annotations model that assumption for TLC.
 Fairness ==
     /\ WF_vars(AdvanceTime)
-    /\ WF_vars(DeliverVote)
-    /\ WF_vars(DeliverCertificate)
-    /\ WF_vars(BroadcastLocalVote)
-    /\ WF_vars(EmitBlockNotarized)
-    /\ WF_vars(EmitSafeToNotar)
-    /\ WF_vars(EmitSafeToSkip)
-    /\ WF_vars(EmitParentReady)
-    /\ WF_vars(\E l \in Validators, s \in 1..MaxSlot, p \in blocks : HonestProposeBlock(l, s, p))
-    /\ WF_vars(\E v \in Validators, s \in 1..MaxSlot : GenerateCertificateAction(v, s))
-    /\ WF_vars(\E b \in blocks : RotorDisseminateSuccess(b))
-    /\ WF_vars(\E v \in Validators, b \in blocks, s \in Validators : RepairBlock(v, b, s))
+    /\ WF_vars(IF AfterGST THEN DeliverVote ELSE UNCHANGED vars)
+    /\ WF_vars(IF AfterGST THEN DeliverCertificate ELSE UNCHANGED vars)
+    /\ WF_vars(IF AfterGST THEN BroadcastLocalVote ELSE UNCHANGED vars)
+    /\ WF_vars(IF AfterGST THEN EmitBlockNotarized ELSE UNCHANGED vars)
+    /\ WF_vars(IF AfterGST THEN EmitSafeToNotar ELSE UNCHANGED vars)
+    /\ WF_vars(IF AfterGST THEN EmitSafeToSkip ELSE UNCHANGED vars)
+    /\ WF_vars(IF AfterGST THEN EmitParentReady ELSE UNCHANGED vars)
+    /\ WF_vars(IF AfterGST THEN (\E l \in Validators, s \in 1..MaxSlot, p \in blocks : HonestProposeBlock(l, s, p)) ELSE UNCHANGED vars)
+    /\ WF_vars(IF AfterGST THEN (\E v \in Validators, s \in 1..MaxSlot : GenerateCertificateAction(v, s)) ELSE UNCHANGED vars)
+    /\ WF_vars(IF AfterGST THEN (\E b \in blocks : RotorDisseminateSuccess(b)) ELSE UNCHANGED vars)
+    /\ WF_vars(IF AfterGST THEN (\E v \in Validators, b \in blocks, s \in Validators : RepairBlock(v, b, s)) ELSE UNCHANGED vars)
     /\ \A v \in Validators :
            IF v \in CorrectNodes
-           THEN WF_vars(\E b \in blocks : ReceiveBlock(v, b))
+           THEN WF_vars(IF AfterGST THEN (\E b \in blocks : ReceiveBlock(v, b)) ELSE UNCHANGED vars)
            ELSE TRUE
 
 Spec == Init /\ [][Next]_vars /\ Fairness
@@ -529,12 +521,28 @@ CertificateNonEquivocation ==
              c1.type \in {"NotarizationCert", "NotarFallbackCert", "FastFinalizationCert"}) =>
             c1.blockHash = c2.blockHash
 
+(***************************************************************************
+ * TRANSIT CERTIFICATES VALID
+ * All in-flight certificates are valid.
+ ***************************************************************************)
+TransitCertificatesValid ==
+    \A c \in messages : c \in Certificate => IsValidCertificate(c)
+
 \* Pool storage guarantees from Definitions 12–13 (white paper §2.5)
 PoolMultiplicityOK ==
     \A v \in Validators : MultiplicityRulesRespected(validators[v].pool)
 
 PoolCertificateUniqueness ==
     \A v \in Validators : CertificateUniqueness(validators[v].pool)
+
+(*
+ * Timeouts are never scheduled in the past.
+ *)
+TimeoutsInFuture ==
+    \A v \in CorrectNodes:
+        \A s \in 1..MaxSlot:
+            LET timeout == validators[v].timeouts[s]
+            IN timeout = 0 \/ timeout > validators[v].clock
 
 (***************************************************************************
  * ROTOR SELECTION SOUNDNESS
@@ -623,10 +631,12 @@ Invariant ==
     /\ GlobalNotarizationUniqueness
     /\ FinalizedImpliesNotarized
     /\ CertificateNonEquivocation
+    /\ TransitCertificatesValid
     /\ ByzantineStakeOK
     /\ PoolMultiplicityOK
     /\ PoolCertificateUniqueness
     /\ RotorSelectSoundness
+    /\ TimeoutsInFuture
 
 \* ============================================================================
 \* STATE CONSTRAINTS (For bounded model checking)
