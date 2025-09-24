@@ -184,6 +184,9 @@ WindowSlots(slot) ==
 \* CHAIN OPERATIONS
 \* ============================================================================
 
+\* Note: A "chain" is represented as a set of blocks, not a sequence.
+\* Ordering-sensitive operations rely on the slot field or ancestry relations.
+
 \* Get the block at a specific slot in a chain
 GetBlockAtSlot(slot, chain) ==
     LET blocksAtSlot == {b \in chain : b.slot = slot}
@@ -192,16 +195,18 @@ GetBlockAtSlot(slot, chain) ==
 
 \* Get the complete chain from genesis to a block
 GetChain(b, allBlocks) ==
-    LET ancestors == GetAncestors(b, allBlocks)
-    IN {a \in ancestors : 
-        \* Include only blocks that are ancestors of all later blocks
-        \A a2 \in ancestors : a2.slot <= a.slot => IsAncestor(a2, a, allBlocks)}
+    GetAncestors(b, allBlocks)
+    \* Precondition (for callers): allBlocks is closed under ancestry of b.
+
+\* Select the tip (maximum-slot element) of a non-empty chain
+Tip(chain) == CHOOSE x \in chain : \A y \in chain : x.slot >= y.slot
 
 \* Check if a new block properly extends an existing chain
 ExtendsChain(newBlock, existingChain) ==
-    \E parent \in existingChain :
-        /\ ValidParentChild(parent, newBlock)
-        /\ \A other \in existingChain : other.slot < newBlock.slot
+    /\ existingChain # {}
+    /\ LET tip == Tip(existingChain) IN
+        /\ ValidParentChild(tip, newBlock)
+        /\ newBlock.slot > tip.slot
 
 \* ============================================================================
 \* INVARIANTS FOR VERIFICATION

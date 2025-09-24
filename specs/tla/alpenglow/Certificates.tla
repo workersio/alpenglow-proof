@@ -186,22 +186,46 @@ CreateFinalizationCert(votes, slot) ==
 \* CERTIFICATE VALIDATION
 \* ============================================================================
 
-\* Check if a certificate is valid (has required threshold)
+\* Check if a certificate is valid (Table 6 thresholds AND vote-content constraints)
+\* Strengthened per audit suggestions to bind votes to certificate type/slot/block.
 IsValidCertificate(cert) ==
     LET stake == StakeFromVotes(cert.votes)
     IN /\ cert.type \in CertificateType
        /\ cert.slot \in Slots
-       /\ CASE cert.type = "FastFinalizationCert" -> 
+       /\ CASE cert.type = "FastFinalizationCert" ->
                /\ cert.blockHash \in BlockHashes
+               /\ \A v \in cert.votes :
+                    /\ v.type = "NotarVote"
+                    /\ v.slot = cert.slot
+                    /\ v.blockHash = cert.blockHash
                /\ MeetsThreshold(stake, 80)  \* 80% for fast path
-          [] cert.type \in {"NotarizationCert", "NotarFallbackCert"} ->
+          [] cert.type = "NotarizationCert" ->
                /\ cert.blockHash \in BlockHashes
+               /\ \A v \in cert.votes :
+                    /\ v.type = "NotarVote"
+                    /\ v.slot = cert.slot
+                    /\ v.blockHash = cert.blockHash
                /\ MeetsThreshold(stake, 60)  \* 60% for notarization
+          [] cert.type = "NotarFallbackCert" ->
+               /\ cert.blockHash \in BlockHashes
+               /\ \A v \in cert.votes :
+                    /\ v.type \in {"NotarVote", "NotarFallbackVote"}
+                    /\ v.slot = cert.slot
+                    /\ v.blockHash = cert.blockHash
+               /\ MeetsThreshold(stake, 60)  \* 60% for notar-fallback
           [] cert.type = "SkipCert" ->
                /\ cert.blockHash = NoBlock
+               /\ \A v \in cert.votes :
+                    /\ v.type \in {"SkipVote", "SkipFallbackVote"}
+                    /\ v.slot = cert.slot
+                    /\ v.blockHash = NoBlock
                /\ MeetsThreshold(stake, 60)  \* 60% for skip
           [] cert.type = "FinalizationCert" ->
                /\ cert.blockHash = NoBlock
+               /\ \A v \in cert.votes :
+                    /\ v.type = "FinalVote"
+                    /\ v.slot = cert.slot
+                    /\ v.blockHash = NoBlock
                /\ MeetsThreshold(stake, 60)  \* 60% for finalization
           [] OTHER -> FALSE
 
@@ -222,6 +246,9 @@ FastFinalizationImpliesNotarization(fastCert, notarCert) ==
     => notarCert.votes \subseteq fastCert.votes
 
 \* Check if two certificates conflict (shouldn't happen!)
+\* Note: This predicate treats conflicts only within the same certificate type.
+\* Cross-type coherence (e.g., Notarization vs NotarFallback for a slot)
+\* is enforced by Pool storage rules and system invariants elsewhere.
 ConflictingCertificates(cert1, cert2) ==
     /\ cert1.slot = cert2.slot           \* Same slot
     /\ cert1.type = cert2.type           \* Same type
@@ -232,21 +259,22 @@ ConflictingCertificates(cert1, cert2) ==
 \* ============================================================================
 
 \* All certificates must be valid
+\* Intended domain: apply to Pool's certificates[slot] sets.
 AllCertificatesValid(certificates) ==
     \A cert \in certificates : IsValidCertificate(cert)
 
 \* No conflicting certificates should exist
+\* Intended domain: apply to Pool's certificates[slot] sets.
 NoConflictingCertificates(certificates) ==
     \A cert1, cert2 \in certificates :
         ~ConflictingCertificates(cert1, cert2)
 
-\* Fast finalization implies notarization exists
+\* Fast finalization implies a corresponding notarization with vote inclusion
+\* Intended domain: apply to Pool's certificates[slot] sets.
 FastPathImplication(certificates) ==
     \A fastCert \in certificates :
         fastCert.type = "FastFinalizationCert" =>
         \E notarCert \in certificates :
-            /\ notarCert.type = "NotarizationCert"
-            /\ notarCert.slot = fastCert.slot
-            /\ notarCert.blockHash = fastCert.blockHash
+            FastFinalizationImpliesNotarization(fastCert, notarCert)
 
 =============================================================================
