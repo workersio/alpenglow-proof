@@ -296,11 +296,15 @@ AdvanceTime ==
 (***************************************************************************
  * ROTOR DISSEMINATION (SUCCESS) — Whitepaper §2.2, Definition 6
  * Rotor succeeds once a correct leader samples ≥ γ correct relays (p. 20–22).
+ * Note: On success, availability is updated for CorrectNodes only, aligning
+ * with the whitepaper text ("all correct nodes will receive the block").
  ***************************************************************************)
 RotorDisseminateSuccess(block) ==
     /\ block \in blocks
     /\ block.leader \in CorrectNodes
     /\ LET needers == {v \in Validators : block \notin blockAvailability[v]}
+           \* Note: The ELSE-branch clamps at MaxSlot for bounded MC only;
+           \* it has no direct protocol analogue (parameterization note).
            nextSlot == IF block.slot + 1 <= MaxSlot THEN block.slot + 1 ELSE block.slot
            nextLeader == Leader(nextSlot)
            relays == RotorSelect(block, needers, nextLeader)
@@ -308,16 +312,24 @@ RotorDisseminateSuccess(block) ==
           /\ relays # {}
           /\ RotorSuccessful(block.leader, relays, CorrectNodes)
           /\ SliceDelivered([leader |-> block.leader, needers |-> needers], relays, CorrectNodes)
-          /\ blockAvailability' = [w \in Validators |-> blockAvailability[w] \union {block}]
+          /\ blockAvailability' =
+                [w \in Validators |->
+                    IF w \in CorrectNodes
+                    THEN blockAvailability[w] \union {block}
+                    ELSE blockAvailability[w]]
           /\ UNCHANGED <<validators, blocks, messages, byzantineNodes, time, finalized>>
 
 (***************************************************************************
- * ROTOR DISSEMINATION (FAILURE) — Either the leader is Byzantine or fewer
- * than γ correct relays participate, so only the sampled relays learn the block.
+ * ROTOR FAILURE (insufficient correct relays) — Definition 6 complement
+ * Leader is correct but fewer than γ correct relays participate. Only
+ * the selected relays learn the block. Recovery occurs via Repair (§2.8).
  ***************************************************************************)
-RotorDisseminateFailure(block) ==
+RotorFailInsufficientRelays(block) ==
     /\ block \in blocks
+    /\ block.leader \in CorrectNodes
     /\ LET needers == {v \in Validators : block \notin blockAvailability[v]}
+           \* Note: The ELSE-branch clamps at MaxSlot for bounded MC only;
+           \* it has no direct protocol analogue (parameterization note).
            nextSlot == IF block.slot + 1 <= MaxSlot THEN block.slot + 1 ELSE block.slot
            nextLeader == Leader(nextSlot)
            relays == RotorSelect(block, needers, nextLeader)
@@ -329,6 +341,32 @@ RotorDisseminateFailure(block) ==
                                         THEN blockAvailability[w] \union {block}
                                         ELSE blockAvailability[w]]
           /\ UNCHANGED <<validators, blocks, messages, byzantineNodes, time, finalized>>
+
+(***************************************************************************
+ * ROTOR FAILURE (Byzantine leader) — adversarial dissemination
+ * Leader is Byzantine and may send shreds to any subset of validators,
+ * unconstrained by PS-P selection. This can result in partial or no
+ * dissemination. Recovery occurs via Repair (§2.8).
+ ***************************************************************************)
+RotorFailByzantineLeader(block) ==
+    /\ block \in blocks
+    /\ block.leader \in byzantineNodes
+    /\ \E recipients \in SUBSET Validators :
+          /\ blockAvailability' = [w \in Validators |->
+                                        IF w \in recipients
+                                        THEN blockAvailability[w] \union {block}
+                                        ELSE blockAvailability[w]]
+          /\ UNCHANGED <<validators, blocks, messages, byzantineNodes, time, finalized>>
+
+(***************************************************************************
+ * ROTOR NO-DISSEMINATION (Byzantine leader immediate fail)
+ * Explicit no-op documenting the paper’s “immediate fail” case: a faulty
+ * leader may send nothing at all in its dissemination round.
+ ***************************************************************************)
+RotorNoDissemination(block) ==
+    /\ block \in blocks
+    /\ block.leader \in byzantineNodes
+    /\ UNCHANGED <<validators, blocks, messages, byzantineNodes, time, finalized, blockAvailability>>
 
 
 (***************************************************************************
@@ -476,7 +514,9 @@ Next ==
     \/ DeliverCertificate
     \/ BroadcastLocalVote
     \/ \E b \in blocks : RotorDisseminateSuccess(b)
-    \/ \E b \in blocks : RotorDisseminateFailure(b)
+    \/ \E b \in blocks : RotorFailInsufficientRelays(b)
+    \/ \E b \in blocks : RotorFailByzantineLeader(b)
+    \/ \E b \in blocks : RotorNoDissemination(b)
     \/ \E v \in Validators, b \in blocks, supplier \in Validators : RepairBlock(v, b, supplier)
     \/ AdvanceTime
 
@@ -516,6 +556,10 @@ Spec == Init /\ [][Next]_vars /\ Fairness
 (***************************************************************************
  * MAIN SAFETY INVARIANT (Whitepaper §2.9, Theorem 1): finalized blocks form
  * a single chain of ancestry.
+ *
+ * Note: The equal-slot corollary (“if two correct nodes finalize at the
+ * same slot, the blocks must be identical”) is captured separately by
+ * NoConflictingFinalization for clarity, following the audit suggestion.
  ***************************************************************************)
 SafetyInvariant ==
     \A v1, v2 \in CorrectNodes :
@@ -689,6 +733,12 @@ WindowFinalizedState(s) ==
                 /\ b.leader = Leader(s)
                 /\ b \in finalized[v]
 
+(*
+ * Whitepaper Theorem 2 (Liveness), §2.10 p. 36:
+ * Under the stated premises (correct window leader, no pre-GST timeouts,
+ * and post-GST delivery/fairness), every slot in the leader’s window is
+ * eventually finalized by all correct nodes.
+ *)
 WindowFinalization(s) ==
     (IsFirstSlotOfWindow(s) /\ Leader(s) \in CorrectNodes /\ NoTimeoutsBeforeGST(s) /\ time >= GST) ~>
         WindowFinalizedState(s)
@@ -761,6 +811,7 @@ StateConstraint ==
     /\ time <= GST + 10
     /\ \A v \in Validators :
        \A s \in 1..MaxSlot :
+           \* Sanity check: bound total votes stored per slot in a validator's pool 
            Cardinality(GetVotesForSlot(validators[v].pool, s)) <= NumValidators * 5
 
 =============================================================================

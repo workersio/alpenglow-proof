@@ -157,25 +157,9 @@ StructuralBinOK(bins, needers, nextLeader) ==
     /\ NextLeaderConstraint(bins, needers, nextLeader)  \* Optimization hint
     /\ NonEmptyConstraint(bins, needers)
 
-\* Legacy set-based constraints (for compatibility with existing relay sets)
-StructuralOK(sample, needers, nextLeader) ==
-    /\ sample \subseteq needers
-    /\ Cardinality(sample) <= GammaTotalShreds   \* Allow smaller sets due to multiplicity
-    /\ LargeStakeholders(needers) \subseteq sample  \* Simplified PS-P constraint
-    /\ (nextLeader \in needers => nextLeader \in sample)  \* Optimization hint
-    /\ (needers # {} => sample # {})
-
 \* Additional resilience constraint (stake-based failure tolerance)
 \* NOTE: This is beyond the core Rotor spec but adds robustness
 ResilienceOK(sample) == FailureResilient(sample)
-
-\* Legacy candidate set (for compatibility) - consider removing
-RotorCandidates(needers, nextLeader) ==
-    {sample \in SUBSET needers :
-        /\ sample # {}
-        /\ Cardinality(sample) = GammaTotalShreds  \* Fixed to exact count
-        /\ (nextLeader \in needers => nextLeader \in sample)
-        /\ CalculateStake(sample) >= RotorMinRelayStake}
 
 \* Core candidate bin assignments following whitepaper constraints
 BinCandidates(block, needers, nextLeader) ==
@@ -183,19 +167,11 @@ BinCandidates(block, needers, nextLeader) ==
         /\ StructuralBinOK(bins, needers, nextLeader)
         /\ ResilienceOK(BinsToRelaySet(bins)) }
 
-\* Legacy candidate relay sets (for compatibility)
-Candidates(block, needers, nextLeader) ==
-    { S \in SUBSET needers : 
-        /\ StructuralOK(S, needers, nextLeader)
-        /\ ResilienceOK(S) }
 
 \* Feasibility predicate: some structurally valid bin assignment exists when needed
 RotorBinAssignmentPossible(block, needers, nextLeader) ==
     IF needers = {} THEN TRUE ELSE BinCandidates(block, needers, nextLeader) # {}
 
-\* Legacy feasibility predicate for compatibility
-RotorSelectionPossible(block, needers, nextLeader) ==
-    IF needers = {} THEN TRUE ELSE Candidates(block, needers, nextLeader) # {}
 
 (***************************************************************************
  * RotorSelect(block, needers, nextLeader)
