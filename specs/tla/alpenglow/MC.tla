@@ -26,11 +26,11 @@ MC_LeaderSchedule == [s \in Slots |->
                         [] s = 2 -> v4
                         [] OTHER -> v1]
 
-\* Test scenario for skipped immediate predecessor slot
-SkippedSlotInit ==
-    /\ Init
-    /\ byzantineNodes = {v4}
+\* [UNCOMMENT FOR TESTING] Test scenario for skipped immediate predecessor slot
+\* SkippedSlotInit ==
+\*     /\ Init
+\*     /\ byzantineNodes = {v4}
 
-SkippedSlotSpec == SkippedSlotInit /\ [][Next]_vars /\ Fairness
+\* SkippedSlotSpec == SkippedSlotInit /\ [][Next]_vars /\ Fairness
 
 =============================================================================
