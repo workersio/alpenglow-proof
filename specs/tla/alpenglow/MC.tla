@@ -22,8 +22,15 @@ MC_StakeMap == [v \in Validators |->
 \* Stake-weighted leader schedule constant for WindowSize = 2
 MC_LeaderSchedule == [s \in Slots |->
                         CASE s = 0 -> v1
-                        [] s = 1 -> v2
-                        [] s = 2 -> v2  \* Leader for slot 2 should be same as slot 1 due to WindowSize = 2
+                        [] s = 1 -> v4
+                        [] s = 2 -> v4
                         [] OTHER -> v1]
+
+\* Test scenario for skipped immediate predecessor slot
+SkippedSlotInit ==
+    /\ Init
+    /\ byzantineNodes = {v4}
+
+SkippedSlotSpec == SkippedSlotInit /\ [][Next]_vars /\ Fairness
 
 =============================================================================

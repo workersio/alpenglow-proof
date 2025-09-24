@@ -251,6 +251,7 @@ HandleBlockNotarized(validator, slot, blockHash) ==
 HandleParentReady(validator, slot, parentHash) ==
     LET newValidator == AddState(validator, slot, "ParentReady")
         withParent == [newValidator EXCEPT !.parentReady[slot] = parentHash]
+        afterCheck == CheckPendingBlocks(withParent)
         windowSlots == WindowSlots(slot)
         \* Set timeouts for all slots in window
         RECURSIVE SetTimeouts(_,_)
@@ -260,8 +261,7 @@ HandleParentReady(validator, slot, parentHash) ==
                 LET s == CHOOSE x \in slots : TRUE
                     timeout == val.clock + DeltaTimeout + ((s - slot + 1) * DeltaBlock)
                 IN SetTimeouts([val EXCEPT !.timeouts[s] = timeout], slots \ {s})
-        withTimeouts == SetTimeouts(withParent, windowSlots \cap Slots)
-    IN CheckPendingBlocks(withTimeouts)
+    IN SetTimeouts(afterCheck, windowSlots \cap Slots)
 
 (***************************************************************************
  * Handle SafeToNotar event (Whitepaper Algorithm 1, lines 16–20).

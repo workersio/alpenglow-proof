@@ -278,11 +278,13 @@ CanEmitSafeToNotar(pool, slot, blockHash, parentHash, alreadyVoted, votedForBloc
     /\ ~votedForBlock    \* But not for this block
     /\ LET notar == NotarStake(pool, slot, blockHash)
            skip == SkipStake(pool, slot)
-           parentSlot == IF slot = 0 THEN 0 ELSE slot - 1
-           parentReady ==
-                IF IsFirstSlotOfWindow(slot)
-                THEN TRUE
-                ELSE parentSlot \in Slots /\ HasNotarFallbackCert(pool, parentSlot, parentHash)
+           parentReady == 
+                \* Per Def. 16, parent must have a notar-fallback cert unless this is the
+                \* first slot of a window. The parent's slot may be < s-1 (skipped slots),
+                \* so search all prior Slots while staying within the Pool's domain.
+                \* The check is specific to NotarFallbackCert (per whitepaper text).
+                IsFirstSlotOfWindow(slot) \/
+                    (\E ps \in Slots : ps < slot /\ HasNotarFallbackCert(pool, ps, parentHash))
        IN parentReady /\
           (MeetsThreshold(notar, 40)
            \/ (MeetsThreshold(skip + notar, 60) /\ MeetsThreshold(notar, 20)))

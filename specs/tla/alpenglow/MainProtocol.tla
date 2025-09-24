@@ -347,7 +347,7 @@ EmitSafeToNotar ==
          /\ LET alreadyVoted == HasState(validators[v], s, "Voted")
                 votedForB == VotedForBlock(validators[v], s, b.hash)
             IN CanEmitSafeToNotar(validators[v].pool, s, b.hash, b.parent, alreadyVoted, votedForB)
-         /\ ~HasState(validators[v], s, "BadWindow")
+         /\ ~HasState(validators[v], s, "BadWindow") \* Prevents re-emitting after a fallback vote was cast
          /\ validators' = [validators EXCEPT ![v] = HandleSafeToNotar(@, s, b.hash)]
     /\ UNCHANGED <<blocks, messages, byzantineNodes, time, finalized, blockAvailability>>
 
@@ -358,12 +358,15 @@ EmitSafeToNotar ==
 EmitSafeToSkip ==
     /\ \E v \in CorrectNodes, s \in 1..MaxSlot :
          /\ LET alreadyVoted == HasState(validators[v], s, "Voted")
+                \* Note: `SkipVote` refers to the initial skip vote (not skip-fallback).
+                \* Repeated fallback emission is suppressed by the `BadWindow` guard below.
                 votedSkip == 
                     \E vt \in GetVotesForSlot(validators[v].pool, s) :
                         /\ vt.validator = v
                         /\ vt.type = "SkipVote"
             IN CanEmitSafeToSkip(validators[v].pool, s, alreadyVoted, votedSkip)
-         /\ ~HasState(validators[v], s, "BadWindow")
+         /\ ~HasSkipCert(validators[v].pool, s) \* Avoid redundant skip-fallback voting when skip cert already exists
+         /\ ~HasState(validators[v], s, "BadWindow") \* Prevents re-emitting after a fallback vote was cast
          /\ validators' = [validators EXCEPT ![v] = HandleSafeToSkip(@, s)]
     /\ UNCHANGED <<blocks, messages, byzantineNodes, time, finalized, blockAvailability>>
 
@@ -372,8 +375,9 @@ EmitSafeToSkip ==
  * Marks the first slot in a leader window when predecessors are certified.
  ***************************************************************************)
 EmitParentReady ==
+    \* Note: The model assumes certificates refer to p \in blocks (consistent with 
+    \* how votes and certs are created), clarifying why p is quantified from blocks.
     /\ \E v \in CorrectNodes, s \in 1..MaxSlot, p \in blocks :
-         /\ IsFirstSlotOfWindow(s)
          /\ ShouldEmitParentReady(validators[v].pool, s, p.hash, p.slot)
          /\ ~HasState(validators[v], s, "ParentReady")
          /\ validators' = [validators EXCEPT ![v] = HandleParentReady(@, s, p.hash)]
@@ -407,7 +411,9 @@ Next ==
 \* ============================================================================
 
 \* Fairness: Whitepaper §2.10 assumes that after GST, honest messages keep
-\* flowing. These weak fairness annotations model that assumption for TLC.
+\* flowing. The weak fairness conditions below are gated by `AfterGST` to
+\* model post-GST eventual delivery/retransmission and scheduler fairness.
+\* We also include finalization fairness to rule out starvation once enabled.
 Fairness ==
     /\ WF_vars(AdvanceTime)
     /\ WF_vars(IF AfterGST THEN DeliverVote ELSE UNCHANGED vars)
@@ -419,6 +425,7 @@ Fairness ==
     /\ WF_vars(IF AfterGST THEN EmitParentReady ELSE UNCHANGED vars)
     /\ WF_vars(IF AfterGST THEN (\E l \in Validators, s \in 1..MaxSlot, p \in blocks : HonestProposeBlock(l, s, p)) ELSE UNCHANGED vars)
     /\ WF_vars(IF AfterGST THEN (\E v \in Validators, s \in 1..MaxSlot : GenerateCertificateAction(v, s)) ELSE UNCHANGED vars)
+    /\ WF_vars(IF AfterGST THEN (\E v \in Validators, b \in blocks : FinalizeBlock(v, b)) ELSE UNCHANGED vars)
     /\ WF_vars(IF AfterGST THEN (\E b \in blocks : RotorDisseminateSuccess(b)) ELSE UNCHANGED vars)
     /\ WF_vars(IF AfterGST THEN (\E v \in Validators, b \in blocks, s \in Validators : RepairBlock(v, b, s)) ELSE UNCHANGED vars)
     /\ \A v \in Validators :
@@ -560,10 +567,10 @@ RotorSelectSoundness ==
 \* ============================================================================
 
 (***************************************************************************
- * EVENTUAL FINALIZATION
- * After GST, blocks eventually get finalized
+ * BASIC LIVENESS (sanity check)
+ * After GST, at least one non-genesis block is eventually finalized
  ***************************************************************************)
-EventualFinalization ==
+BasicLiveness ==
     (time >= GST) ~> 
         (\E v \in Validators :
              \E b \in blocks : b.slot > 0 /\ b \in finalized[v])
@@ -618,6 +625,16 @@ TypeInvariant ==
     /\ \A v \in Validators : ValidatorStateOK(validators[v])
 
 (***************************************************************************
+ * Implied invariant: if ParentReady is in the state, a certificate exists.
+ * This is checked to catch regressions.
+ ***************************************************************************)
+ParentReadyImpliesCert ==
+    \A v \in CorrectNodes, s \in 1..MaxSlot:
+        (s > 1 /\ "ParentReady" \in validators[v].state[s]) =>
+            \E p \in blocks:
+                ShouldEmitParentReady(validators[v].pool, s, p.hash, p.slot)
+
+(***************************************************************************
  * Implied invariant: if BlockNotarized is in the state, a certificate exists.
  * This is checked to catch regressions.
  ***************************************************************************)
@@ -647,6 +664,7 @@ Invariant ==
     /\ RotorSelectSoundness
     /\ TimeoutsInFuture
     /\ BlockNotarizedImpliesCert
+    /\ ParentReadyImpliesCert
 
 \* ============================================================================
 \* STATE CONSTRAINTS (For bounded model checking)
