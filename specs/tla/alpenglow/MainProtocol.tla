@@ -434,7 +434,8 @@ RotorDisseminateSuccess(block) ==
            relays == RotorSelect(block, needers, nextLeader)
        IN /\ needers # {}
           /\ relays # {}
-          /\ RotorSuccessful(block.leader, relays, CorrectNodes)
+          \* SliceDelivered abstracts block-level dissemination once γ correct relays
+          \* participate; use as the single success gate (drops redundant RotorSuccessful).
           /\ SliceDelivered([leader |-> block.leader, needers |-> needers], relays, CorrectNodes)
           /\ blockAvailability' =
                 [w \in Validators |->

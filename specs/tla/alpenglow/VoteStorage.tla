@@ -11,6 +11,21 @@
 EXTENDS Naturals, FiniteSets, Messages, Blocks, Certificates
 
 \* ============================================================================
+\* PARAMETERS (caps from Definition 12)
+\* ============================================================================
+
+(***************************************************************************
+ * Parameterized caps for vote multiplicity (audit suggestion)
+ * - These mirror Definition 12’s “first/first/up to 3/first” limits.
+ * - Using named constants avoids magic numbers and clarifies intent.
+ ***************************************************************************)
+
+MaxInitialVotes == 1         \* First initial (Notar or Skip) per slot/validator
+MaxNotarFallbacks == 3       \* Up to three notar-fallback votes
+MaxSkipFallbacks == 1        \* First skip-fallback vote
+MaxFinalVotes == 1           \* First finalization vote
+
+\* ============================================================================
 \* POOL STATE STRUCTURE
 \* ============================================================================
 
@@ -58,31 +73,33 @@ CanStoreVote(pool, vote) ==
         existingVotes == pool.votes[slot][validator]
     IN
         CASE vote.type = "NotarVote" ->
-            \* Can only store if no initial vote (Notar or Skip) exists yet
-            ~\E v \in existingVotes : v.type \in {"NotarVote", "SkipVote"}
+            \* Can store only if no initial vote (Notar or Skip) exists yet
+            ~\E v \in existingVotes : IsInitialVote(v)
 
         [] vote.type = "SkipVote" ->
-            \* Can only store if no initial vote (Notar or Skip) exists yet
-            ~\E v \in existingVotes : v.type \in {"NotarVote", "SkipVote"}
+            \* Can store only if no initial vote (Notar or Skip) exists yet
+            ~\E v \in existingVotes : IsInitialVote(v)
             
         [] vote.type = "NotarFallbackVote" ->
             \* Can store up to 3 notar-fallback votes
-            Cardinality({v \in existingVotes : v.type = "NotarFallbackVote"}) < 3
+            Cardinality({v \in existingVotes : v.type = "NotarFallbackVote"}) < MaxNotarFallbacks
             
         [] vote.type = "SkipFallbackVote" ->
-            \* Can only store if no SkipFallbackVote exists yet
-            ~\E v \in existingVotes : v.type = "SkipFallbackVote"
+            \* Can store only if under cap for SkipFallbackVote
+            Cardinality({v \in existingVotes : v.type = "SkipFallbackVote"}) < MaxSkipFallbacks
             
         [] vote.type = "FinalVote" ->
-            \* Can only store if no FinalVote exists yet
-            ~\E v \in existingVotes : v.type = "FinalVote"
+            \* Can store only if under cap for FinalVote
+            Cardinality({v \in existingVotes : v.type = "FinalVote"}) < MaxFinalVotes
             
         [] OTHER -> FALSE
 
 \* Definition 12: once the multiplicity check passes we record the vote for
 \* this validator/slot so later stake calculations can see it.
 StoreVote(pool, vote) ==
-    \* Defensive validity gate (audit suggestion): only store well-formed votes
+    \* Defensive validity gate (audit suggestion): only store well-formed votes.
+    \* See MainProtocol.DeliverVote for the ingress contract that selects
+    \* only `vote \in Vote /\ IsValidVote(vote)` from the network.
     IF IsValidVote(vote) /\ CanStoreVote(pool, vote) THEN
         LET 
             slot == vote.slot
@@ -145,8 +162,16 @@ StoreCertificate(pool, cert) ==
 \* ============================================================================
 
 \* Get all votes for a slot (across all validators)
+\* Cross-link: Whitepaper Definition 16 (pages 21–22) defines notar(b) and
+\* skip(s) as stake over votes "in Pool" for the slot. This operator is the
+\* Pool-side aggregator used by those stake formulas.
 GetVotesForSlot(pool, slot) ==
-    UNION {pool.votes[slot][v] : v \in Validators}
+    \* Domain-robustness (audit 0009): iterate over DOMAIN of the slot map
+    UNION { pool.votes[slot][v] : v \in DOMAIN pool.votes[slot] }
+
+\* Lightweight lemma (audit 0009): result is a subset of Vote
+GetVotesForSlotTypeOK(pool, slot) ==
+    GetVotesForSlot(pool, slot) \subseteq Vote
 
 \* Count stake for notarization votes on a specific block
 \* IMPORTANT: Uses count-once-per-slot rule!
@@ -329,14 +354,18 @@ PoolTypeOK(pool) ==
     /\ \A s \in Slots : DOMAIN pool.votes[s] = Validators
     /\ \A s \in Slots : pool.certificates[s] \subseteq Certificate
 
+\* Votes aggregated per slot are well-typed (audit 0009)
+VotesTypeOK(pool) ==
+    \A s \in Slots : GetVotesForSlotTypeOK(pool, s)
+
 \* Multiplicity rules are respected
 MultiplicityRulesRespected(pool) ==
     \A s \in Slots, v \in Validators :
         LET votes == pool.votes[s][v]
-        IN /\ Cardinality({vt \in votes : vt.type \in {"NotarVote", "SkipVote"}}) <= 1
-           /\ Cardinality({vt \in votes : vt.type = "NotarFallbackVote"}) <= 3
-           /\ Cardinality({vt \in votes : vt.type = "SkipFallbackVote"}) <= 1
-           /\ Cardinality({vt \in votes : vt.type = "FinalVote"}) <= 1
+        IN /\ Cardinality({vt \in votes : IsInitialVote(vt)}) <= MaxInitialVotes
+           /\ Cardinality({vt \in votes : vt.type = "NotarFallbackVote"}) <= MaxNotarFallbacks
+           /\ Cardinality({vt \in votes : vt.type = "SkipFallbackVote"}) <= MaxSkipFallbacks
+           /\ Cardinality({vt \in votes : vt.type = "FinalVote"}) <= MaxFinalVotes
 
 \* Certificate uniqueness is maintained
 CertificateUniqueness(pool) ==
@@ -363,5 +392,15 @@ PoolFastImpliesNotarSubset(pool, s, h) ==
 \* structurally well-formed (their vote sets contain only relevant votes).
 CertificatesWellFormed(pool) ==
     \A s \in Slots : AllCertificatesWellFormed(pool.certificates[s])
+
+(***************************************************************************
+ * Post-condition lemma (audit suggestion): Storing a valid vote that passes
+ * CanStoreVote preserves MultiplicityRulesRespected for the Pool.
+ * This ties StoreVote directly to the invariant used by DeliverVote.
+ *************************************************************************)
+THEOREM StoreVotePreservesMultiplicity ==
+    \A pool \in PoolState, vote \in Vote :
+        (MultiplicityRulesRespected(pool) /\ IsValidVote(vote) /\ CanStoreVote(pool, vote))
+            => MultiplicityRulesRespected(StoreVote(pool, vote))
 
 =============================================================================
