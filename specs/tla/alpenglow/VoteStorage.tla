@@ -38,7 +38,7 @@ MaxFinalVotes == 1           \* First finalization vote
 
 PoolState == [
     votes: [Slots -> [Validators -> SUBSET Vote]],  \* Votes by slot and validator
-    certificates: [Slots -> SUBSET Certificate]      \* Certificates by slot
+    certificates: [Slots -> SUBSET Certificate]      \* Certificates by slot (see Def. 12/13)
 ]
 
 \* Initialize an empty pool
@@ -353,6 +353,14 @@ PoolTypeOK(pool) ==
     /\ DOMAIN pool.votes = Slots
     /\ \A s \in Slots : DOMAIN pool.votes[s] = Validators
     /\ \A s \in Slots : pool.certificates[s] \subseteq Certificate
+
+\* Alignment invariants (audit 0009): items stored match their slot/validator keys
+PoolVotesSlotValidatorAligned(pool) ==
+    \A s \in Slots : \A v \in Validators :
+        \A vt \in pool.votes[s][v] : vt.slot = s /\ vt.validator = v
+
+PoolCertificatesSlotAligned(pool) ==
+    \A s \in Slots : \A c \in pool.certificates[s] : c.slot = s
 
 \* Votes aggregated per slot are well-typed (audit 0009)
 VotesTypeOK(pool) ==

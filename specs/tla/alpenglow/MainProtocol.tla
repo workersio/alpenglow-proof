@@ -921,6 +921,13 @@ PoolMultiplicityOK ==
 PoolCertificateUniqueness ==
     \A v \in Validators : CertificateUniqueness(validators[v].pool)
 
+\* Pool alignment invariants (audit 0009): slot/validator alignment for votes,
+\* and slot alignment for certificates across all validators.
+PoolAlignmentOK ==
+    \A v \in Validators :
+        /\ PoolVotesSlotValidatorAligned(validators[v].pool)
+        /\ PoolCertificatesSlotAligned(validators[v].pool)
+
 (*
  * TIMEOUTS IN FUTURE — never schedule a timeout in the past
  *
@@ -1093,6 +1100,7 @@ Invariant ==
     /\ ByzantineStakeOK
     /\ PoolMultiplicityOK
     /\ PoolCertificateUniqueness
+    /\ PoolAlignmentOK
     /\ RotorSelectSoundness
     /\ TimeoutsInFuture
     /\ UniqueBlockHashes(blocks)
