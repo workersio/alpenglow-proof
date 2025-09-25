@@ -19,11 +19,11 @@ MC_StakeMap == [v \in Validators |->
                     [] v = v4 -> 10
                     [] OTHER -> 0]
 
-\* Stake-weighted leader schedule constant for WindowSize = 2
-MC_LeaderSchedule == [s \in Slots |->
-                        CASE s = 0 -> v1
-                        [] s = 1 -> v4
-                        [] s = 2 -> v4
+\* Window-indexed leader function (WindowLeader) for WindowSize = 2
+\* WindowIndex(0) = 0; WindowIndex(1) = 0; WindowIndex(2) = 0.
+\* Make the first window's leader v4 (so slots 1 and 2 map to v4).
+MC_WindowLeader == [k \in Nat |->
+                        CASE k = 0 -> v4
                         [] OTHER -> v1]
 
 \* [UNCOMMENT FOR TESTING] Test scenario for skipped immediate predecessor slot

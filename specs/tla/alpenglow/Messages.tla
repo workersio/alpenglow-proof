@@ -23,6 +23,7 @@ CONSTANTS
 ASSUME
     /\ Validators # {}           \* At least one validator exists
     /\ Slots \subseteq Nat       \* Slots are natural numbers
+    /\ \A s \in Slots : 0..s \subseteq Slots  \* Prefix-closed domain for slot arithmetic
     /\ BlockHashes # {}          \* At least one possible block hash
     /\ NoBlock \notin BlockHashes \* NoBlock is distinct from real blocks
 

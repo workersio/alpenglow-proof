@@ -124,8 +124,11 @@ CanStoreCertificate(pool, cert) ==
         [] OTHER -> FALSE
 
 \* Store a certificate in the pool
+\* Improvement: validate certificate contents on store (see audit suggestions).
+\* We keep acceptance independent of local vote availability to avoid dropping
+\* network-learned certificates whose constituent votes may arrive later.
 StoreCertificate(pool, cert) ==
-    IF CanStoreCertificate(pool, cert) THEN
+    IF CanStoreCertificate(pool, cert) /\ IsValidCertificate(cert) THEN
         [pool EXCEPT !.certificates[cert.slot] = 
             pool.certificates[cert.slot] \union {cert}]
     ELSE
@@ -180,6 +183,9 @@ MaxNotarStake(pool, slot) ==
 \* votes and returns any certificate that can now be assembled.
 GenerateCertificate(pool, slot) ==
     LET votes == GetVotesForSlot(pool, slot)
+        \* Candidate blocks are discovered via NotarVote only. Per Def. 16,
+        \* notar-fallback votes arise only after sufficient notar stake is
+        \* observed, so there won't be fallback-only blocks with zero NotarVote.
         notarBlocks == {vote.blockHash : vote \in {vt \in votes : vt.type = "NotarVote"}}
         BlockCertFor(block) ==
             IF CanCreateFastFinalizationCert(votes, slot, block) THEN
@@ -198,7 +204,8 @@ GenerateCertificate(pool, slot) ==
             ELSE {}
         blockCerts ==
             UNION {BlockCertFor(block) : block \in notarBlocks}
-        skipCert == IF CanCreateSkipCert(votes, slot)
+        \* Gate SkipCert creation: do not emit if any block certificate is creatable
+        skipCert == IF (blockCerts = {}) /\ CanCreateSkipCert(votes, slot)
                      THEN {CreateSkipCert(votes, slot)}
                      ELSE {}
         finalCert == IF CanCreateFinalizationCert(votes, slot)
@@ -287,7 +294,7 @@ CanEmitSafeToNotar(pool, slot, blockHash, parentHash, alreadyVoted, votedForBloc
                     (\E ps \in Slots : ps < slot /\ HasNotarFallbackCert(pool, ps, parentHash))
        IN parentReady /\
           (MeetsThreshold(notar, 40)
-           \/ (MeetsThreshold(skip + notar, 60) /\ MeetsThreshold(notar, 20)))
+           \/ (MeetsThreshold(skip + notar, DefaultThreshold) /\ MeetsThreshold(notar, 20)))
 
 (***************************************************************************
  * Event: SafeToSkip - DEFINITION 16 (Fallback events) - Page 22:
@@ -331,5 +338,19 @@ CertificateUniqueness(pool) ==
         \A c1, c2 \in pool.certificates[s] :
             (c1.type = c2.type /\ c1.slot = c2.slot) =>
             (c1.type \in {"SkipCert", "FinalizationCert"} \/ c1.blockHash = c2.blockHash)
+
+(***************************************************************************
+ * Pool-scoped lemma (audit suggestion): For the certificates stored in a
+ * given slot of a Pool, every fast-finalization certificate implies the
+ * existence of a notarization certificate for the same block with
+ * vote-subset inclusion (per Certificates.FastFinalizationImpliesNotarization).
+ * This removes ambiguity about cross-node timing by scoping to a single Pool.
+ *************************************************************************)
+PoolFastImpliesNotarSubset(pool, s, h) ==
+    LET certs == pool.certificates[s]
+    IN \A fastCert \in certs :
+        (fastCert.type = "FastFinalizationCert" /\ fastCert.blockHash = h)
+            => \E notarCert \in certs :
+                FastFinalizationImpliesNotarization(fastCert, notarCert)
 
 =============================================================================

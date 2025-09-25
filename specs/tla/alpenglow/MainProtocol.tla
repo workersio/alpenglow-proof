@@ -295,7 +295,6 @@ ByzantineAction(v) ==
  *   matching Def.15’s precondition for starting the window.
  ***************************************************************************)
 HonestProposeBlock(leader, slot, parent) ==
-    /\ leader = Leader(slot)
     /\ leader \in CorrectNodes
     /\ parent \in blocks
     /\ slot \in Slots
@@ -314,6 +313,7 @@ HonestProposeBlock(leader, slot, parent) ==
            leader |-> leader
        ]
        IN \* Hint: ExtendsChain(newBlock, blocks)
+          /\ LeaderMatchesSchedule(newBlock)
           /\ IsValidBlock(newBlock)
           /\ blocks' = blocks \union {newBlock}
           /\ blockAvailability' = [blockAvailability EXCEPT ![leader] = @ \union {newBlock}]
@@ -332,7 +332,6 @@ HonestProposeBlock(leader, slot, parent) ==
  * - Disabled by default; included for comparison with the strict variant.
  ***************************************************************************)
 HonestProposeBlockOptimistic(leader, slot, parent) ==
-    /\ leader = Leader(slot)
     /\ leader \in CorrectNodes
     /\ parent \in blocks
     /\ slot \in Slots
@@ -349,7 +348,8 @@ HonestProposeBlockOptimistic(leader, slot, parent) ==
            parent |-> parent.hash,
            leader |-> leader
        ]
-       IN /\ IsValidBlock(newBlock)
+       IN /\ LeaderMatchesSchedule(newBlock)
+          /\ IsValidBlock(newBlock)
           /\ blocks' = blocks \union {newBlock}
           /\ blockAvailability' = [blockAvailability EXCEPT ![leader] = @ \union {newBlock}]
           /\ UNCHANGED <<validators, messages, byzantineNodes, time, finalized>>
@@ -366,7 +366,6 @@ HonestProposeBlockOptimistic(leader, slot, parent) ==
  *   and send them to arbitrary subsets of validators (withholding).
  ***************************************************************************)
 ByzantineProposeBlock(leader, slot, parent) ==
-    /\ leader = Leader(slot)
     /\ leader \in byzantineNodes
     /\ parent \in blocks
     /\ slot \in Slots
@@ -380,7 +379,8 @@ ByzantineProposeBlock(leader, slot, parent) ==
            parent |-> parent.hash,
            leader |-> leader
        ]
-       IN /\ blocks' = blocks \union {newBlock}
+       IN /\ LeaderMatchesSchedule(newBlock)
+          /\ blocks' = blocks \union {newBlock}
           /\ \E recipients \in SUBSET Validators :
                 blockAvailability' =
                     [w \in Validators |->
@@ -856,6 +856,20 @@ CertificateNonEquivocation ==
             c1.blockHash = c2.blockHash
 
 (***************************************************************************
+ * SKIP VS BLOCK-CERT EXCLUSION — mutual exclusion per slot
+ *
+ * Explanation
+ * - No validator's pool may contain both a SkipCert and any block-related
+ *   certificate (Notarization/NotarFallback/FastFinalization) in the same slot.
+ * - Mirrors whitepaper arguments that these conditions are mutually exclusive
+ *   under the model assumptions; surfaces modeling errors early.
+ ***************************************************************************)
+PoolSkipVsBlockExclusion ==
+    \A v \in CorrectNodes :
+    \A s \in 1..MaxSlot :
+        SkipVsBlockCertExclusion(validators[v].pool.certificates[s])
+
+(***************************************************************************
  * HONEST NON-EQUIVOCATION — at most one (leader,slot) block if leader correct
  *
  * Explanation
@@ -998,6 +1012,30 @@ BlockNotarizedImpliesCert ==
         (\E b \in blocks : b.slot = s /\ "BlockNotarized" \in validators[v].state[s]) =>
         (\E b \in blocks : b.slot = s /\ HasNotarizationCert(validators[v].pool, s, b.hash))
 
+(* --------------------------------------------------------------------------
+ * FINALIZED ANCESTOR CLOSURE — finalized sets are ancestry-closed
+ *
+ * If a validator has finalized b, then all ancestors of b (w.r.t. global
+ * blocks) are also finalized by that validator. This documents and checks the
+ * closure property relied upon by SingleChain over finalized sets.
+ * -------------------------------------------------------------------------- *)
+FinalizedAncestorClosure ==
+    \A v \in Validators : \A b \in finalized[v] :
+        GetAncestors(b, blocks) \subseteq finalized[v]
+
+\* ============================================================================
+\* STATE CONSTRAINTS (For bounded model checking)
+\* ============================================================================
+
+StateConstraint ==
+    /\ Cardinality(blocks) <= MaxBlocks
+    /\ time <= GST + 10
+    /\ \A v \in Validators :
+       \A s \in 1..MaxSlot :
+           \* Sanity check: bound total votes stored per slot in a validator's pool 
+           Cardinality(GetVotesForSlot(validators[v].pool, s)) <= NumValidators * 5
+
+
 \* ============================================================================
 \* MAIN INVARIANT (Combines all safety properties)
 \* ============================================================================
@@ -1012,6 +1050,7 @@ Invariant ==
     /\ GlobalNotarizationUniqueness
     /\ FinalizedImpliesNotarized
     /\ CertificateNonEquivocation
+    /\ PoolSkipVsBlockExclusion
     /\ HonestNonEquivocation
     /\ TransitCertificatesValid
     /\ ByzantineStakeOK
@@ -1019,19 +1058,9 @@ Invariant ==
     /\ PoolCertificateUniqueness
     /\ RotorSelectSoundness
     /\ TimeoutsInFuture
+    /\ UniqueBlockHashes(blocks)
+    /\ FinalizedAncestorClosure
     /\ BlockNotarizedImpliesCert
     /\ ParentReadyImpliesCert
-
-\* ============================================================================
-\* STATE CONSTRAINTS (For bounded model checking)
-\* ============================================================================
-
-StateConstraint ==
-    /\ Cardinality(blocks) <= MaxBlocks
-    /\ time <= GST + 10
-    /\ \A v \in Validators :
-       \A s \in 1..MaxSlot :
-           \* Sanity check: bound total votes stored per slot in a validator's pool 
-           Cardinality(GetVotesForSlot(validators[v].pool, s)) <= NumValidators * 5
 
 =============================================================================
