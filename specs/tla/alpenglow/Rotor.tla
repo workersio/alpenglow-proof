@@ -12,7 +12,7 @@ EXTENDS Naturals, FiniteSets, Certificates
  *    * Step 3: Sample one node per bin proportionally to stake
  *  - BinsToRelaySet: Convert bin assignments to relay sets (handles multiplicity)
  *  - FailureResilient: Ensures sufficient residual stake after crashes/faults
- *  - NextDisseminationDelay + NextLeaderConstraint: "send to next leader first"
+ *  - NextDisseminationDelay: models "send to next leader first" as a latency hint
  *  - SliceReconstructable: abstracts Reed–Solomon recovery threshold
  *  - Bin-based model correctly captures PS-P variance reduction properties): total shreds per slice
  *   γ (GammaDataShreds): minimum distinct shreds to reconstruct
@@ -151,8 +151,10 @@ PartitionWeights(needers) ==
        THEN [ j \in {} |-> [ v \in remainingNeeders |-> 0 ] ]
        ELSE IF remainingNeeders = {}
             THEN [ j \in idx |-> [ v \in remainingNeeders |-> 0 ] ]
-            ELSE CHOOSE part \in [ idx -> [ remainingNeeders -> Nat ] ] :
-                    /\ \A j \in idx : \E v \in remainingNeeders : part[j][v] > 0
+            ELSE 
+                \* Stake-proportional per-bin weights (refinement witness):
+                \* For each remaining bin j, set weights equal to StakeMap[v].
+                [ j \in idx |-> [ v \in remainingNeeders |-> StakeMap[v] ] ]
 
 EligibleInBin(part, j) == { v \in DOMAIN part[j] : part[j][v] > 0 }
 PSPBinAssignment(needers, nextLeader) ==
@@ -176,15 +178,10 @@ PSPBinAssignment(needers, nextLeader) ==
             detBins[j]
         ELSE IF remainingNeeders # {} THEN
             \* Partitioned sampling for remaining bins (PS‑P Steps 2–3, support only)
-            IF nextLeader \in remainingNeeders /\ j = deterministicTotal + 1 /\
-               nextLeader \in EligibleInBin(part, j)
-            THEN nextLeader
-            ELSE CHOOSE v \in EligibleInBin(part, j) : TRUE
+            CHOOSE v \in EligibleInBin(part, j) : TRUE
         ELSE
             \* Fallback: if no non-large needers exist, choose any needer (duplicates allowed)
-            IF nextLeader \in needers /\ j = deterministicTotal + 1
-            THEN nextLeader
-            ELSE CHOOSE v \in needers : TRUE]
+            CHOOSE v \in needers : TRUE]
 
 \* Convert bin assignment to relay set (distinct relays)
 \* Note: This collapses per-bin multiplicity into the set of distinct relays.
@@ -203,29 +200,47 @@ RequiredResilientStake == RotorMinRelayStake
 FailureResilient(sample) ==
     CalculateStake(sample) >= RotorMinRelayStake + RotorMaxFailedRelayStake
 
-\* PS-P structural constraint: verify bin assignment correctness
-\* - Exactly Γ bins assigned and range within needers
-\* - Enforce PS-P Step 1 multiplicities exactly over the deterministic prefix
-\*   (allows additional probabilistic assignments for large stakeholders beyond Step 1)
+\* PS-P structural constraint (instantiated over `needers`):
+\* - Exactly Γ bins assigned and range within `needers` (operational scoping)
+\* - Enforce PS-P Step 1 exact multiplicity for each large stakeholder v:
+\*     occurrences(bins, v) = ⌊ρ_v · Γ⌋ = DeterministicBinCount(v)
+\*   Remaining bins are allocated among non-large stakeholders when available
+\*   (fallback to any needer if none are non-large).
 PSPConstraint(bins, needers) == 
     /\ DOMAIN bins = 1..GammaTotalShreds
     /\ \A j \in DOMAIN bins : bins[j] \in needers
     /\ \A v \in LargeStakeholdersInNeeders(needers) :
-          Cardinality({ j \in 1..TotalDeterministicBinsExact(needers) : bins[j] = v }) = DeterministicBinCount(v)
+          Cardinality({ j \in DOMAIN bins : bins[j] = v }) = DeterministicBinCount(v)
 
-\* Latency optimisation: include next leader early if it still needs the block.
-\* Updated to work with bin assignments
-NextLeaderConstraint(bins, needers, nextLeader) ==
-    (nextLeader \in needers => \E j \in DOMAIN bins : bins[j] = nextLeader)
+\* Optional stronger check (documented): If desired, one can additionally
+\* require that the deterministic prefix of bins 1..TotalDeterministicBinsExact(needers)
+\* matches exact multiplicities, leaving the remaining bins unconstrained
+\* beyond membership. This is already enforced by PSPBinAssignment's construction
+\* but deliberately not required here to keep PSPConstraint minimal per audit.
 
-\* Exact bin assignment constraint - exactly Γ bins assigned
-ExactBinAssignmentConstraint(bins) == DOMAIN bins = 1..GammaTotalShreds
+\* Counting sanity (readability lemmas)
+RECURSIVE SumBinCounts(_, _)
+SumBinCounts(bins, S) ==
+    IF S = {} THEN 0
+    ELSE LET v == CHOOSE x \in S : TRUE IN
+         Cardinality({ j \in DOMAIN bins : bins[j] = v }) + SumBinCounts(bins, S \ {v})
+
+\* The total multiplicity across distinct image values sums to Γ
+CountingLemma(bins) ==
+    DOMAIN bins = 1..GammaTotalShreds =>
+        LET img == { bins[j] : j \in DOMAIN bins } IN
+            SumBinCounts(bins, img) = GammaTotalShreds
+
+\* Trivial separation of small/large cases
+ZeroCountLowerBound(bins, v) ==
+    DeterministicBinCount(v) = 0 => Cardinality({ j \in DOMAIN bins : bins[j] = v }) >= 0
 
 \* Combined structural constraints for whitepaper-compliant bin assignments
+\* Note: Keep selection unbiased; the next-leader prioritization is modeled
+\* as a separate latency hint (see NextDisseminationDelay) and is not a
+\* selection constraint.
 StructuralBinOK(bins, needers, nextLeader) ==
-    /\ ExactBinAssignmentConstraint(bins)        \* Exactly Γ bins (Section 2.2)
     /\ PSPConstraint(bins, needers)              \* PS-P compliance (§3.1)
-    /\ NextLeaderConstraint(bins, needers, nextLeader)  \* Optimization hint
 
 \* Additional resilience constraint (stake-based failure tolerance)
 \* Note: This is an explicit modeling guard beyond the whitepaper.
@@ -237,7 +252,7 @@ ResilienceOK(sample) == FailureResilient(sample)
 
 \* Core candidate bin assignments following whitepaper constraints
 \* Intent: over-approximate PS-P feasibility by structural compliance
-\* (Step 1 multiplicities + next-leader priority) plus resilience guard.
+\* (Step 1 multiplicities) plus resilience guard; selection remains unbiased.
 \* This is used as a feasibility/existence witness; actual selection can
 \* be any member of this set (e.g., via `PSPSelect`).
 BinCandidates(needers, nextLeader) ==
@@ -262,24 +277,27 @@ RotorBinAssignmentPossible(needers, nextLeader) ==
 
 (***************************************************************************
  * RotorSelect(block, needers, nextLeader)
- * Whitepaper-compliant relay selection: picks exactly Γ relays per slice.
+ * Whitepaper-aligned relay selection: uses exactly Γ bins per slice; the
+ * returned relay set contains the distinct assignees (≤ Γ).
  * - Implements PS-P algorithm (Definition 46) with proper bin multiplicity
  * - Deterministically includes large stakeholders in ⌊ρᵢ * Γ⌋ bins (PS-P Step 1)
- * - Partitions remaining stakes and samples per bin (PS-P Steps 2-3)
+ * - Partitions remaining stakes and samples per bin (PS-P Steps 2–3)
  * - Returns {} iff no feasible relay set exists (safety)
  * 
- * UPDATED: Now uses bin-based PS-P with proper multiplicity handling
  * Note: `block` is currently unused here; it remains in the signature to
  * allow referencing per-slice/block metadata in future constraints.
 ***************************************************************************)
 RotorSelect(block, needers, nextLeader) ==
     IF needers = {} THEN {}
-    ELSE LET psSelection == PSPSelect(needers, nextLeader)
-         IN IF /\ psSelection \subseteq needers
-               /\ CalculateStake(psSelection) >= RotorMinRelayStake
-               /\ (nextLeader \in needers => nextLeader \in psSelection)
-            THEN psSelection
-            ELSE {} \* Explicit failure - insufficient needers/stake
+    ELSE IF ~RotorBinAssignmentPossible(needers, nextLeader)
+         THEN {} \* Fail closed when no structurally/resilience-feasible assignment exists
+         ELSE 
+            \* Select any resilient candidate induced by a valid bin assignment
+            LET psSelection == PSPSelect(needers, nextLeader)
+            IN IF /\ psSelection \subseteq needers
+                  /\ CalculateStake(psSelection) >= RotorMinRelayStake
+               THEN psSelection
+               ELSE {} \* Defensive: should be unreachable if BinCandidates enforced
 
 (***************************************************************************
  * Streaming Progress (abstract): a slice is reconstructable after γ distinct
@@ -310,7 +328,11 @@ SliceDelivered(slice, relays, correctNodes) ==
  * Latency Hint: next leader prioritized -> zero additional delay if included.
  * (Purely advisory; other modules may incorporate this in time progression.)
  ***************************************************************************)
-NextDisseminationDelay(sample, nextLeader) == IF nextLeader \in sample THEN 0 ELSE 1
+\* Delivery/latency hint decoupled from selection membership:
+\* If any relays are selected (sample # {}), each relay sends to the
+\* next leader first; the next leader’s additional delay is modeled as 0.
+\* This does not require the next leader to be among the relays.
+NextDisseminationDelay(sample, nextLeader) == IF sample # {} THEN 0 ELSE 1
 
 (***************************************************************************
  * Selection Safety Invariant (can be referenced elsewhere):
@@ -331,7 +353,7 @@ RotorSelectSound(block, needers, nextLeader) ==
  *  - Γ, γ, κ: Erasure coding & over-provisioning (Lemma 7 requirement κ > 5/3)
  *  - LargeStakeholders + PSPConstraint: Step 1 of Definition 46 (PS-P)
  *  - FailureResilient: Ensures sufficient residual stake after crashes/faults
- *  - NextDisseminationDelay + NextLeaderConstraint: “send to next leader first”
+ *  - NextDisseminationDelay: “send to next leader first” (latency hint only)
  *  - SliceReconstructable: abstracts Reed–Solomon recovery threshold
  ***************************************************************************)
 
