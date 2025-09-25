@@ -72,6 +72,7 @@ ASSUME
     /\ MaxSlot \in Nat \ {0}
     /\ MaxBlocks \in Nat \ {0}
     /\ Cardinality(Validators) = NumValidators
+    /\ Slots = 0..MaxSlot   \* Centralize epoch bound: finite slot domain (includes genesis slot 0)
 
 \* ============================================================================
 \* SYSTEM STATE VARIABLES

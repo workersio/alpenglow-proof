@@ -5,6 +5,11 @@
  * Votor exchanges a small family of messages described in Whitepaper §2.4
  * (Definition 11, Tables 5–6). This file encodes them explicitly so later
  * modules can reason about which path (fast ≥80% or slow ≥60%) is active.
+ *
+ * Note on NoBlock sentinel: Skip and Finalization messages in Table 5/6
+ * carry no block reference (whitepaper lines ~497 and ~507). We model this
+ * explicitly with a dedicated value `NoBlock` that is kept disjoint from
+ * `BlockHashes` to avoid ambiguity in typing and reasoning across modules.
  ***************************************************************************)
 
 EXTENDS Naturals, FiniteSets
