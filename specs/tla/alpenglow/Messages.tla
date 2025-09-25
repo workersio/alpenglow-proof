@@ -131,8 +131,11 @@ CreateSkipVoteForSlot(v, s) == CreateSkipVote(v, s)
 \* for "approval" vs "skip" votes.
 
 \* Does this vote approve a block (either initial or fallback)?
+\* Alias note: "IsApprovalVote" is the preferred name (audit suggestion)
+\* to avoid confusion with "initial notarization"; keep both for clarity.
 IsNotarVote(vote) ==
     vote.type \in {"NotarVote", "NotarFallbackVote"}
+IsApprovalVote(vote) == IsNotarVote(vote)
 
 \* Does this vote skip the slot (initial or fallback)?
 IsSkipVote(vote) ==
@@ -152,8 +155,10 @@ IsFallbackVote(vote) ==
 
 \* Does this vote support a specific block?
 IsVoteForBlock(vote, blockHash) ==
-    /\ IsNotarVote(vote)
+    /\ IsApprovalVote(vote)
     /\ vote.blockHash = blockHash
+
+\* (lemmas moved below IsValidVote for parser ordering)
 
 \* ============================================================================
 \* CERTIFICATE TYPES (Definition 11, Table 6 from whitepaper)
@@ -197,6 +202,20 @@ IsValidVote(vote) ==
     /\ (IsNotarVote(vote) => vote.blockHash \in BlockHashes)
     /\ (IsSkipVote(vote) \/ IsFinalVote(vote) => vote.blockHash = NoBlock)
 
+\* ============================================================================
+\* DOMAIN LEMMAS (audit suggestion)
+\* Make explicit the blockHash domain by vote family, already enforced by
+\* IsValidVote; these theorems document intended shapes for proof clarity.
+\* ============================================================================
+
+THEOREM ApprovalVotesCarryBlockHash ==
+    \A v \in Vote :
+        (IsValidVote(v) /\ IsApprovalVote(v)) => v.blockHash \in BlockHashes
+
+THEOREM NonBlockVotesUseNoBlock ==
+    \A v \in Vote :
+        (IsValidVote(v) /\ (IsSkipVote(v) \/ IsFinalVote(v))) => v.blockHash = NoBlock
+
 \* Audit lemma (creation-time validity): Any SkipFallbackVote constructed by
 \* the helper is a valid vote per IsValidVote typing/shape rules.
 THEOREM SkipFallbackVoteCreationIsValid ==
@@ -210,13 +229,14 @@ THEOREM SkipVoteCreationIsValid ==
         IsValidVote(CreateSkipVote(v, s))
 
 \* Check if two votes conflict (violate protocol rules)
-\* IMPORTANT: This helps verify Lemma 20 - validators vote once per slot
+\* Captures any double initial voting per slot by a validator
+\* (Whitepaper Def. 12 and Lemma 20).
 ConflictingVotes(vote1, vote2) ==
-    /\ vote1.validator = vote2.validator  \* Same validator
-    /\ vote1.slot = vote2.slot            \* Same slot
-    /\ IsInitialVote(vote1)               \* Both are initial votes
+    /\ vote1.validator = vote2.validator
+    /\ vote1.slot = vote2.slot
+    /\ IsInitialVote(vote1)
     /\ IsInitialVote(vote2)
-    /\ vote1.type # vote2.type            \* But different types!
+    /\ vote1 # vote2
 
 \* ============================================================================
 \* QUERY FUNCTIONS

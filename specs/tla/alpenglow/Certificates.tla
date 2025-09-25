@@ -163,8 +163,9 @@ CanCreateNotarizationCert(votes, slot, blockHash) ==
  *   NotarFallbackVote from the same validator are present.
  ***************************************************************************)
 CanCreateNotarFallbackCert(votes, slot, blockHash) ==
-    LET relevantVotes == VotesFor(votes, slot, blockHash,
-                                  {"NotarVote", "NotarFallbackVote"})
+    LET relevantVotes == {v \in votes :
+        /\ v.slot = slot
+        /\ IsVoteForBlock(v, blockHash)}
     IN MeetsThreshold(StakeFromVotes(relevantVotes), DefaultThreshold)
 
 (***************************************************************************
@@ -233,9 +234,7 @@ CreateNotarFallbackCert(votes, slot, blockHash) ==
     [type |-> "NotarFallbackCert",
      slot |-> slot,
      blockHash |-> blockHash,
-     votes |-> {v \in votes : 
-        v.type \in {"NotarVote", "NotarFallbackVote"} /\ 
-        v.slot = slot /\ v.blockHash = blockHash}]
+     votes |-> {v \in votes : /\ v.slot = slot /\ IsVoteForBlock(v, blockHash)}]
 
 \* PRECONDITIONS (documentation):
 \* - votes \subseteq Vote; slot \in Slots (Messages.tla typing);
@@ -272,7 +271,7 @@ IsValidCertificate(cert) ==
                [] cert.type = "NotarizationCert" ->
                      VotesFor(cert.votes, cert.slot, cert.blockHash, {"NotarVote"})
                [] cert.type = "NotarFallbackCert" ->
-                     VotesFor(cert.votes, cert.slot, cert.blockHash, {"NotarVote", "NotarFallbackVote"})
+                     {v \in cert.votes : /\ v.slot = cert.slot /\ IsVoteForBlock(v, cert.blockHash)}
                [] cert.type = "SkipCert" ->
                      VotesFor(cert.votes, cert.slot, NoBlock, {"SkipVote", "SkipFallbackVote"})
                [] cert.type = "FinalizationCert" ->
@@ -307,7 +306,7 @@ CertificateWellFormed(cert) ==
                [] cert.type = "NotarizationCert" ->
                      VotesFor(cert.votes, cert.slot, cert.blockHash, {"NotarVote"})
                [] cert.type = "NotarFallbackCert" ->
-                     VotesFor(cert.votes, cert.slot, cert.blockHash, {"NotarVote", "NotarFallbackVote"})
+                     {v \in cert.votes : /\ v.slot = cert.slot /\ IsVoteForBlock(v, cert.blockHash)}
                [] cert.type = "SkipCert" ->
                      VotesFor(cert.votes, cert.slot, NoBlock, {"SkipVote", "SkipFallbackVote"})
                [] cert.type = "FinalizationCert" ->
