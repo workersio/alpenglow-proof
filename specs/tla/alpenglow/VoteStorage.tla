@@ -129,7 +129,12 @@ CanStoreCertificate(pool, cert) ==
 \* We keep acceptance independent of local vote availability to avoid dropping
 \* network-learned certificates whose constituent votes may arrive later.
 StoreCertificate(pool, cert) ==
-    IF CanStoreCertificate(pool, cert) /\ IsValidCertificate(cert) THEN
+    \* Enforce structural well-formedness on store (audit suggestion):
+    \* certificates must contain only votes relevant to their (type, slot, blockHash).
+    IF CanStoreCertificate(pool, cert)
+       /\ IsValidCertificate(cert)
+       /\ CertificateWellFormed(cert)
+    THEN
         [pool EXCEPT !.certificates[cert.slot] = 
             pool.certificates[cert.slot] \union {cert}]
     ELSE
@@ -353,5 +358,10 @@ PoolFastImpliesNotarSubset(pool, s, h) ==
         (fastCert.type = "FastFinalizationCert" /\ fastCert.blockHash = h)
             => \E notarCert \in certs :
                 FastFinalizationImpliesNotarization(fastCert, notarCert)
+
+\* Optional global invariant (audit suggestion): All stored certificates are
+\* structurally well-formed (their vote sets contain only relevant votes).
+CertificatesWellFormed(pool) ==
+    \A s \in Slots : AllCertificatesWellFormed(pool.certificates[s])
 
 =============================================================================

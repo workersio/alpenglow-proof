@@ -174,6 +174,10 @@ CertificateType == {
 }
 
 \* Structure of a certificate
+\* Note: NoBlock is intentional for slot-scoped certificates (Skip/Finalization).
+\* Relevance filtering of `votes` by (type, slot, blockHash) happens during
+\* validation; see `Certificates.tla` → `IsValidCertificate` and
+\* `CertificateWellFormed` for details.
 Certificate == [
     type: CertificateType,                    \* Which certificate type
     slot: Slots,                              \* Which slot
