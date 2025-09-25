@@ -56,17 +56,15 @@ DeterministicBinCount(v) ==
 LargeStakeholdersInNeeders(needers) == 
     { v \in needers : DeterministicBinCount(v) >= 1 }
 
-\* Total deterministic bins occupied by large stakeholders
-\* Simplified: each large stakeholder gets exactly their deterministic count
+\* Total deterministic bins occupied by large stakeholders (PS-P Step 1)
+\* Exact: Σ_{v ∈ needers} ⌊ρ_v · Γ⌋
 TotalDeterministicBins(needers) ==
-    LET largeStakeholders == LargeStakeholdersInNeeders(needers)
-    IN IF largeStakeholders = {} THEN 0
-       ELSE \* For modeling simplicity, we approximate the total
-            \* In a full implementation, this would sum DeterministicBinCount(v) for all v
-            \* Here we use a conservative estimate that won't exceed GammaTotalShreds
-            LET maxPossible == GammaTotalShreds
-                conservativeEstimate == Cardinality(largeStakeholders)
-            IN IF conservativeEstimate > maxPossible THEN maxPossible ELSE conservativeEstimate
+    LET RECURSIVE SumDet(_)
+        SumDet(S) ==
+            IF S = {} THEN 0
+            ELSE LET v == CHOOSE x \in S : TRUE IN
+                 DeterministicBinCount(v) + SumDet(S \ {v})
+    IN SumDet(needers)
 
 \* Remaining bins after deterministic assignments
 RemainingBins(needers) ==
@@ -75,6 +73,13 @@ RemainingBins(needers) ==
        THEN 0 
        ELSE GammaTotalShreds - deterministicTotal
 
+\* Note: We instantiate PS-P over `needers` (validators that still need the slice),
+\* not the entire validator set. This aligns with Rotor's operational constraint
+\* to only choose relays from nodes that do not yet have the block.
+
+\* Supporting bound: Σ_{v} ⌊ρ_v · Γ⌋ ≤ Γ ensures non-negativity above.
+THEOREM DeterministicBinsBound == TotalDeterministicBins(DOMAIN StakeMap) <= GammaTotalShreds
+
 \* Helper: Check if PS-P bin assignment is feasible
 PSPBinAssignmentPossible(needers, nextLeader) ==
     LET largeStakeholders == LargeStakeholdersInNeeders(needers)
@@ -82,7 +87,6 @@ PSPBinAssignmentPossible(needers, nextLeader) ==
         remainingBins == RemainingBins(needers)
         deterministicTotal == TotalDeterministicBins(needers)
     IN /\ deterministicTotal <= GammaTotalShreds
-       /\ remainingBins <= Cardinality(remainingNeeders)
        /\ (nextLeader \in needers => 
            nextLeader \in largeStakeholders \/ nextLeader \in remainingNeeders)
 
@@ -135,8 +139,8 @@ LargeStakeholders(S) == { v \in S : DeterministicBinCount(v) >= 1 }
 PSPConstraint(bins, needers) == 
     /\ DOMAIN bins = 1..GammaTotalShreds  \* Exactly Γ bins assigned
     /\ \A j \in DOMAIN bins : bins[j] \in needers  \* All assignments valid
-    /\ \A v \in LargeStakeholders(needers) :  \* Large stakeholders get appropriate bins
-        Cardinality({j \in DOMAIN bins : bins[j] = v}) >= 1
+    /\ \A v \in needers :  \* Enforce PS-P Step 1 multiplicity lower bound
+        Cardinality({j \in DOMAIN bins : bins[j] = v}) >= DeterministicBinCount(v)
 
 \* Latency optimisation: include next leader early if it still needs the block.
 \* Updated to work with bin assignments
