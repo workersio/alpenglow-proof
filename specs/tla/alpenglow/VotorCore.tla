@@ -171,7 +171,7 @@ TrySkipWindow(validator, slot) ==
                     IF slots = {} THEN val
                     ELSE 
                         LET s == CHOOSE x \in slots : TRUE
-                            vote == CreateSkipVote(val.id, s)
+                            vote == CreateSkipVoteForSlot(val.id, s)
                             newVal1 == AddState(val, s, "Voted")
                             newVal2 == AddState(newVal1, s, "BadWindow")
                             poolWithVote == StoreVote(newVal2.pool, vote)
@@ -339,5 +339,12 @@ ValidatorStateOK(validator) ==
 THEOREM TryNotarProducesValidNotarVote ==
     \A v \in Validators, b \in Block :
         IsValidBlock(b) => IsValidVote(CreateNotarVoteForBlock(v, b))
+
+\* Audit lemma (creation-time validity): TrySkipWindow constructs skip votes
+\* using the typed wrapper; these are valid by construction.
+THEOREM TrySkipWindowProducesValidSkipVotes ==
+    \A validator, s \in Slots :
+        ValidatorStateOK(validator) /\ ~HasState(validator, s, "Voted")
+            => IsValidVote(CreateSkipVoteForSlot(validator.id, s))
 
 =============================================================================

@@ -89,6 +89,8 @@ CreateNotarFallbackVote(validator, slot, blockHash) ==
      blockHash |-> blockHash]
 
 \* Definition 11: SkipVote — initial vote to skip the slot (no block hash).
+\* Whitepaper Table 5: skip votes carry no block reference; we encode this by
+\* setting `blockHash = NoBlock` and enforce it via IsValidVote.
 CreateSkipVote(validator, slot) ==
     [type |-> "SkipVote",
      validator |-> validator,
@@ -115,6 +117,10 @@ CreateFinalVote(validator, slot) ==
      validator |-> validator,
      slot |-> slot,
      blockHash |-> NoBlock]  \* Slot-scoped finalization vote (FinalVote(s))
+
+\* Optional typed wrapper (audit suggestion): documents intent that callers
+\* pass a slot and returns the correctly shaped skip vote.
+CreateSkipVoteForSlot(v, s) == CreateSkipVote(v, s)
 
 \* ============================================================================
 \* VOTE CLASSIFICATION HELPERS
@@ -192,6 +198,12 @@ IsValidVote(vote) ==
 THEOREM SkipFallbackVoteCreationIsValid ==
     \A v \in Validators, s \in Slots :
         IsValidVote(CreateSkipFallbackVote(v, s))
+
+\* Audit lemma (creation-time validity): Any SkipVote constructed by the
+\* helper is a valid vote per IsValidVote typing/shape rules.
+THEOREM SkipVoteCreationIsValid ==
+    \A v \in Validators, s \in Slots :
+        IsValidVote(CreateSkipVote(v, s))
 
 \* Check if two votes conflict (violate protocol rules)
 \* IMPORTANT: This helps verify Lemma 20 - validators vote once per slot
