@@ -66,6 +66,9 @@ InitPool == [
 \* Definition 12: multiplicity limits — exactly one initial vote, up to
 \* three notar fallback votes, etc. This predicate enforces those limits
 \* before adding anything to the Pool.
+\* Cross-link: alpenglow-whitepaper.md:513 (page 20)
+\* Scope note: the "up to 3 notar-fallback votes" cap is per (slot, validator)
+\* across all blocks (as encoded here), not per-block.
 CanStoreVote(pool, vote) ==
     LET 
         slot == vote.slot
@@ -97,6 +100,7 @@ CanStoreVote(pool, vote) ==
 \* Definition 12: once the multiplicity check passes we record the vote for
 \* this validator/slot so later stake calculations can see it.
 StoreVote(pool, vote) ==
+    \* Cross-link: alpenglow-whitepaper.md:513 (page 20)
     \* Defensive validity gate (audit suggestion): only store well-formed votes.
     \* See MainProtocol.DeliverVote for the ingress contract that selects
     \* only `vote \in Vote /\ IsValidVote(vote)` from the network.
@@ -106,6 +110,8 @@ StoreVote(pool, vote) ==
             validator == vote.validator
             existingVotes == pool.votes[slot][validator]
         IN
+            \* Idempotence: set union ensures duplicate deliveries are harmless.
+            \* Re-storing an identical vote has no effect on Pool state.
             [pool EXCEPT !.votes[slot][validator] = existingVotes \union {vote}]
     ELSE
         pool  \* Don't store if multiplicity rules violated
@@ -129,17 +135,22 @@ CanStoreCertificate(pool, cert) ==
         slot == cert.slot
         existing == pool.certificates[slot]
         NotarTypes == {"NotarizationCert", "NotarFallbackCert", "FastFinalizationCert"}
+        HasBlockCert == (\E c \in existing : c.type \in NotarTypes)
     IN
-        CASE cert.type \in {"SkipCert", "FinalizationCert"} ->
-            \* At most one SkipCert and one FinalizationCert per slot
-            ~\E c \in existing : c.type = cert.type
+        CASE cert.type = "SkipCert" ->
+                 \* Enforce mutual exclusion with any block-related cert
+                 ( ~\E c \in existing : c.type = "SkipCert" ) /\ ~HasBlockCert
 
-        [] cert.type \in NotarTypes ->
-            /\ ~\E c \in existing : c.type = cert.type /\ c.blockHash = cert.blockHash
-            /\ \A c \in existing :
-                  c.type \in NotarTypes => c.blockHash = cert.blockHash
+           [] cert.type = "FinalizationCert" ->
+                 \* At most one FinalizationCert per slot
+                 ~\E c \in existing : c.type = "FinalizationCert"
 
-        [] OTHER -> FALSE
+           [] cert.type \in NotarTypes ->
+                 /\ ~\E c \in existing : c.type = cert.type /\ c.blockHash = cert.blockHash
+                 /\ (\A c \in existing : c.type \in NotarTypes => c.blockHash = cert.blockHash)
+                 /\ ~\E c \in existing : c.type = "SkipCert"
+
+           [] OTHER -> FALSE
 
 \* Store a certificate in the pool
 \* Improvement: validate certificate contents on store (see audit suggestions).

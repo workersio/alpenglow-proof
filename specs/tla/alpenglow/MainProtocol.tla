@@ -914,6 +914,37 @@ LocalVotesWellFormed ==
         \A vt \in validators[v].pool.votes[s][v] :
             IsValidVote(vt) /\ vt.slot = s
 
+(***************************************************************************
+ * FAST ⇒ NOTAR (subset) — Pool-level implication per Table 6
+ *
+ * Whitepaper refs
+ * - "fast ⇒ notar ⇒ fallback" implication: `alpenglow-whitepaper.md:534` • §2.5.
+ *
+ * Explanation
+ * - For every slot’s certificate set in each correct validator’s pool,
+ *   if a fast-finalization certificate exists, a matching notarization
+ *   certificate also exists with a vote set that is a subset of the fast one.
+ *************************************************************************)
+PoolFastPathImplication ==
+    \A v \in CorrectNodes :
+    \A s \in 1..MaxSlot :
+        FastPathImplication(validators[v].pool.certificates[s])
+
+(***************************************************************************
+ * CERT BLOCK PROVENANCE — stored block-bearing certs reference known blocks
+ *
+ * Explanation
+ * - Any stored certificate that carries a block hash must reference the
+ *   hash of some block present in `blocks`. This documents the modeling
+ *   assumption that certificates are only formed for extant blocks.
+ *************************************************************************)
+CertificateBlockProvenance ==
+    \A v \in CorrectNodes :
+    \A s \in 1..MaxSlot :
+        \A c \in validators[v].pool.certificates[s] :
+            (c.type \in {"NotarizationCert", "NotarFallbackCert", "FastFinalizationCert"}) =>
+            c.blockHash \in {b.hash : b \in blocks}
+
 \* Pool storage guarantees from Definitions 12–13 (whitepaper §2.5)
 PoolMultiplicityOK ==
     \A v \in Validators : MultiplicityRulesRespected(validators[v].pool)
@@ -1097,6 +1128,8 @@ Invariant ==
     /\ HonestNonEquivocation
     /\ TransitCertificatesValid
     /\ LocalVotesWellFormed
+    /\ PoolFastPathImplication
+    /\ CertificateBlockProvenance
     /\ ByzantineStakeOK
     /\ PoolMultiplicityOK
     /\ PoolCertificateUniqueness
