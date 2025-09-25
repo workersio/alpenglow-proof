@@ -172,6 +172,10 @@ StoreCertificate(pool, cert) ==
 \* VOTE AGGREGATION AND QUERIES
 \* ============================================================================
 
+\* Helper: maximum of a finite set of natural numbers.
+\* Returns 0 on the empty set. Useful for Def. 16 formulas (e.g., SafeToSkip).
+MaxNat(S) == IF S = {} THEN 0 ELSE CHOOSE x \in S : \A y \in S : x >= y
+
 \* Get all votes for a slot (across all validators)
 \* Cross-link: Whitepaper Definition 16 (pages 21–22) defines notar(b) and
 \* skip(s) as stake over votes "in Pool" for the slot. This operator is the
@@ -201,20 +205,23 @@ SkipStake(pool, slot) ==
     IN CalculateStake(validators)
 
 \* Total notarization stake across ALL blocks in a slot
+\* Whitepaper §2.5, Definition 16: corresponds to Σ_b notar(b) and uses
+\* count-once-per-slot semantics per Definition 12 (deduplicate validators).
 TotalNotarStake(pool, slot) ==
     LET votes == GetVotesForSlot(pool, slot)
         notarVotes == {v \in votes : v.type = "NotarVote"}
-        validators == {v.validator : v \in notarVotes}
-    IN CalculateStake(validators)
+    IN StakeFromVotes(notarVotes)
 
 \* Maximum notarization stake for any single block in a slot
+\* Whitepaper §2.5, Definition 16 (SafeToSkip): this is the max_b notar(b)
+\* term used in `CanEmitSafeToSkip` (see alpenglow-whitepaper.md:571).
 MaxNotarStake(pool, slot) ==
     LET votes == GetVotesForSlot(pool, slot)
         notarVotes == {v \in votes : v.type = "NotarVote"}
         blocks == {v.blockHash : v \in notarVotes}
     IN IF blocks = {} THEN 0
        ELSE LET stakes == {NotarStake(pool, slot, b) : b \in blocks}
-            IN CHOOSE s \in stakes : \A s2 \in stakes : s >= s2
+            IN MaxNat(stakes)
 
 \* ============================================================================
 \* CERTIFICATE GENERATION
@@ -224,11 +231,12 @@ MaxNotarStake(pool, slot) ==
 \* corresponding certificate(s). This function checks every block with
 \* votes and returns any certificate that can now be assembled.
 GenerateCertificate(pool, slot) ==
-    LET votes == GetVotesForSlot(pool, slot)
-        \* Candidate blocks are discovered via NotarVote only. Per Def. 16,
-        \* notar-fallback votes arise only after sufficient notar stake is
-        \* observed, so there won't be fallback-only blocks with zero NotarVote.
-        notarBlocks == {vote.blockHash : vote \in {vt \in votes : vt.type = "NotarVote"}}
+    LET \* Assumption: `votes` are Pool-sourced (Definition 12), ensuring
+        \* count-once-per-slot semantics for stake aggregation in guards.
+        votes == GetVotesForSlot(pool, slot)
+        \* Improvement (audit 0012): discover candidates from both notar and
+        \* notar-fallback votes to improve liveness under out-of-order delivery.
+        candidateBlocks == {v.blockHash : v \in {vt \in votes : vt.type \in {"NotarVote", "NotarFallbackVote"}}}
         BlockCertFor(block) ==
             IF CanCreateFastFinalizationCert(votes, slot, block) THEN
                 {
@@ -245,12 +253,16 @@ GenerateCertificate(pool, slot) ==
                 {CreateNotarFallbackCert(votes, slot, block)}
             ELSE {}
         blockCerts ==
-            UNION {BlockCertFor(block) : block \in notarBlocks}
+            UNION {BlockCertFor(block) : block \in candidateBlocks}
         \* Gate SkipCert creation: do not emit if any block certificate is creatable
         skipCert == IF (blockCerts = {}) /\ CanCreateSkipCert(votes, slot)
                      THEN {CreateSkipCert(votes, slot)}
                      ELSE {}
-        finalCert == IF CanCreateFinalizationCert(votes, slot)
+        \* Optional gating (audit 0012): create FinalizationCert only when
+        \* some notarization is known (stored) or creatable now, to reduce churn.
+        hasNotarNow == \E c \in blockCerts : c.type = "NotarizationCert"
+        hasNotarStored == \E c \in pool.certificates[slot] : c.type = "NotarizationCert"
+        finalCert == IF CanCreateFinalizationCert(votes, slot) /\ (hasNotarNow \/ hasNotarStored)
                       THEN {CreateFinalizationCert(votes, slot)}
                       ELSE {}
     IN blockCerts \cup skipCert \cup finalCert
@@ -260,10 +272,14 @@ GenerateCertificate(pool, slot) ==
 \* ============================================================================
 
 \* Check if pool has a notarization certificate for a block
+\* Trust boundary: validity is enforced when storing certificates via
+\* StoreCertificate (requires IsValidCertificate / CertificateWellFormed).
+\* This query assumes stored certs are valid and is a presence check.
 HasNotarizationCert(pool, slot, blockHash) ==
     \E cert \in pool.certificates[slot] :
         /\ cert.type = "NotarizationCert"
         /\ cert.blockHash = blockHash
+        /\ cert.slot = slot
 
 \* Check if pool has a notar-fallback certificate for a block
 HasNotarFallbackCert(pool, slot, blockHash) ==
@@ -345,6 +361,7 @@ CanEmitSafeToNotar(pool, slot, blockHash, parentHash, alreadyVoted, votedForBloc
  *   skip(s) + Σ_b notar(b) - max_b notar(b) ≥ 40%"
  * 
  * This ensures no block can achieve fast finalization (safety).
+ * Def. 16 anchor: alpenglow-whitepaper.md:571
  * Effect: Enables casting skip-fallback vote for slot s.
  ***************************************************************************)
 CanEmitSafeToSkip(pool, slot, alreadyVoted, votedSkip) ==
@@ -370,12 +387,24 @@ PoolVotesSlotValidatorAligned(pool) ==
     \A s \in Slots : \A v \in Validators :
         \A vt \in pool.votes[s][v] : vt.slot = s /\ vt.validator = v
 
+\* Bucket-slot consistency (audit 0011): certificates stored under slot s
+\* all have c.slot = s.
 PoolCertificatesSlotAligned(pool) ==
     \A s \in Slots : \A c \in pool.certificates[s] : c.slot = s
 
 \* Votes aggregated per slot are well-typed (audit 0009)
 VotesTypeOK(pool) ==
     \A s \in Slots : GetVotesForSlotTypeOK(pool, s)
+
+\* Optional typing lemma (audit 0011): the per-block notar-stake values
+\* considered by MaxNotarStake are natural numbers, making the MaxNat domain
+\* explicit. This follows from CalculateStake: Validators → Nat.
+BlockNotarStakesAreNat(pool, s) ==
+    LET votes == GetVotesForSlot(pool, s)
+        notarVotes == {v \in votes : v.type = "NotarVote"}
+        blocks == {v.blockHash : v \in notarVotes}
+        stakes == {NotarStake(pool, s, b) : b \in blocks}
+    IN stakes \subseteq Nat
 
 \* Multiplicity rules are respected
 MultiplicityRulesRespected(pool) ==
@@ -421,5 +450,13 @@ THEOREM StoreVotePreservesMultiplicity ==
     \A pool \in PoolState, vote \in Vote :
         (MultiplicityRulesRespected(pool) /\ IsValidVote(vote) /\ CanStoreVote(pool, vote))
             => MultiplicityRulesRespected(StoreVote(pool, vote))
+
+\* Optional sanity (audit 0010): TotalNotarStake equals stake of unique
+\* validators that cast a NotarVote in the slot (Σ over projection).
+TotalNotarStakeEqualsUniqueNotarVoters(pool, s) ==
+    LET votes == GetVotesForSlot(pool, s)
+        nv == {vt \in votes : vt.type = "NotarVote"}
+        uniqVals == {vt.validator : vt \in nv}
+    IN TotalNotarStake(pool, s) = CalculateStake(uniqVals)
 
 =============================================================================

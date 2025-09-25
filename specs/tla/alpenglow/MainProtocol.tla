@@ -220,7 +220,7 @@ ReceiveBlock(v, block) ==
  * Explanation
  * - Aggregate qualifying votes into a certificate and broadcast it if newly
  *   learned by any node (abstracting the “store then broadcast” rule).
- * - Prefer notarization certificates when multiple candidates exist.
+ * - Prefer fast-finalization first, then notarization among candidates.
  ***************************************************************************)
 GenerateCertificateAction(v, slot) ==
     /\ v \in CorrectNodes
@@ -234,9 +234,11 @@ GenerateCertificateAction(v, slot) ==
                              /\ CanStoreCertificate(validators[v].pool, c)}
        IN /\ candidates # {}
           /\ LET cert ==
-                    IF (\E c \in candidates : c.type = "NotarizationCert")
-                    THEN CHOOSE c \in candidates : c.type = "NotarizationCert"
-                    ELSE CHOOSE c \in candidates : TRUE
+                    IF (\E c \in candidates : c.type = "FastFinalizationCert")
+                    THEN CHOOSE c \in candidates : c.type = "FastFinalizationCert"
+                    ELSE IF (\E c \in candidates : c.type = "NotarizationCert")
+                         THEN CHOOSE c \in candidates : c.type = "NotarizationCert"
+                         ELSE CHOOSE c \in candidates : TRUE
              IN /\ messages' = messages \union {cert}
                 /\ validators' = [validators EXCEPT ![v].pool = StoreCertificate(validators[v].pool, cert)]
     /\ UNCHANGED <<blocks, byzantineNodes, time, finalized, blockAvailability>>
@@ -960,6 +962,13 @@ PoolAlignmentOK ==
         /\ PoolVotesSlotValidatorAligned(validators[v].pool)
         /\ PoolCertificatesSlotAligned(validators[v].pool)
 
+\* Optional sanity (audit 0010): TotalNotarStake equals the stake of
+\* unique notar voters per slot in each validator's pool.
+TotalNotarStakeSanity ==
+    \A v \in Validators :
+    \A s \in 1..MaxSlot :
+        TotalNotarStakeEqualsUniqueNotarVoters(validators[v].pool, s)
+
 (*
  * TIMEOUTS IN FUTURE — never schedule a timeout in the past
  *
@@ -1142,5 +1151,6 @@ Invariant ==
     /\ BlockNotarizedImpliesCert
     /\ ParentReadyImpliesCert
     /\ FinalVoteImpliesBlockNotarized
+    /\ TotalNotarStakeSanity
 
 =============================================================================
