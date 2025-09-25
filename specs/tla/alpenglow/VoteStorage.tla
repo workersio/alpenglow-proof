@@ -315,9 +315,18 @@ HasFastFinalizationCert(pool, slot, blockHash) ==
         /\ cert.slot = slot
 
 \* Check if pool has a finalization certificate
+\* Clarification (Def. 14): This is a slot-level check. The finalized block
+\* in the slow path is determined by combining this with the unique notarized
+\* block for the slot via HasNotarizationCert.
 HasFinalizationCert(pool, slot) ==
     \E cert \in pool.certificates[slot] :
         cert.type = "FinalizationCert"
+
+\* Readability helper (audit 0013): slow-path finalization guard from Def. 14
+\* Encodes the pairing "FinalizationCert(s) + NotarizationCert(s, h)".
+CanFinalizeSlow(pool, slot, blockHash) ==
+    /\ HasFinalizationCert(pool, slot)
+    /\ HasNotarizationCert(pool, slot, blockHash)
 
 \* ============================================================================
 \* EVENT GENERATION (Definitions 15 and 16)
@@ -467,12 +476,21 @@ PoolFastImpliesNotarSubset(pool, s, h) ==
     IN \A fastCert \in certs :
         (fastCert.type = "FastFinalizationCert" /\ fastCert.blockHash = h)
             => \E notarCert \in certs :
-                FastFinalizationImpliesNotarization(fastCert, notarCert)
+                /\ notarCert.type = "NotarizationCert"
+                /\ notarCert.slot = fastCert.slot
+                /\ notarCert.blockHash = h
+                /\ notarCert.votes \subseteq fastCert.votes
 
 \* Optional global invariant (audit suggestion): All stored certificates are
 \* structurally well-formed (their vote sets contain only relevant votes).
 CertificatesWellFormed(pool) ==
     \A s \in Slots : AllCertificatesWellFormed(pool.certificates[s])
+
+\* Def. 14 pairing (audit 0013): presence of a FinalizationCert for slot s in
+\* a Pool implies presence of some NotarizationCert in the same slot set.
+FinalizationImpliesNotarizationPresent(pool, s) ==
+    (\E c \in pool.certificates[s] : c.type = "FinalizationCert")
+        => (\E n \in pool.certificates[s] : n.type = "NotarizationCert")
 
 (***************************************************************************
  * Post-condition lemma (audit suggestion): Storing a valid vote that passes

@@ -319,7 +319,7 @@ CertificateWellFormed(cert) ==
 \* ============================================================================
 
 (***************************************************************************
- * IMPORTANT IMPLICATION (whitepaper §2.4–§2.5):
+ * IMPORTANT RELATION (whitepaper §2.4–§2.5):
  * - Table 6 thresholds imply that if a node can construct the
  *   Fast-Finalization Certificate (80%), it can also construct the
  *   Notarization Certificate (60%). The paper states this explicitly in §2.5
@@ -333,7 +333,7 @@ FastFinalizationImpliesNotarization(fastCert, notarCert) ==
     /\ notarCert.type = "NotarizationCert"
     /\ fastCert.slot = notarCert.slot
     /\ fastCert.blockHash = notarCert.blockHash
-    => notarCert.votes \subseteq fastCert.votes
+    /\ notarCert.votes \subseteq fastCert.votes
 
 (***************************************************************************
  * IMPLICATION (cascade): Notarization implies Notar-Fallback (Table 6; §2.5)
@@ -419,7 +419,10 @@ FastPathImplication(certificates) ==
     \A fastCert \in certificates :
         fastCert.type = "FastFinalizationCert" =>
         \E notarCert \in certificates :
-            FastFinalizationImpliesNotarization(fastCert, notarCert)
+            /\ notarCert.type = "NotarizationCert"
+            /\ notarCert.slot = fastCert.slot
+            /\ notarCert.blockHash = fastCert.blockHash
+            /\ notarCert.votes \subseteq fastCert.votes
 
 \* Notarization cascade: every notarization implies a corresponding fallback
 NotarizationCascadeImplication(certificates) ==

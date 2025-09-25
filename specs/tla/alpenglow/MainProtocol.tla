@@ -261,8 +261,7 @@ FinalizeBlock(v, block) ==
     /\ LET pool == validators[v].pool
            slot == block.slot
        IN \/ HasFastFinalizationCert(pool, slot, block.hash)
-          \/ (HasNotarizationCert(pool, slot, block.hash) /\ 
-              HasFinalizationCert(pool, slot))
+          \/ CanFinalizeSlow(pool, slot, block.hash)
     /\ finalized' = [finalized EXCEPT ![v] = finalized[v] \union GetAncestors(block, blocks)]
     /\ UNCHANGED <<validators, blocks, messages, byzantineNodes, time, blockAvailability>>
 
@@ -960,6 +959,19 @@ PoolFastPathImplication ==
         FastPathImplication(validators[v].pool.certificates[s])
 
 (***************************************************************************
+ * FINALIZATION ⇒ NOTARIZATION (slot presence) — Def. 14 pairing
+ *
+ * Explanation
+ * - For each validator's Pool and each slot, the presence of a
+ *   FinalizationCert implies the presence of some NotarizationCert in the
+ *   same slot set. This captures the Def.14 pairing at the storage level.
+ *************************************************************************)
+PoolFinalizationImpliesNotarizationPresent ==
+    \A v \in CorrectNodes :
+    \A s \in 1..MaxSlot :
+        FinalizationImpliesNotarizationPresent(validators[v].pool, s)
+
+(***************************************************************************
  * CERT BLOCK PROVENANCE — stored block-bearing certs reference known blocks
  *
  * Explanation
@@ -980,6 +992,12 @@ PoolMultiplicityOK ==
 
 PoolCertificateUniqueness ==
     \A v \in Validators : CertificateUniqueness(validators[v].pool)
+
+\* All stored certificates are valid (Tables 5–6; Pool §2.5)
+PoolCertificatesValid ==
+    \A v \in Validators :
+    \A s \in 1..MaxSlot :
+        AllCertificatesValid(validators[v].pool.certificates[s])
 
 \* Pool alignment invariants (audit 0009): slot/validator alignment for votes,
 \* and slot alignment for certificates across all validators.
@@ -1170,10 +1188,12 @@ Invariant ==
     /\ TransitCertificatesValid
     /\ LocalVotesWellFormed
     /\ PoolFastPathImplication
+    /\ PoolFinalizationImpliesNotarizationPresent
     /\ CertificateBlockProvenance
     /\ ByzantineStakeOK
     /\ PoolMultiplicityOK
     /\ PoolCertificateUniqueness
+    /\ PoolCertificatesValid
     /\ PoolAlignmentOK
     /\ BucketSlotConsistencyOK
     /\ RotorSelectSoundness
