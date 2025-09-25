@@ -537,6 +537,9 @@ RepairBlock(v, block, supplier) ==
  * Explanation
  * - Pop a vote from the network and store it in every validator’s Pool, honoring
  *   the storage/multiplicity rules of Def.12.
+ * - Ingress contract (audit note): only well-typed and semantically valid
+ *   votes are accepted from the network. Concretely, the guard requires
+ *   `vote \in Vote /\ IsValidVote(vote)` when selecting from `messages`.
  ***************************************************************************)
 DeliverVote ==
     /\ \E vote \in messages : vote \in Vote /\ IsValidVote(vote)
