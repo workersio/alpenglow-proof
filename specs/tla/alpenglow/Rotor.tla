@@ -202,15 +202,16 @@ FailureResilient(sample) ==
 
 \* PS-P structural constraint (instantiated over `needers`):
 \* - Exactly Γ bins assigned and range within `needers` (operational scoping)
-\* - Enforce PS-P Step 1 exact multiplicity for each large stakeholder v:
-\*     occurrences(bins, v) = ⌊ρ_v · Γ⌋ = DeterministicBinCount(v)
-\*   Remaining bins are allocated among non-large stakeholders when available
-\*   (fallback to any needer if none are non-large).
+\* - Enforce PS-P Step 1 deterministic lower bound for every validator v:
+\*     occurrences(bins, v) ≥ ⌊ρ_v · Γ⌋ = DeterministicBinCount(v)
+\*   This captures the Step 1 requirement without constraining how remaining
+\*   bins (from Steps 2–3) distribute; probabilistic partitioning/sampling is
+\*   not encoded as a structural invariant here.
 PSPConstraint(bins, needers) == 
     /\ DOMAIN bins = 1..GammaTotalShreds
     /\ \A j \in DOMAIN bins : bins[j] \in needers
-    /\ \A v \in LargeStakeholdersInNeeders(needers) :
-          Cardinality({ j \in DOMAIN bins : bins[j] = v }) = DeterministicBinCount(v)
+    /\ \A v \in needers :
+          Cardinality({ j \in DOMAIN bins : bins[j] = v }) >= DeterministicBinCount(v)
 
 \* Optional stronger check (documented): If desired, one can additionally
 \* require that the deterministic prefix of bins 1..TotalDeterministicBinsExact(needers)
