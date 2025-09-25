@@ -661,6 +661,10 @@ EmitSafeToSkip ==
          /\ LET alreadyVoted == HasState(validators[v], s, "Voted")
                 \* Note: `SkipVote` refers to the initial skip vote (not skip-fallback).
                 \* Repeated fallback emission is suppressed by the `BadWindow` guard below.
+                \* Suppression rationale: Algorithm 1 (lines ~21–25) emits SafeToSkip
+                \* at most once per window per node; Algorithm 2 (TRYSKIPWINDOW,
+                \* lines ~22–27) sets BadWindow when any fallback or skip vote is
+                \* cast. The guards here mirror that behaviour.
                 votedSkip == 
                     \E vt \in GetVotesForSlot(validators[v].pool, s) :
                         /\ vt.validator = v
@@ -784,6 +788,28 @@ NoConflictingFinalization ==
     \A v1, v2 \in CorrectNodes :
     \A b1 \in finalized[v1], b2 \in finalized[v2] :
         (b1.slot = b2.slot) => b1.hash = b2.hash
+
+(***************************************************************************
+ * SAFE-TO-SKIP PRECLUDES FAST — Def.16 ⇒ no 80% notar later (state form)
+ *
+ * Whitepaper refs
+ * - Definition 16 (SafeToSkip inequality): `alpenglow-whitepaper.md:571`.
+ * - Safety intuition: once skip(s) + Σ notar(b) − max notar(b) ≥ 40%, the
+ *   remaining stake that could still coalesce on any single block is < 80%.
+ *
+ * Explanation
+ * - State-level strengthening: whenever the SafeToSkip guard’s inequality
+ *   holds (ignoring the local alreadyVoted/~votedSkip gate), no block of that
+ *   slot has ≥80% NotarVote stake in the same Pool. This captures the
+ *   paper’s “cannot fast-finalize later” as a safety check usable as an
+ *   invariant.
+ ***************************************************************************)
+SafeToSkipPrecludesFastNow ==
+    \A v \in CorrectNodes :
+    \A s \in 1..MaxSlot :
+        CanEmitSafeToSkip(validators[v].pool, s, TRUE, FALSE)
+            => (\A b \in {x \in blocks : x.slot = s} :
+                    ~MeetsThreshold(NotarStake(validators[v].pool, s, b.hash), 80))
 
 (***************************************************************************
  * CHAIN CONSISTENCY — restating Theorem 1 under Assumption 1
@@ -962,6 +988,10 @@ PoolAlignmentOK ==
         /\ PoolVotesSlotValidatorAligned(validators[v].pool)
         /\ PoolCertificatesSlotAligned(validators[v].pool)
 
+\* Bucket–slot consistency (audit 0013): explicit alias assertion
+BucketSlotConsistencyOK ==
+    \A v \in Validators : BucketSlotConsistency(validators[v].pool)
+
 \* Optional sanity (audit 0010): TotalNotarStake equals the stake of
 \* unique notar voters per slot in each validator's pool.
 TotalNotarStakeSanity ==
@@ -1128,6 +1158,7 @@ Invariant ==
     /\ TypeInvariant
     /\ SafetyInvariant
     /\ NoConflictingFinalization
+    /\ SafeToSkipPrecludesFastNow
     /\ ChainConsistency
     /\ VoteUniqueness
     /\ UniqueNotarization
@@ -1144,6 +1175,7 @@ Invariant ==
     /\ PoolMultiplicityOK
     /\ PoolCertificateUniqueness
     /\ PoolAlignmentOK
+    /\ BucketSlotConsistencyOK
     /\ RotorSelectSoundness
     /\ TimeoutsInFuture
     /\ UniqueBlockHashes(blocks)

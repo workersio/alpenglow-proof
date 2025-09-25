@@ -189,7 +189,9 @@ GetVotesForSlotTypeOK(pool, slot) ==
     GetVotesForSlot(pool, slot) \subseteq Vote
 
 \* Count stake for notarization votes on a specific block
-\* IMPORTANT: Uses count-once-per-slot rule!
+\* IMPORTANT (Def. 16 clarification): Uses initial votes only (NotarVote),
+\* not notar-fallback votes, and enforces count-once-per-slot via deduplication.
+\* Cross-link: alpenglow-whitepaper.md:554–:571 (pages 21–22).
 NotarStake(pool, slot, blockHash) ==
     LET votes == GetVotesForSlot(pool, slot)
         notarVotes == {v \in votes : 
@@ -198,6 +200,9 @@ NotarStake(pool, slot, blockHash) ==
     IN CalculateStake(validators)
 
 \* Count stake for skip votes in a slot
+\* IMPORTANT (Def. 16 clarification): Uses initial votes only (SkipVote),
+\* not skip-fallback votes, and enforces count-once-per-slot via deduplication.
+\* Cross-link: alpenglow-whitepaper.md:554–:571 (pages 21–22).
 SkipStake(pool, slot) ==
     LET votes == GetVotesForSlot(pool, slot)
         skipVotes == {v \in votes : v.type = "SkipVote"}
@@ -222,6 +227,11 @@ MaxNotarStake(pool, slot) ==
     IN IF blocks = {} THEN 0
        ELSE LET stakes == {NotarStake(pool, slot, b) : b \in blocks}
             IN MaxNat(stakes)
+
+\* Readability helper (audit 0013): stake outside the max-notarized block.
+\* Mirrors the paper’s Σ_b notar(b) − max_b notar(b) term.
+NonMaxNotarStake(pool, slot) ==
+    TotalNotarStake(pool, slot) - MaxNotarStake(pool, slot)
 
 \* ============================================================================
 \* CERTIFICATE GENERATION
@@ -271,6 +281,11 @@ GenerateCertificate(pool, slot) ==
 \* CERTIFICATE QUERIES
 \* ============================================================================
 
+\* Trust boundary (audit 0013): validity and structural well-formedness of
+\* certificates are enforced at store time by StoreCertificate via
+\* IsValidCertificate / CertificateWellFormed. The following predicates are
+\* presence checks over the Pool and may assume well-formed entries.
+
 \* Check if pool has a notarization certificate for a block
 \* Trust boundary: validity is enforced when storing certificates via
 \* StoreCertificate (requires IsValidCertificate / CertificateWellFormed).
@@ -297,6 +312,7 @@ HasFastFinalizationCert(pool, slot, blockHash) ==
     \E cert \in pool.certificates[slot] :
         /\ cert.type = "FastFinalizationCert"
         /\ cert.blockHash = blockHash
+        /\ cert.slot = slot
 
 \* Check if pool has a finalization certificate
 HasFinalizationCert(pool, slot) ==
@@ -338,20 +354,18 @@ ShouldEmitParentReady(pool, slot, parentHash, parentSlot) ==
  * This prevents fast-finalization of a conflicting block (safety).
  * Effect: Enables casting notar-fallback vote for block b.
  ***************************************************************************)
+\* Readability (audit 0013): centralize Def. 16 parent-gating logic.
+ParentFallbackReady(pool, slot, parentHash) ==
+    /\ IsFirstSlotOfWindow(slot)
+    \/ (\E ps \in Slots : ps < slot /\ HasNotarFallbackCert(pool, ps, parentHash))
+
 CanEmitSafeToNotar(pool, slot, blockHash, parentHash, alreadyVoted, votedForBlock) ==
     /\ alreadyVoted      \* Must have voted in slot
     /\ ~votedForBlock    \* But not for this block
+    /\ ParentFallbackReady(pool, slot, parentHash)
     /\ LET notar == NotarStake(pool, slot, blockHash)
            skip == SkipStake(pool, slot)
-           parentReady == 
-                \* Per Def. 16, parent must have a notar-fallback cert unless this is the
-                \* first slot of a window. The parent's slot may be < s-1 (skipped slots),
-                \* so search all prior Slots while staying within the Pool's domain.
-                \* The check is specific to NotarFallbackCert (per whitepaper text).
-                IsFirstSlotOfWindow(slot) \/
-                    (\E ps \in Slots : ps < slot /\ HasNotarFallbackCert(pool, ps, parentHash))
-       IN parentReady /\
-          (MeetsThreshold(notar, 40)
+       IN (MeetsThreshold(notar, 40)
            \/ (MeetsThreshold(skip + notar, DefaultThreshold) /\ MeetsThreshold(notar, 20)))
 
 (***************************************************************************
@@ -364,13 +378,16 @@ CanEmitSafeToNotar(pool, slot, blockHash, parentHash, alreadyVoted, votedForBloc
  * Def. 16 anchor: alpenglow-whitepaper.md:571
  * Effect: Enables casting skip-fallback vote for slot s.
  ***************************************************************************)
+\* Clarification (audit 0013): The quantities skip(s) and notar(b) below refer
+\* to initial votes only (SkipVote/NotarVote), not fallback votes. Count-once-
+\* per-slot semantics (Definition 12) are realized via TotalNotarStake/SkipStake
+\* by deduplicating validators per slot. This matches the whitepaper’s intent.
 CanEmitSafeToSkip(pool, slot, alreadyVoted, votedSkip) ==
     /\ alreadyVoted      \* Must have voted in slot
     /\ ~votedSkip        \* But not skip
     /\ LET skip == SkipStake(pool, slot)
-           totalNotar == TotalNotarStake(pool, slot)
-           maxNotar == MaxNotarStake(pool, slot)
-       IN MeetsThreshold(skip + totalNotar - maxNotar, 40)
+           nonMaxNotar == NonMaxNotarStake(pool, slot)
+       IN MeetsThreshold(skip + nonMaxNotar, 40)
 
 \* ============================================================================
 \* INVARIANTS FOR VERIFICATION
@@ -392,9 +409,25 @@ PoolVotesSlotValidatorAligned(pool) ==
 PoolCertificatesSlotAligned(pool) ==
     \A s \in Slots : \A c \in pool.certificates[s] : c.slot = s
 
+\* Alias (audit 0013 terminology): bucket–slot consistency
+BucketSlotConsistency(pool) == PoolCertificatesSlotAligned(pool)
+
 \* Votes aggregated per slot are well-typed (audit 0009)
 VotesTypeOK(pool) ==
     \A s \in Slots : GetVotesForSlotTypeOK(pool, s)
+
+\* Optional invariant (audit 0013): No double-counting across skip+notar.
+\* For every slot, the set of validators with an initial SkipVote is disjoint
+\* from those with an initial NotarVote (any block). This makes explicit the
+\* property relied upon by Def. 16 arithmetic: SkipStake and NotarStake never
+\* count the same validator in the same slot.
+NoSkipAndNotarDoubleCount(pool, s) ==
+    LET votes == GetVotesForSlot(pool, s)
+        skipVotes == {vt \in votes : vt.type = "SkipVote"}
+        notarVotes == {vt \in votes : vt.type = "NotarVote"}
+        skipVals == {vt.validator : vt \in skipVotes}
+        notarVals == {vt.validator : vt \in notarVotes}
+    IN skipVals \cap notarVals = {}
 
 \* Optional typing lemma (audit 0011): the per-block notar-stake values
 \* considered by MaxNotarStake are natural numbers, making the MaxNat domain
