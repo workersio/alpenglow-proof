@@ -891,6 +891,18 @@ HonestNonEquivocation ==
 TransitCertificatesValid ==
     \A c \in messages : c \in Certificate => IsValidCertificate(c)
 
+(***************************************************************************
+ * LOCAL VOTES WELL-FORMED — correct nodes' own votes are valid and
+ * match their recorded slot. This captures the intended well-formedness
+ * of locally created votes and guards against slot–hash pairing mistakes
+ * at call sites (mitigated further by CreateNotarVoteForBlock).
+ ***************************************************************************)
+LocalVotesWellFormed ==
+    \A v \in CorrectNodes :
+    \A s \in 1..MaxSlot :
+        \A vt \in validators[v].pool.votes[s][v] :
+            IsValidVote(vt) /\ vt.slot = s
+
 \* Pool storage guarantees from Definitions 12–13 (whitepaper §2.5)
 PoolMultiplicityOK ==
     \A v \in Validators : MultiplicityRulesRespected(validators[v].pool)
@@ -1013,6 +1025,19 @@ BlockNotarizedImpliesCert ==
         (\E b \in blocks : b.slot = s /\ HasNotarizationCert(validators[v].pool, s, b.hash))
 
 (* --------------------------------------------------------------------------
+ * IMPLIED: FinalVote implies BlockNotarized for that slot (cross-module aid)
+ *
+ * Audit suggestion: make explicit that a correct node only issues/stores a
+ * FinalVote(s) after observing BlockNotarized(s) locally. TryFinal enforces
+ * this guard; the invariant documents it for model checking.
+ * -------------------------------------------------------------------------- *)
+FinalVoteImpliesBlockNotarized ==
+    \A v \in CorrectNodes :
+    \A s \in 1..MaxSlot :
+        \A vt \in validators[v].pool.votes[s][v] :
+            IsFinalVote(vt) => HasState(validators[v], s, "BlockNotarized")
+
+(* --------------------------------------------------------------------------
  * FINALIZED ANCESTOR CLOSURE — finalized sets are ancestry-closed
  *
  * If a validator has finalized b, then all ancestors of b (w.r.t. global
@@ -1053,6 +1078,7 @@ Invariant ==
     /\ PoolSkipVsBlockExclusion
     /\ HonestNonEquivocation
     /\ TransitCertificatesValid
+    /\ LocalVotesWellFormed
     /\ ByzantineStakeOK
     /\ PoolMultiplicityOK
     /\ PoolCertificateUniqueness
@@ -1062,5 +1088,6 @@ Invariant ==
     /\ FinalizedAncestorClosure
     /\ BlockNotarizedImpliesCert
     /\ ParentReadyImpliesCert
+    /\ FinalVoteImpliesBlockNotarized
 
 =============================================================================

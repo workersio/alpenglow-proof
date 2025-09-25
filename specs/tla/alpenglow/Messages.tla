@@ -62,6 +62,15 @@ Vote == [
 \* These functions create properly formatted vote messages
 \* ============================================================================
 
+(***************************************************************************
+ * Abstraction note on signatures
+ * - The whitepaper describes votes and certificates as signed messages and
+ *   aggregated signatures. In this model, we abstract signatures as sets of
+ *   votes with stake-weighted aggregation performed by StakeFromVotes
+ *   (see Certificates.tla). There are no explicit cryptographic artifacts
+ *   here; only the logical content and stake thresholds matter for safety.
+ ***************************************************************************)
+
 \* Definition 11 (Table 5): NotarVote — validator immediately approves
 \* block `blockHash` for slot `slot`.
 CreateNotarVote(validator, slot, blockHash) ==
@@ -94,11 +103,14 @@ CreateSkipFallbackVote(validator, slot) ==
      blockHash |-> NoBlock]
 
 \* Definition 11: FinalVote — second round of voting used in the 60% path.
+\* Whitepaper refs: Algorithm 2 (TRYFINAL, lines 18–21) and Definition 14
+\* (slot-scoped finalization). We encode slot scoping by setting
+\* `blockHash |-> NoBlock` so FinalVote(s) carries only the slot.
 CreateFinalVote(validator, slot) ==
     [type |-> "FinalVote",
      validator |-> validator,
      slot |-> slot,
-     blockHash |-> NoBlock]  \* Final votes don't need block hash
+     blockHash |-> NoBlock]  \* Slot-scoped finalization vote (FinalVote(s))
 
 \* ============================================================================
 \* VOTE CLASSIFICATION HELPERS
@@ -115,6 +127,10 @@ IsNotarVote(vote) ==
 \* Does this vote skip the slot (initial or fallback)?
 IsSkipVote(vote) ==
     vote.type \in {"SkipVote", "SkipFallbackVote"}
+
+\* Is this a finalization vote?
+IsFinalVote(vote) ==
+    vote.type = "FinalVote"
 
 \* Initial votes are the ones counted once per slot (Definition 12 / Lemma 20).
 IsInitialVote(vote) ==
@@ -165,7 +181,7 @@ IsValidVote(vote) ==
     /\ vote.validator \in Validators
     /\ vote.slot \in Slots
     /\ (IsNotarVote(vote) => vote.blockHash \in BlockHashes)
-    /\ (IsSkipVote(vote) \/ vote.type = "FinalVote" => vote.blockHash = NoBlock)
+    /\ (IsSkipVote(vote) \/ IsFinalVote(vote) => vote.blockHash = NoBlock)
 
 \* Check if two votes conflict (violate protocol rules)
 \* IMPORTANT: This helps verify Lemma 20 - validators vote once per slot

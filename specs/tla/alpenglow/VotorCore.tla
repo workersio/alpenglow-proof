@@ -119,7 +119,7 @@ TryNotar(validator, block) ==
                    VotedForBlock(validator, parentSlot, block.parent))
     IN
         IF canVote THEN
-            LET vote == CreateNotarVote(validator.id, slot, block.hash)
+            LET vote == CreateNotarVoteForBlock(validator.id, block)
                 newState1 == AddState(validator, slot, "Voted")
                 newState2 == AddState(newState1, slot, "VotedNotar")
                 poolWithVote == StoreVote(newState2.pool, vote)
@@ -329,5 +329,11 @@ ValidatorStateOK(validator) ==
     /\ PoolTypeOK(validator.pool)
     /\ validator.clock \in Nat
     /\ validator.timeouts \in [Slots -> Nat]
+
+\* Optional lemma (audit suggestion): votes produced for valid blocks are
+\* valid by construction (content-only, signatures abstracted).
+THEOREM TryNotarProducesValidNotarVote ==
+    \A v \in Validators, b \in Block :
+        IsValidBlock(b) => IsValidVote(CreateNotarVoteForBlock(v, b))
 
 =============================================================================

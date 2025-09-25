@@ -114,6 +114,27 @@ ValidParentChild(parent, child) ==
     /\ parent.slot < child.slot     \* Parent comes before child
 
 \* ============================================================================
+\* VOTE HELPERS (block-typed wrappers)
+\* ============================================================================
+
+(***************************************************************************
+ * Create a notarization vote for a given block. This wrapper preserves the
+ * intended slot–hash pairing by construction and avoids accidental mismatch
+ * at call sites.
+ *
+ * Note: This is a typed convenience; it relies on IsValidBlock(b) for
+ * well-formedness, and on Messages.IsValidVote for vote validity checks.
+ ***************************************************************************)
+CreateNotarVoteForBlock(v, b) ==
+    CreateNotarVote(v, b.slot, b.hash)
+
+\* Well-formedness lemma: a notar-vote constructed for a valid block is a
+\* valid vote (content-only; signatures are abstracted).
+THEOREM CreateNotarVoteForBlockWellTyped ==
+    \A v \in Validators, b \in Block :
+        IsValidBlock(b) => IsValidVote(CreateNotarVoteForBlock(v, b))
+
+\* ============================================================================
 \* ANCESTRY RELATIONSHIPS (whitepaper §2.1, Def. 5; safety §2.6/Thm. 1)
 \* ============================================================================
 
