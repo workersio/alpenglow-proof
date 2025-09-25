@@ -81,6 +81,7 @@ CreateNotarVote(validator, slot, blockHash) ==
 
 \* Definition 11: NotarFallbackVote — emitted after SafeToNotar to back
 \* the same block once enough peers voted.
+\* Note: signatures are abstracted; this records logical content only.
 CreateNotarFallbackVote(validator, slot, blockHash) ==
     [type |-> "NotarFallbackVote",
      validator |-> validator,
@@ -96,6 +97,9 @@ CreateSkipVote(validator, slot) ==
 
 \* Definition 11: SkipFallbackVote — broadcast after SafeToSkip confirms
 \* the slot cannot be notarized.
+\* Whitepaper refs: Algorithm 1 (lines 21–25) issues SkipFallbackVote(s)
+\* after attempting to skip unvoted slots; Definition 16 (Fallback events)
+\* specifies the SafeToSkip preconditions that gate this emission.
 CreateSkipFallbackVote(validator, slot) ==
     [type |-> "SkipFallbackVote",
      validator |-> validator,
@@ -182,6 +186,12 @@ IsValidVote(vote) ==
     /\ vote.slot \in Slots
     /\ (IsNotarVote(vote) => vote.blockHash \in BlockHashes)
     /\ (IsSkipVote(vote) \/ IsFinalVote(vote) => vote.blockHash = NoBlock)
+
+\* Audit lemma (creation-time validity): Any SkipFallbackVote constructed by
+\* the helper is a valid vote per IsValidVote typing/shape rules.
+THEOREM SkipFallbackVoteCreationIsValid ==
+    \A v \in Validators, s \in Slots :
+        IsValidVote(CreateSkipFallbackVote(v, s))
 
 \* Check if two votes conflict (violate protocol rules)
 \* IMPORTANT: This helps verify Lemma 20 - validators vote once per slot

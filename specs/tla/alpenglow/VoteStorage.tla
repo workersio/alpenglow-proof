@@ -82,7 +82,8 @@ CanStoreVote(pool, vote) ==
 \* Definition 12: once the multiplicity check passes we record the vote for
 \* this validator/slot so later stake calculations can see it.
 StoreVote(pool, vote) ==
-    IF CanStoreVote(pool, vote) THEN
+    \* Defensive validity gate (audit suggestion): only store well-formed votes
+    IF IsValidVote(vote) /\ CanStoreVote(pool, vote) THEN
         LET 
             slot == vote.slot
             validator == vote.validator

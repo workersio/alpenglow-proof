@@ -134,6 +134,20 @@ THEOREM CreateNotarVoteForBlockWellTyped ==
     \A v \in Validators, b \in Block :
         IsValidBlock(b) => IsValidVote(CreateNotarVoteForBlock(v, b))
 
+(***************************************************************************
+ * Create a notar-fallback vote for a given block. Like the notar wrapper,
+ * this preserves the slot–hash pairing and avoids call‑site mismatches.
+ * Signatures are abstracted; only logical content matters (see §1.6).
+ ***************************************************************************)
+CreateNotarFallbackVoteForBlock(v, b) ==
+    CreateNotarFallbackVote(v, b.slot, b.hash)
+
+\* Well-formedness lemma: a notar-fallback vote constructed for a valid
+\* block is a valid vote (content-only; signatures are abstracted).
+THEOREM CreateNotarFallbackVoteForBlockWellTyped ==
+    \A v \in Validators, b \in Block :
+        IsValidBlock(b) => IsValidVote(CreateNotarFallbackVoteForBlock(v, b))
+
 \* ============================================================================
 \* ANCESTRY RELATIONSHIPS (whitepaper §2.1, Def. 5; safety §2.6/Thm. 1)
 \* ============================================================================

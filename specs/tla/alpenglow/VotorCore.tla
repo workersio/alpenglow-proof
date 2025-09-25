@@ -271,13 +271,17 @@ HandleParentReady(validator, slot, parentHash) ==
  * Handle SafeToNotar event (Whitepaper Algorithm 1, lines 16–20).
  * After verifying Definition 16 conditions, emits skip votes for any
  * missed slots and casts the notar-fallback vote.
+ *
+ * Note: We accept the block `b` (available at the call site) and use the
+ * block-typed wrapper to preserve slot–hash pairing by construction.
  ***************************************************************************)
 
-HandleSafeToNotar(validator, slot, blockHash) ==
-    LET skipResult == TrySkipWindow(validator, slot)
+HandleSafeToNotar(validator, b) ==
+    LET slot == b.slot
+        skipResult == TrySkipWindow(validator, slot)
     IN
         IF ~HasState(skipResult, slot, "ItsOver") THEN
-            LET vote == CreateNotarFallbackVote(skipResult.id, slot, blockHash)
+            LET vote == CreateNotarFallbackVoteForBlock(skipResult.id, b)
                 newValidator == AddState(skipResult, slot, "BadWindow")
                 poolWithVote == StoreVote(newValidator.pool, vote)
             IN [newValidator EXCEPT !.pool = poolWithVote]

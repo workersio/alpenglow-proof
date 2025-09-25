@@ -619,6 +619,9 @@ EmitBlockNotarized ==
  * Explanation
  * - When that inequality holds and the node hasn’t already voted to notarize b
  *   in slot s, emit the event and cast notar-fallback accordingly (Alg.1).
+ * - We pass the full block `b` into the handler and use the typed wrapper
+ *   to ensure slot–hash pairing by construction; creation occurs only under
+ *   the CanEmitSafeToNotar guard above (aid to model checking).
  ***************************************************************************)
 EmitSafeToNotar ==
     /\ \E v \in CorrectNodes, s \in 1..MaxSlot, b \in blocks :
@@ -628,7 +631,7 @@ EmitSafeToNotar ==
                 votedForB == VotedForBlock(validators[v], s, b.hash)
             IN CanEmitSafeToNotar(validators[v].pool, s, b.hash, b.parent, alreadyVoted, votedForB)
          /\ ~HasState(validators[v], s, "BadWindow") \* Prevents re-emitting after a fallback vote was cast
-         /\ validators' = [validators EXCEPT ![v] = HandleSafeToNotar(@, s, b.hash)]
+         /\ validators' = [validators EXCEPT ![v] = HandleSafeToNotar(@, b)]
     /\ UNCHANGED <<blocks, messages, byzantineNodes, time, finalized, blockAvailability>>
 
  (***************************************************************************
