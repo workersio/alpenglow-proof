@@ -293,10 +293,12 @@ ByzantineAction(v) ==
  * - Correct leader for slot `s` creates a new block that extends `parent`.
  * - For the first slot of a window, require `ParentReady` to be in state,
  *   matching Def.15’s precondition for starting the window.
- ***************************************************************************)
+***************************************************************************)
+\* Proposal is gated on leader having the parent locally (Rotor handoff).
 HonestProposeBlock(leader, slot, parent) ==
     /\ leader \in CorrectNodes
     /\ parent \in blocks
+    /\ parent \in blockAvailability[leader]
     /\ slot \in Slots
     /\ slot > parent.slot
     /\ slot <= MaxSlot
@@ -330,10 +332,12 @@ HonestProposeBlock(leader, slot, parent) ==
  * - Allow the leader to begin building at the first slot of a window as soon
  *   as the ParentReady predicate would hold (even before the event is emitted).
  * - Disabled by default; included for comparison with the strict variant.
- ***************************************************************************)
+***************************************************************************)
+\* Optimistic proposal also requires having the parent locally (Rotor handoff).
 HonestProposeBlockOptimistic(leader, slot, parent) ==
     /\ leader \in CorrectNodes
     /\ parent \in blocks
+    /\ parent \in blockAvailability[leader]
     /\ slot \in Slots
     /\ slot > parent.slot
     /\ slot <= MaxSlot

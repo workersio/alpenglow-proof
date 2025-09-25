@@ -249,7 +249,7 @@ StructuralBinOK(bins, needers, nextLeader) ==
 \* among selected relays, and `RotorMaxFailedRelayStake` as the maximum
 \* admissible failed stake within the chosen set, so that even after
 \* failures the remaining stake still meets `RotorMinRelayStake`.
-ResilienceOK(sample) == FailureResilient(sample)
+ResilienceOK(relays) == FailureResilient(relays)
 
 \* Core candidate bin assignments following whitepaper constraints
 \* Intent: over-approximate PS-P feasibility by structural compliance
@@ -327,13 +327,14 @@ SliceDelivered(slice, relays, correctNodes) ==
 
 (***************************************************************************
  * Latency Hint: next leader prioritized -> zero additional delay if included.
- * (Purely advisory; other modules may incorporate this in time progression.)
+ * (Advisory; protocol uses this to reason about fast handoff.)
  ***************************************************************************)
-\* Delivery/latency hint decoupled from selection membership:
-\* If any relays are selected (sample # {}), each relay sends to the
-\* next leader first; the next leader’s additional delay is modeled as 0.
-\* This does not require the next leader to be among the relays.
-NextDisseminationDelay(sample, nextLeader) == IF sample # {} THEN 0 ELSE 1
+\* Abstract on-path hook and δ vs 2δ delay:
+\* If the next leader is on-path (typically among selected relays),
+\* model zero additional delay; otherwise add one unit.
+OnPath(nextLeader, relays) == nextLeader \in relays
+
+NextDisseminationDelay(relays, nextLeader) == IF OnPath(nextLeader, relays) THEN 0 ELSE 1
 
 (***************************************************************************
  * Selection Safety Invariant (can be referenced elsewhere):
