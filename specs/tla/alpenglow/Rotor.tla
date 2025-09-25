@@ -47,12 +47,19 @@ ASSUME
  * Step 3: Sample one node per remaining bin proportionally
  ***************************************************************************)
 
+\* DeterministicBinCount preconditions (typing/totality documentation):
+\*  - StakeMap ∈ [Validators → Nat{0}] (Certificates.tla)
+\*  - Validators # {} (Messages.tla) ⇒ TotalStake > 0 (division safe)
+\* These are assumed globally and ensure PS‑P Step 1 arithmetic is well-defined.
 \* PS-P Step 1: Calculate deterministic bin count for a node
 \* Returns ⌊(stake_fraction * Γ)⌋ where stake_fraction = StakeMap[v] / TotalStake
 DeterministicBinCount(v) ==
     (StakeMap[v] * GammaTotalShreds) \div TotalStake
 
-\* Large stakeholders: those with deterministic bin count ≥ 1
+
+\* Large stakeholders: those with deterministic bin count ≥ 1.
+\* Boundary note: includes the equality case rho = 1/Gamma since floor(rho*Gamma) >= 1;
+\* see PS-P Definition 46, Step 1 (alpenglow-whitepaper.md:1156).
 LargeStakeholdersInNeeders(needers) == 
     { v \in needers : DeterministicBinCount(v) >= 1 }
 
@@ -66,9 +73,21 @@ TotalDeterministicBins(needers) ==
                  DeterministicBinCount(v) + SumDet(S \ {v})
     IN SumDet(needers)
 
+\* Exact total deterministic bins occupied by large stakeholders (PS-P Step 1)
+\* Exact per Definition 46: Σ_{v ∈ large} ⌊ρ_v · Γ⌋, capped by Γ
+TotalDeterministicBinsExact(needers) ==
+    LET large == LargeStakeholdersInNeeders(needers)
+        RECURSIVE SumDet(_)
+        SumDet(S) ==
+            IF S = {} THEN 0
+            ELSE LET v == CHOOSE x \in S : TRUE IN
+                 DeterministicBinCount(v) + SumDet(S \ {v})
+        total == SumDet(large)
+    IN IF total >= GammaTotalShreds THEN GammaTotalShreds ELSE total
+
 \* Remaining bins after deterministic assignments
 RemainingBins(needers) ==
-    LET deterministicTotal == TotalDeterministicBins(needers)
+    LET deterministicTotal == TotalDeterministicBinsExact(needers)
     IN IF deterministicTotal >= GammaTotalShreds 
        THEN 0 
        ELSE GammaTotalShreds - deterministicTotal
@@ -76,50 +95,63 @@ RemainingBins(needers) ==
 \* Note: We instantiate PS-P over `needers` (validators that still need the slice),
 \* not the entire validator set. This aligns with Rotor's operational constraint
 \* to only choose relays from nodes that do not yet have the block.
+\* Consistency with the whitepaper’s wording “other nodes that still need it”
+\* (alpenglow-whitepaper.md:384–386): the current leader is not a needer.
+\* In MainProtocol, the leader records the new block upon proposal, ensuring
+\* leader ∉ needers by construction.
 
 \* Supporting bound: Σ_{v} ⌊ρ_v · Γ⌋ ≤ Γ ensures non-negativity above.
-THEOREM DeterministicBinsBound == TotalDeterministicBins(DOMAIN StakeMap) <= GammaTotalShreds
+THEOREM DeterministicBinsBound == TotalDeterministicBinsExact(DOMAIN StakeMap) <= GammaTotalShreds
 
 \* Helper: Check if PS-P bin assignment is feasible
 PSPBinAssignmentPossible(needers, nextLeader) ==
     LET largeStakeholders == LargeStakeholdersInNeeders(needers)
         remainingNeeders == needers \ largeStakeholders
         remainingBins == RemainingBins(needers)
-        deterministicTotal == TotalDeterministicBins(needers)
+        deterministicTotal == TotalDeterministicBinsExact(needers)
     IN /\ deterministicTotal <= GammaTotalShreds
        /\ (nextLeader \in needers => 
            nextLeader \in largeStakeholders \/ nextLeader \in remainingNeeders)
 
+\* Deterministic bin indices (first d bins are PS-P Step 1 allocations)
+DeterministicIndices(needers) == 1..TotalDeterministicBinsExact(needers)
+
 \* Bin assignment function: maps each bin [1..Γ] to a node
-\* Simplified PS-P algorithm with proper multiplicity handling
+\* Implements PS-P Step 1 exactly (per-validator multiplicities), then fills
+\* remaining bins by a simple proportional-sampling placeholder among non-large.
 PSPBinAssignment(needers, nextLeader) ==
     IF ~PSPBinAssignmentPossible(needers, nextLeader) THEN [j \in {} |-> CHOOSE v \in needers : TRUE]
     ELSE LET largeStakeholders == LargeStakeholdersInNeeders(needers)
              remainingNeeders == needers \ largeStakeholders
-             deterministicTotal == TotalDeterministicBins(needers)
+             deterministicTotal == TotalDeterministicBinsExact(needers)
              remainingBins == RemainingBins(needers)
-         IN IF GammaTotalShreds <= Cardinality(needers) THEN
-                \* Simple case: enough needers to fill all bins
+              detBins ==
+                  IF deterministicTotal = 0 THEN [j \in {} |-> CHOOSE v \in needers : TRUE]
+                  ELSE 
+                      \* Choose an arbitrary function that assigns exact multiplicities
+                      CHOOSE f \in [1..deterministicTotal -> largeStakeholders] :
+                          \A v \in largeStakeholders :
+                              Cardinality({ i \in 1..deterministicTotal : f[i] = v }) = DeterministicBinCount(v)
+          IN IF GammaTotalShreds <= Cardinality(needers) THEN
+                \* Enough needers to map all Γ bins (duplicates allowed in bins; set conversion dedups)
                 [j \in 1..GammaTotalShreds |-> 
-                 IF j <= deterministicTotal /\ largeStakeholders # {} THEN
-                     \* Assign deterministic bins to large stakeholders (round-robin)
-                     CHOOSE v \in largeStakeholders : TRUE
+                 IF j \in 1..deterministicTotal /\ largeStakeholders # {} THEN
+                     \* Deterministic allocations first, honoring exact multiplicities
+                     detBins[j]
                  ELSE IF nextLeader \in remainingNeeders /\ j = deterministicTotal + 1 THEN
                      \* Prioritize next leader in first remaining bin
                      nextLeader
+                 ELSE IF remainingNeeders # {} THEN
+                     \* Fill remaining bins from non-large needers (simplified PS-P Steps 2–3)
+                     CHOOSE v \in remainingNeeders : TRUE
                  ELSE
-                     \* Fill remaining bins from remaining needers
-                     CHOOSE v \in remainingNeeders : TRUE]
-            ELSE [j \in {} |-> CHOOSE v \in needers : TRUE] \* Not enough needers
+                     \* Fallback: if no non-large needers exist, choose any needer
+                     CHOOSE v \in needers : TRUE]
+            ELSE [j \in {} |-> CHOOSE v \in needers : TRUE] \* Not enough unique needers to fill Γ
 
 \* Convert bin assignment to relay set (handles multiplicity correctly)
 BinsToRelaySet(bins) ==
     { bins[j] : j \in DOMAIN bins }
-
-\* PS-P relay selection using bin-based approach
-PSPSelect(needers, nextLeader) ==
-    LET bins == PSPBinAssignment(needers, nextLeader)
-    IN IF DOMAIN bins = {} THEN {} ELSE BinsToRelaySet(bins)
 
 \* Minimum residual stake required after worst allowed relay failures
 RequiredResilientStake == RotorMinRelayStake
@@ -135,12 +167,14 @@ FailureResilient(sample) ==
 LargeStakeholders(S) == { v \in S : DeterministicBinCount(v) >= 1 }
 
 \* PS-P structural constraint: verify bin assignment correctness
-\* Updated to work with bin-based multiplicity model
+\* - Exactly Γ bins assigned and range within needers
+\* - Enforce PS-P Step 1 multiplicities exactly over the deterministic prefix
+\*   (allows additional probabilistic assignments for large stakeholders beyond Step 1)
 PSPConstraint(bins, needers) == 
-    /\ DOMAIN bins = 1..GammaTotalShreds  \* Exactly Γ bins assigned
-    /\ \A j \in DOMAIN bins : bins[j] \in needers  \* All assignments valid
-    /\ \A v \in needers :  \* Enforce PS-P Step 1 multiplicity lower bound
-        Cardinality({j \in DOMAIN bins : bins[j] = v}) >= DeterministicBinCount(v)
+    /\ DOMAIN bins = 1..GammaTotalShreds
+    /\ \A j \in DOMAIN bins : bins[j] \in needers
+    /\ \A v \in LargeStakeholdersInNeeders(needers) :
+          Cardinality({ j \in 1..TotalDeterministicBinsExact(needers) : bins[j] = v }) = DeterministicBinCount(v)
 
 \* Latency optimisation: include next leader early if it still needs the block.
 \* Updated to work with bin assignments
@@ -160,6 +194,15 @@ StructuralBinOK(bins, needers, nextLeader) ==
     /\ PSPConstraint(bins, needers)              \* PS-P compliance (§3.1)
     /\ NextLeaderConstraint(bins, needers, nextLeader)  \* Optimization hint
     /\ NonEmptyConstraint(bins, needers)
+
+\* PS-P relay selection using bin-based approach (enforces structural validity)
+PSPSelect(needers, nextLeader) ==
+    LET bins == PSPBinAssignment(needers, nextLeader)
+    IN IF DOMAIN bins = {}
+       THEN {}
+       ELSE IF StructuralBinOK(bins, needers, nextLeader)
+            THEN BinsToRelaySet(bins)
+            ELSE {}
 
 \* Additional resilience constraint (stake-based failure tolerance)
 \* NOTE: This is beyond the core Rotor spec but adds robustness
