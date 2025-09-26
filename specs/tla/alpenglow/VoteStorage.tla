@@ -323,10 +323,22 @@ HasNotarizationCert(pool, slot, blockHash) ==
 HasNotarFallbackCert(pool, slot, blockHash) ==
     HasBlockCertOfType(pool, slot, blockHash, "NotarFallbackCert")
 
-\* Check if pool has a skip certificate for a slot
-HasSkipCert(pool, slot) ==
+\* Generic slot-scoped certificate presence (symmetry with HasBlockCertOfType)
+\* Whitepaper: Table 6 (certificate types) notes Skip/Finalization are slot-scoped.
+HasSlotCertOfType(pool, slot, certType) ==
     \E cert \in pool.certificates[slot] :
-        cert.type = "SkipCert"
+        /\ cert.type = certType
+        /\ cert.slot = slot
+
+\* Check if pool has a skip certificate for a slot
+\* Documentation (audit): Definition 15 (ParentReady) requires that every
+\* gap slot between the certified parent and the first slot of a leader
+\* window is covered by a skip certificate — see
+\* alpenglow-whitepaper.md:543–:546 (Def. 15) and Table 6.
+\* Note: Mutual exclusion with block certificates for the same slot is
+\* enforced by Certificates.SkipVsBlockCertExclusion (see Invariant).
+HasSkipCert(pool, slot) ==
+    HasSlotCertOfType(pool, slot, "SkipCert")
 
 \* Check if pool has a fast-finalization certificate
 HasFastFinalizationCert(pool, slot, blockHash) ==
@@ -337,8 +349,7 @@ HasFastFinalizationCert(pool, slot, blockHash) ==
 \* in the slow path is determined by combining this with the unique notarized
 \* block for the slot via HasNotarizationCert.
 HasFinalizationCert(pool, slot) ==
-    \E cert \in pool.certificates[slot] :
-        cert.type = "FinalizationCert"
+    HasSlotCertOfType(pool, slot, "FinalizationCert")
 
 \* Optional typing helper (audit suggestion): Callers can assert this to make
 \* slot/block domains explicit in proof obligations without cluttering the
