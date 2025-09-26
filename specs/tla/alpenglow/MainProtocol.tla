@@ -1048,6 +1048,12 @@ TimeoutsInFuture ==
             LET timeout == validators[v].timeouts[s]
             IN timeout = 0 \/ timeout > validators[v].clock
 
+\* Local clock monotonicity (audit 0017): correct nodes' local clocks never
+\* move ahead of the model time and, combined with AdvanceTime, are
+\* non-decreasing across steps.
+LocalClockMonotonic ==
+    \A v \in CorrectNodes : validators[v].clock <= time
+
 (***************************************************************************
  * ROTOR SELECTION SOUNDNESS — structural constraints when successful
  ***************************************************************************)
@@ -1314,6 +1320,7 @@ Invariant ==
     /\ BucketSlotConsistencyOK
     /\ RotorSelectSoundness
     /\ TimeoutsInFuture
+    /\ LocalClockMonotonic
     /\ UniqueBlockHashes(blocks)
     /\ FinalizedAncestorClosure
     /\ BlockNotarizedImpliesCert

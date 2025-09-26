@@ -386,14 +386,17 @@ AdvanceClock(validator, newTime) ==
     \* Monotonic guard (audit 0015 suggestion): do not move clock backwards
     IF newTime < validator.clock THEN validator
     ELSE
-        LET expiredTimeouts == {s \in Slots : 
-                            validator.timeouts[s] > 0 /\ 
-                            validator.timeouts[s] <= newTime}
-        RECURSIVE ProcessTimeouts(_,_)
+        LET 
+            \* MC note (audit 0017): `Slots` is configuration-bounded in
+            \* MainProtocol (Slots = 0..MaxSlot), so this set is finite.
+            expiredTimeouts == {s \in Slots :
+                                   /\ validator.timeouts[s] > 0
+                                   /\ validator.timeouts[s] <= newTime}
+            RECURSIVE ProcessTimeouts(_,_)
         ProcessTimeouts(val, slots) ==
             IF slots = {} THEN val
             ELSE
-                LET s == CHOOSE x \in slots : TRUE
+                LET s == CHOOSE x \in slots : \A y \in slots : x <= y
                     newVal == HandleTimeout(val, s)
                 IN ProcessTimeouts(newVal, slots \ {s})
         IN [ProcessTimeouts(validator, expiredTimeouts) EXCEPT !.clock = newTime]
