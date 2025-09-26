@@ -24,7 +24,7 @@
  * voting validators’ stakes (Table 6: Σ = Σ_i ρ_i).
  ***************************************************************************)
 
-EXTENDS Naturals, FiniteSets, Messages
+EXTENDS Naturals, FiniteSets, Messages, Sequences
 
 \* ============================================================================
 \* CONSTANTS
@@ -61,27 +61,33 @@ DefaultThreshold  == 60
  * prior to stake summation.
  ***************************************************************************)
 
+EnumerateSet(S) ==
+    CHOOSE seq \in Seq(S) :
+        /\ Len(seq) = Cardinality(S)
+        /\ {seq[i] : i \in 1 .. Len(seq)} = S
+        /\ \A i, j \in 1 .. Len(seq) : i # j => seq[i] # seq[j]
+
 \* Calculate total stake in the system (Σ_all v ρ_v)
 TotalStake == 
     LET vals == DOMAIN StakeMap
-    IN IF vals = {} THEN 0
-       ELSE LET RECURSIVE Sum(_)
-            Sum(S) == 
-                IF S = {} THEN 0
-                ELSE LET v == CHOOSE x \in S : TRUE
-                     IN StakeMap[v] + Sum(S \ {v})
-            IN Sum(vals)
+        seq == EnumerateSet(vals)
+        n == Len(seq)
+        folds == {f \in [0..n -> Nat] :
+                      f[0] = 0 /\
+                      \A i \in 1..n : f[i] = f[i - 1] + StakeMap[seq[i]]}
+        totals == {f[n] : f \in folds}
+    IN IF totals = {} THEN 0 ELSE CHOOSE total \in totals : TRUE
 
 \* Calculate stake for a set of validators (Σ_{v ∈ set} ρ_v)
 CalculateStake(validatorSet) ==
     LET vals == validatorSet \cap DOMAIN StakeMap
-    IN IF vals = {} THEN 0
-       ELSE LET RECURSIVE Sum(_)
-            Sum(S) == 
-                IF S = {} THEN 0
-                ELSE LET v == CHOOSE x \in S : TRUE
-                     IN StakeMap[v] + Sum(S \ {v})
-            IN Sum(vals)
+        seq == EnumerateSet(vals)
+        n == Len(seq)
+        folds == {f \in [0..n -> Nat] :
+                      f[0] = 0 /\
+                      \A i \in 1..n : f[i] = f[i - 1] + StakeMap[seq[i]]}
+        totals == {f[n] : f \in folds}
+    IN IF totals = {} THEN 0 ELSE CHOOSE total \in totals : TRUE
 
 \* Get unique validators from a set of votes (enforce Def. 12 “count once”)
 UniqueValidators(votes) ==

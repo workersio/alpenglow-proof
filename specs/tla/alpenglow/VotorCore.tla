@@ -85,6 +85,15 @@ HasState(validator, slot, stateObj) ==
 AddState(validator, slot, stateObj) ==
     [validator EXCEPT !.state[slot] = validator.state[slot] \union {stateObj}]
 
+FoldValidatorSet(step(_,_), base, set) ==
+    LET seq == EnumerateSet(set)
+        n == Len(seq)
+        folds == {f \in [0..n -> ValidatorState] :
+                      f[0] = base /\
+                      \A i \in 1..n : f[i] = step(seq[i], f[i - 1])}
+        states == {f[n] : f \in folds}
+    IN IF states = {} THEN base ELSE CHOOSE result \in states : TRUE
+
 \* Check if validator voted for a specific block
 VotedForBlock(validator, slot, blockHash) ==
     \E vote \in GetVotesForSlot(validator.pool, slot) :
@@ -164,41 +173,28 @@ TrySkipWindow(validator, slot) ==
     LET windowSlots == WindowSlots(slot)
         slotsToSkip == {s \in windowSlots : 
                         s \in Slots /\ ~HasState(validator, s, "Voted")}
-    IN
-        IF slotsToSkip # {} THEN
-            LET RECURSIVE SkipSlots(_,_)
-                SkipSlots(val, slots) ==
-                    IF slots = {} THEN val
-                    ELSE 
-                        LET s == CHOOSE x \in slots : TRUE
-                            vote == CreateSkipVote(val.id, s)
-                            newVal1 == AddState(val, s, "Voted")
-                            newVal2 == AddState(newVal1, s, "BadWindow")
-                            poolWithVote == StoreVote(newVal2.pool, vote)
-                            updatedVal == [newVal2 EXCEPT 
-                                          !.pool = poolWithVote,
-                                          !.pendingBlocks[s] = {}]
-                        IN SkipSlots(updatedVal, slots \ {s})
-            IN SkipSlots(validator, slotsToSkip)
-        ELSE validator
+        SkipSlotStep(s, val) ==
+            LET vote == CreateSkipVote(val.id, s)
+                newVal1 == AddState(val, s, "Voted")
+                newVal2 == AddState(newVal1, s, "BadWindow")
+                poolWithVote == StoreVote(newVal2.pool, vote)
+            IN [newVal2 EXCEPT
+                !.pool = poolWithVote,
+                !.pendingBlocks[s] = {}]
+    IN FoldValidatorSet(SkipSlotStep, validator, slotsToSkip)
 
 \* ============================================================================
 \* CHECK PENDING BLOCKS (Whitepaper Algorithm 1, lines 28–30)
 \* ============================================================================
 
 CheckPendingBlocks(validator) ==
-    LET RECURSIVE CheckSlots(_,_)
-        CheckSlots(val, slots) ==
-            IF slots = {} THEN val
-            ELSE
-                LET s == CHOOSE x \in slots : TRUE
-                    blocks == val.pendingBlocks[s]
-                IN IF blocks = {} THEN CheckSlots(val, slots \ {s})
-                   ELSE 
-                       LET block == CHOOSE b \in blocks : TRUE
-                           newVal == TryNotar(val, block)
-                       IN CheckSlots(newVal, slots \ {s})
-    IN CheckSlots(validator, {s \in Slots : validator.pendingBlocks[s] # {}})
+    LET slotsWithPending == {s \in Slots : validator.pendingBlocks[s] # {}}
+        CheckSlotStep(s, val) ==
+            LET blocks == val.pendingBlocks[s]
+            IN IF blocks = {} THEN val
+               ELSE LET block == CHOOSE b \in blocks : TRUE
+                    IN TryNotar(val, block)
+    IN FoldValidatorSet(CheckSlotStep, validator, slotsWithPending)
 
 \* ============================================================================
 \* EVENT HANDLERS (Algorithm 1)
@@ -257,15 +253,10 @@ HandleParentReady(validator, slot, parentHash) ==
         withParent == [newValidator EXCEPT !.parentReady[slot] = parentHash]
         afterCheck == CheckPendingBlocks(withParent)
         windowSlots == WindowSlots(slot)
-        \* Set timeouts for all slots in window
-        RECURSIVE SetTimeouts(_,_)
-        SetTimeouts(val, slots) ==
-            IF slots = {} THEN val
-            ELSE
-                LET s == CHOOSE x \in slots : TRUE
-                    timeout == val.clock + DeltaTimeout + ((s - slot + 1) * DeltaBlock)
-                IN SetTimeouts([val EXCEPT !.timeouts[s] = timeout], slots \ {s})
-    IN SetTimeouts(afterCheck, windowSlots \cap Slots)
+        SetTimeoutStep(s, val) ==
+            LET timeout == val.clock + DeltaTimeout + ((s - slot + 1) * DeltaBlock)
+            IN [val EXCEPT !.timeouts[s] = timeout]
+    IN FoldValidatorSet(SetTimeoutStep, afterCheck, windowSlots \cap Slots)
 
 (***************************************************************************
  * Handle SafeToNotar event (Whitepaper Algorithm 1, lines 16–20).
@@ -308,14 +299,9 @@ AdvanceClock(validator, newTime) ==
     LET expiredTimeouts == {s \in Slots : 
                             validator.timeouts[s] > 0 /\ 
                             validator.timeouts[s] <= newTime}
-        RECURSIVE ProcessTimeouts(_,_)
-        ProcessTimeouts(val, slots) ==
-            IF slots = {} THEN val
-            ELSE
-                LET s == CHOOSE x \in slots : TRUE
-                    newVal == HandleTimeout(val, s)
-                IN ProcessTimeouts(newVal, slots \ {s})
-    IN [ProcessTimeouts(validator, expiredTimeouts) EXCEPT !.clock = newTime]
+        ProcessTimeoutStep(s, val) == HandleTimeout(val, s)
+        updatedValidator == FoldValidatorSet(ProcessTimeoutStep, validator, expiredTimeouts)
+    IN [updatedValidator EXCEPT !.clock = newTime]
 
 \* ============================================================================
 \* TYPE INVARIANT
