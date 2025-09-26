@@ -3,80 +3,96 @@
 EXTENDS Naturals, FiniteSets, Certificates
 
 (***************************************************************************
- * ERASURE CODING CONSTANTS (Section 2.2)
- *   Γ (GammaTotal * Commentary mapping to Whitepaper
- *  - Γ, γ, κ: Erasure coding & over-provisioning (Lemma 7 requirement κ > 5/3)
- *  - DeterministicBinCount + PSPBinAssignment: Complete PS-P Definition 46
- *    * Step 1: ⌊ρᵢ * Γ⌋ deterministic bins per large stakeholder
- *    * Step 2: Partition remaining stakes across remaining bins
- *    * Step 3: Sample one node per bin proportionally to stake
- *  - BinsToRelaySet: Convert bin assignments to relay sets (handles multiplicity)
- *  - FailureResilient: Ensures sufficient residual stake after crashes/faults
- *  - NextDisseminationDelay: models "send to next leader first" as a latency hint
- *  - SliceReconstructable: abstracts Reed–Solomon recovery threshold
- *  - Bin-based model correctly captures PS-P variance reduction properties): total shreds per slice
- *   γ (GammaDataShreds): minimum distinct shreds to reconstruct
- *   κ (KappaExpRatio): expansion ratio (Γ / γ)  — over‑provisioning > 5/3
- * Assumptions stay purely arithmetic to avoid rationals.
+ * ROTOR DATA DISSEMINATION — mapping to the whitepaper
+ *
+ * What this module specifies and where it comes from:
+ *   - §2.2 Rotor (lines :378–:406, :414–:439)
+ *       • Leader encodes each slice into Γ shreds with a Merkle tree; any γ
+ *         shreds suffice to reconstruct (Reed–Solomon). Authenticity is
+ *         per‑shred via Merkle paths and a signed root (:382–:401; §1.6 :267).
+ *       • Relays: per slice, the leader selects Γ relays and sends one shred
+ *         to each; relays then broadcast to all nodes that still need it and
+ *         prioritize the next leader first for faster handoff (:402–:406).
+ *       • Success (Def. 6 :414): leader correct AND at least γ correct relays.
+ *       • Resilience (Lemma 7 :418): over‑provisioning κ = Γ/γ > 5/3 makes
+ *         success overwhelmingly likely as γ→∞.
+ *       • Latency (Lemma 8 :431): ≤2δ; with large κ it approaches δ.
+ *       • Bandwidth optimality (Lemma 9 :439): stake‑proportional usage, rate
+ *         β_ℓ/κ in expectation, asymptotically optimal.
+ *   - §1.6 Cryptography (Erasure code, Merkle) (:267–:275)
+ *   - §3.1 Smart Sampling (PS‑P, Definition 46 :1154): bin‑based relay sampling
+ *     that reduces variance vs IID; Step 1 deterministic ⌊ρ·Γ⌋ bins per large
+ *     stakeholder, then partition + per‑bin sampling for the remainder.
+ *
+ * How the TLA+ model captures the above:
+ *   - Γ (`GammaTotalShreds`) and γ (`GammaDataShreds`) are explicit constants;
+ *     κ > 5/3 is enforced arithmetically in `ASSUME` per Lemma 7.
+ *   - PS‑P is modeled with explicit bin multiplicities (Γ bins per slice):
+ *       • Step 1: `DeterministicBinCount`, `LargeStakeholders`, and exact
+ *         multiplicity assignment for ⌊ρᵢ·Γ⌋ bins.
+ *       • Steps 2–3: `PartitionWeights` + per‑bin eligibility to abstract
+ *         partitioning/sampling without committing to RNGs.
+ *   - Two success predicates are provided:
+ *       • `RotorSuccessful` counts distinct relays (set view; conservative).
+ *       • `RotorSuccessfulBins` counts by‑bin assignments (Γ multiplicity),
+ *         matching Definition 6 more closely.
+ *   - `NextDisseminationDelay` records the “send to next leader first” latency
+ *     hint from §2.2 (:402–:406) for reasoning about fast leader handoff.
+ *
+ * Scope note: This module concerns data dissemination only; chain safety does
+ * not depend on Rotor (paper §2.2 “Analysis” :19). Voting/finality are in
+ * `VotorCore.tla`/`Certificates.tla`.
  ***************************************************************************)
 CONSTANTS
-    RotorMinRelayStake,   \* Minimum total stake covered by a relay set
-    GammaTotalShreds,       \* Γ > 0 - exactly this many relays per slice
-    GammaDataShreds,        \* γ > 0 - minimum shreds needed to reconstruct
-    RotorMaxFailedRelayStake, \* Upper bound (stake) of relays that may fail (crash/Byz)
-    MaxSlicesPerBlock
+    RotorMinRelayStake,       \* Modeling guard: min stake covered by selected relays
+    GammaTotalShreds,         \* Γ > 0 — total shreds/relays per slice (§2.2 :382)
+    GammaDataShreds,          \* γ > 0 — min shreds to reconstruct (§1.6 :267; §2.2 :384)
+    RotorMaxFailedRelayStake, \* Modeling guard: max failed stake tolerated within relays
+    MaxSlicesPerBlock         \* Upper bound on slices per block (pipeline; §2.2 :378)
 
 ASSUME
     /\ GammaTotalShreds \in Nat \ {0}
     /\ GammaDataShreds \in Nat \ {0}
-    /\ 3 * GammaTotalShreds > 5 * GammaDataShreds   \* κ > 5/3 resilience condition (Lemma 7)
+    /\ 3 * GammaTotalShreds > 5 * GammaDataShreds   \* κ > 5/3 (Lemma 7 :418)
     /\ GammaDataShreds < GammaTotalShreds
     /\ RotorMinRelayStake \in Nat \ {0}
     /\ RotorMinRelayStake <= TotalStake
     /\ RotorMaxFailedRelayStake \in Nat
-    /\ RotorMaxFailedRelayStake < RotorMinRelayStake   \* Need residual stake after failures
+    /\ RotorMaxFailedRelayStake < RotorMinRelayStake   \* Ensure residual stake after failures
     /\ MaxSlicesPerBlock \in Nat \ {0}
-\* Parameter semantics:
-\*  - Units: RotorMinRelayStake and RotorMaxFailedRelayStake use the same stake units
-\*    as StakeMap/TotalStake (Certificates.tla). In the MC harness, TotalStake = 100
-\*    (percent-style normalization), so values like 40 and 10 read as percentages.
-\*  - Relation to γ and κ (Γ/γ): These parameters act as an explicit robustness
-\*    guard for relay selection, complementing the whitepaper’s success condition
-\*    (≥γ correct relays). They are not directly bound to γ or κ here; calibrate
-\*    them per model goals if needed (e.g., to target a desired failure tolerance).
+\* Semantics and references:
+\*  - Γ, γ encode the erasure‑coding parameters (§1.6 :267; §2.2 :382–:385).
+\*  - κ > 5/3 encodes the over‑provisioning used in Lemma 7 (rotor resilience).
+\*  - RotorMinRelayStake / RotorMaxFailedRelayStake are specification guards
+\*    to model “enough stake” among chosen relays; they complement Def. 6’s
+\*    ≥γ‑correct‑relays condition (:414) and are not fixed by the paper.
 
 (***************************************************************************
- * PS-P ALGORITHM IMPLEMENTATION (Definition 46)
- * Key insight: Model relay selection as bin assignments (functions) to capture
- * multiplicity correctly. Large stakeholders can occupy multiple bins.
- * 
- * Step 1: Deterministic inclusion - ⌊ρᵢ * Γ⌋ bins per large stakeholder
- * Step 2: Partition remaining stakes into remaining bins  
- * Step 3: Sample one node per remaining bin proportionally
+ * PS-P SAMPLING (Smart Sampling, §3.1; Definition 46 :1154)
+ *
+ * We model rotor relay sampling with explicit Γ “bins” per slice:
+ *   - Step 1 (deterministic): for each validator v, assign ⌊ρ_v·Γ⌋ bins.
+ *   - Step 2 (partition): partition remaining stake across the remaining bins.
+ *   - Step 3 (per‑bin sampling): sample one validator per remaining bin in
+ *     proportion to stake within that bin’s partition.
+ * The construction keeps multiplicity, which matters when reasoning with
+ * Definition 6 over bin assignments (see RotorSuccessfulBins).
  ***************************************************************************)
 
-\* DeterministicBinCount preconditions (typing/totality documentation):
-\*  - StakeMap ∈ [Validators → Nat{0}] (Certificates.tla)
-\*  - Validators # {} (Messages.tla) ⇒ TotalStake > 0 (division safe)
-\* These are assumed globally and ensure PS‑P Step 1 arithmetic is well-defined.
-\* PS-P Step 1: Calculate deterministic bin count for a node
-\* Returns ⌊(stake_fraction * Γ)⌋ where stake_fraction = StakeMap[v] / TotalStake
+\* Step 1 — deterministic bins (PS‑P, Def. 46 :1154)
+\* Preconditions (typing documentation):
+\*  - `StakeMap ∈ [Validators → Nat{0}]` and `TotalStake > 0` (Certificates.tla)
+\*  - Returns ⌊ρ_v·Γ⌋ where ρ_v = StakeMap[v] / TotalStake
 DeterministicBinCount(v) ==
     (StakeMap[v] * GammaTotalShreds) \div TotalStake
 
-\* Large stakeholders helper used across the module.
-\* PS-P Step 1 alignment note: ⌊ρ_v · Γ⌋ ≥ 1 ⇔ ρ_v ≥ 1/Γ; this reconciles the
-\* strict “> 1/Γ” phrasing in prose with the Σ⌊ρ_i·Γ⌋ arithmetic for k.
+\* Large stakeholders for Step 1: ⌊ρ_v·Γ⌋ ≥ 1 ⇔ ρ_v ≥ 1/Γ.
 LargeStakeholders(S) == { v \in S : DeterministicBinCount(v) >= 1 }
 
-\* Large stakeholders per PS-P Step 1 (Definition 46): those with
-\* ⌊ρ_v · Γ⌋ ≥ 1, i.e., ρ_v ≥ 1/Γ. Using the bin-count test with integer
-\* division makes the boundary explicit and keeps k = Γ − Σ⌊ρ_i · Γ⌋ consistent
-\* with deterministic assignments (the equality case ρ = 1/Γ is included).
+\* Alias used locally for readability.
 LargeStakeholdersInNeeders(needers) == LargeStakeholders(needers)
 
-\* Total deterministic bins occupied by large stakeholders (PS-P Step 1)
-\* Exact: Σ_{v ∈ needers} ⌊ρ_v · Γ⌋
+\* Total deterministic bins Σ_{v∈needers} ⌊ρ_v·Γ⌋ (Step 1; Def. 46)
 TotalDeterministicBins(needers) ==
     LET RECURSIVE SumDet(_)
         SumDet(S) ==
@@ -85,8 +101,7 @@ TotalDeterministicBins(needers) ==
                  DeterministicBinCount(v) + SumDet(S \ {v})
     IN SumDet(needers)
 
-\* Exact total deterministic bins occupied by large stakeholders (PS-P Step 1)
-\* Exact per Definition 46: Σ_{v ∈ large} ⌊ρ_v · Γ⌋, capped by Γ
+\* Exact deterministic count (capped by Γ) used to prefix‑assign bins.
 TotalDeterministicBinsExact(needers) ==
     LET large == LargeStakeholdersInNeeders(needers)
         RECURSIVE SumDet(_)
@@ -104,13 +119,8 @@ RemainingBins(needers) ==
        THEN 0 
        ELSE GammaTotalShreds - deterministicTotal
 
-\* Note: We instantiate PS-P over `needers` (validators that still need the slice),
-\* not the entire validator set. This aligns with Rotor's operational constraint
-\* to only choose relays from nodes that do not yet have the block.
-\* Consistency with the whitepaper’s wording “other nodes that still need it”
-\* (alpenglow-whitepaper.md:384–386): the current leader is not a needer.
-\* In MainProtocol, the leader records the new block upon proposal, ensuring
-\* leader ∉ needers by construction.
+\* We instantiate PS‑P over `needers` (validators that still need the slice),
+\* matching §2.2’s “other nodes that still need it” phrasing (:384–:386).
 
 \* Supporting bound: Σ_{v} ⌊ρ_v · Γ⌋ ≤ Γ ensures non-negativity above.
 THEOREM DeterministicBinsBound == TotalDeterministicBinsExact(DOMAIN StakeMap) <= GammaTotalShreds
@@ -128,20 +138,13 @@ PSPBinAssignmentPossible(needers, nextLeader) ==
 \* Deterministic bin indices (first d bins are PS-P Step 1 allocations)
 DeterministicIndices(needers) == 1..TotalDeterministicBinsExact(needers)
 
-\* Bin assignment function: maps each bin [1..Γ] to a node
-\* Implements PS-P Step 1 exactly (per-validator multiplicities), then models
-\* Steps 2–3 with an abstract partitioning witness over non‑large validators.
-\* We avoid probabilities and keep only per‑bin eligibility (support), which is
-\* sufficient to constrain choices without committing to a specific RNG.
-\* Always returns a total function on domain 1..GammaTotalShreds; duplicates
-\* across bins are allowed (PS‑P permits repeated selection when |needers| < Γ).
+\* Bin assignment: 1..Γ → needers
+\* - Implements Step 1 with exact multiplicities; Steps 2–3 via per‑bin
+\*   eligibility sets (support‑only; no RNG), allowing duplicates as in PS‑P.
 
-\* Partitioning witness (support only, no probabilities):
-\*  - For each remaining bin j, choose a non‑empty eligible subset of
-\*    remaining (non‑large) needers.
-\*  - If there are no non‑large needers, we fall back to choosing from
-\*    all needers for the remaining bins, preserving PS‑P's allowance of
-\*    duplicates.
+\* Partitioning witness (Step 2; §3.1):
+\*  - For each remaining bin j, provide a non‑empty eligible subset of
+\*    non‑large needers, weighted by stake; if none exist, allow all needers.
 PartitionWeights(needers) ==
     LET largeStakeholders == LargeStakeholdersInNeeders(needers)
         remainingNeeders == needers \ largeStakeholders
@@ -183,9 +186,8 @@ PSPBinAssignment(needers, nextLeader) ==
             \* Fallback: if no non-large needers exist, choose any needer (duplicates allowed)
             CHOOSE v \in needers : TRUE]
 
-\* Convert bin assignment to relay set (distinct relays)
-\* Note: This collapses per-bin multiplicity into the set of distinct relays.
-\* Success (Definition 6) and resilience checks are over distinct correct relays.
+\* Convert bin assignment to the distinct relay set used operationally.
+\* Note: collapses multiplicity; use RotorSuccessfulBins for by‑bin counting.
 BinsToRelaySet(bins) ==
     { bins[j] : j \in DOMAIN bins }
 
@@ -193,20 +195,16 @@ BinsToRelaySet(bins) ==
 \* Alias of `RotorMinRelayStake` for clarity and compatibility.
 RequiredResilientStake == RotorMinRelayStake
 
-\* A set of relays is failure-resilient if even after losing up to
-\* RotorMaxFailedRelayStake stake (inside the chosen set), the remaining
-\* stake still meets RotorMinRelayStake.
-\* Simplified for clarity: equivalent single constraint.
+\* Stake‑based resilience guard (specification‑level, not mandated by the paper):
+\* even if up to RotorMaxFailedRelayStake of stake among chosen relays fails,
+\* remaining stake still ≥ RotorMinRelayStake.
 FailureResilient(sample) ==
     CalculateStake(sample) >= RotorMinRelayStake + RotorMaxFailedRelayStake
 
-\* PS-P structural constraint (instantiated over `needers`):
-\* - Exactly Γ bins assigned and range within `needers` (operational scoping)
-\* - Enforce PS-P Step 1 deterministic lower bound for every validator v:
-\*     occurrences(bins, v) ≥ ⌊ρ_v · Γ⌋ = DeterministicBinCount(v)
-\*   This captures the Step 1 requirement without constraining how remaining
-\*   bins (from Steps 2–3) distribute; probabilistic partitioning/sampling is
-\*   not encoded as a structural invariant here.
+\* PS‑P structural constraint (Step 1 lower bound per validator):
+\*  - domain(bins) = 1..Γ and values in `needers`
+\*  - multiplicity(bins, v) ≥ ⌊ρ_v·Γ⌋ = DeterministicBinCount(v)
+\*  - Steps 2–3 remain unconstrained beyond membership, matching §3.1.
 PSPConstraint(bins, needers) == 
     /\ DOMAIN bins = 1..GammaTotalShreds
     /\ \A j \in DOMAIN bins : bins[j] \in needers
@@ -236,10 +234,9 @@ CountingLemma(bins) ==
 ZeroCountLowerBound(bins, v) ==
     DeterministicBinCount(v) = 0 => Cardinality({ j \in DOMAIN bins : bins[j] = v }) >= 0
 
-\* Combined structural constraints for whitepaper-compliant bin assignments
-\* Note: Keep selection unbiased; the next-leader prioritization is modeled
-\* as a separate latency hint (see NextDisseminationDelay) and is not a
-\* selection constraint.
+\* Combined structural constraints for whitepaper‑compliant bin assignments.
+\* The “send to next leader first” optimization affects latency only; selection
+\* remains unbiased (§2.2 :402–:406).
 StructuralBinOK(bins, needers, nextLeader) ==
     /\ PSPConstraint(bins, needers)              \* PS-P compliance (§3.1)
 
@@ -251,18 +248,14 @@ StructuralBinOK(bins, needers, nextLeader) ==
 \* failures the remaining stake still meets `RotorMinRelayStake`.
 ResilienceOK(relays) == FailureResilient(relays)
 
-\* Core candidate bin assignments following whitepaper constraints
-\* Intent: over-approximate PS-P feasibility by structural compliance
-\* (Step 1 multiplicities) plus resilience guard; selection remains unbiased.
-\* This is used as a feasibility/existence witness; actual selection can
-\* be any member of this set (e.g., via `PSPSelect`).
+\* Candidate bin assignments that satisfy PS‑P structure and resilience guard.
+\* Used as an existence/feasibility witness for `RotorSelect`.
 BinCandidates(needers, nextLeader) ==
     { bins \in [1..GammaTotalShreds -> needers] : 
         /\ StructuralBinOK(bins, needers, nextLeader)
         /\ ResilienceOK(BinsToRelaySet(bins)) }
 
-\* PS-P relay selection bound to structural feasibility.
-\* Picks any relay set induced by a structurally valid and resilient bin assignment.
+\* Relay selection picks any resilient set induced by a valid bin assignment.
 PSPSelect(needers, nextLeader) ==
     LET candBins == BinCandidates(needers, nextLeader)
         candSets == { BinsToRelaySet(b) : b \in candBins }
@@ -271,23 +264,22 @@ PSPSelect(needers, nextLeader) ==
        ELSE CHOOSE s \in candSets : TRUE
 
 
-\* Feasibility predicate: some structurally valid bin assignment exists when needed
+\* Feasibility predicate: some valid bin assignment exists when needed.
 RotorBinAssignmentPossible(needers, nextLeader) ==
     IF needers = {} THEN TRUE ELSE BinCandidates(needers, nextLeader) # {}
 
 
 (***************************************************************************
+ * ROTOR RELAY SELECTION (§2.2; §3.1 Def. 46 :1154)
+ *
  * RotorSelect(block, needers, nextLeader)
- * Whitepaper-aligned relay selection: uses exactly Γ bins per slice; the
- * returned relay set contains the distinct assignees (≤ Γ).
- * - Implements PS-P algorithm (Definition 46) with proper bin multiplicity
- * - Deterministically includes large stakeholders in ⌊ρᵢ * Γ⌋ bins (PS-P Step 1)
- * - Partitions remaining stakes and samples per bin (PS-P Steps 2–3)
- * - Returns {} iff no feasible relay set exists (safety)
- * 
- * Note: `block` is currently unused here; it remains in the signature to
- * allow referencing per-slice/block metadata in future constraints.
-***************************************************************************)
+ * - Uses Γ bins per slice; returns the set of distinct assignees (≤Γ).
+ * - Enforces Step 1 exact multiplicities (⌊ρ·Γ⌋), abstracts Steps 2–3 by
+ *   per‑bin eligibility. Returns {} iff no feasible selection exists.
+ * - `nextLeader` is not a selection constraint; it is used only by the
+ *   latency hint in `NextDisseminationDelay` (send next‑leader first, :402).
+ * - `block` is retained for potential future slice‑specific constraints.
+ ***************************************************************************)
 RotorSelect(block, needers, nextLeader) ==
     IF needers = {} THEN {}
     ELSE IF ~RotorBinAssignmentPossible(needers, nextLeader)
@@ -301,32 +293,25 @@ RotorSelect(block, needers, nextLeader) ==
                ELSE {} \* Defensive: should be unreachable if BinCandidates enforced
 
 (***************************************************************************
- * Streaming Progress (abstract): a slice is reconstructable after γ distinct
- * successful relay deliveries. We do not model individual shreds; instead we
- * expose a predicate that other modules can use if they wish. Callers are
- * responsible for ensuring the count reflects distinct, Merkle-validated
- * shreds for the same root.
+ * SLICE RECONSTRUCTION THRESHOLD (§1.6 :267; §2.2 :382–:385)
+ * A slice is reconstructable once γ distinct shreds for the same Merkle root
+ * are received and validated. We abstract per‑shred Merkle checks here.
  ***************************************************************************)
 SliceReconstructable(receivedShredsCount) ==
     receivedShredsCount >= GammaDataShreds
 
 (***************************************************************************
- * Definition 6 from Whitepaper: Rotor Success Condition
- * Rotor is successful if the leader is correct and at least γ correct relays participate.
- *
- * Note (conservative set-based approximation): This predicate counts distinct
- * relays only (collapsing multiplicity across Γ bins). It under-approximates
- * success relative to the whitepaper, which counts per-bin assignments. Use
- * RotorSuccessfulBins when the Γ-assignment multiplicity matters.
+ * ROTOR SUCCESS — DISTINCT RELAYS VIEW (Def. 6 :414)
+ * Leader correct AND at least γ distinct relays are correct.
+ * Set‑based approximation; under‑counts compared to by‑bin multiplicity.
  ***************************************************************************)
 RotorSuccessful(leader, relays, correctNodes) ==
     /\ leader \in correctNodes
     /\ Cardinality(relays \cap correctNodes) >= GammaDataShreds
 
 (***************************************************************************
- * Bins-aware success (aligns with Γ-assignment multiplicity)
- * Rotor is successful iff the leader is correct and at least γ bin assignments
- * go to correct nodes (counting multiplicity over the Γ bins).
+ * ROTOR SUCCESS — BY-BIN VIEW (Def. 6 :414)
+ * Counts multiplicity over the Γ bin assignments, matching §2.2 text.
  ***************************************************************************)
 CorrectAssignmentsCount(bins, correctNodes) ==
     Cardinality({ j \in DOMAIN bins : bins[j] \in correctNodes })
@@ -336,8 +321,8 @@ RotorSuccessfulBins(leader, bins, correctNodes) ==
     /\ CorrectAssignmentsCount(bins, correctNodes) >= GammaDataShreds
 
 (***************************************************************************
- * Slice Delivery Model: abstract representation of slice transmission
- * Models the two-hop delivery: Leader -> Relays -> All nodes
+ * SLICE DELIVERY MODEL (§2.2 :382–:406)
+ * Abstract two‑hop delivery: leader → relays → all nodes that still need it.
  ***************************************************************************)
 SliceDelivered(slice, relays, correctNodes) ==
     /\ slice.leader \in correctNodes  \* Leader is correct
@@ -345,19 +330,18 @@ SliceDelivered(slice, relays, correctNodes) ==
     /\ relays \subseteq slice.needers  \* Relays are from nodes that need the slice
 
 (***************************************************************************
- * Latency Hint: next leader prioritized -> zero additional delay if included.
- * (Advisory; protocol uses this to reason about fast handoff.)
+ * LATENCY HINT (Lemma 8 :431; minor optimization :402–:406)
+ * Relays prioritize the next leader first. If the next leader is among
+ * selected relays (on path), model zero extra hop; otherwise, add one.
  ***************************************************************************)
-\* Abstract on-path hook and δ vs 2δ delay:
-\* If the next leader is on-path (typically among selected relays),
-\* model zero additional delay; otherwise add one unit.
 OnPath(nextLeader, relays) == nextLeader \in relays
 
 NextDisseminationDelay(relays, nextLeader) == IF OnPath(nextLeader, relays) THEN 0 ELSE 1
 
 (***************************************************************************
- * Selection Safety Invariant (can be referenced elsewhere):
- * Whenever needers is non-empty and a non-empty result returned, constraints hold.
+ * SELECTION SOUNDNESS (internal invariant)
+ * If a non‑empty selection is returned, there exists a witness bin assignment
+ * that satisfies PS‑P structure and the resilience guard.
  ***************************************************************************)
 RotorSelectSound(block, needers, nextLeader) ==
     LET sel == RotorSelect(block, needers, nextLeader)
@@ -370,12 +354,13 @@ RotorSelectSound(block, needers, nextLeader) ==
                 /\ BinsToRelaySet(bins) = sel)
 
 (***************************************************************************
- * Commentary mapping to Whitepaper
- *  - Γ, γ, κ: Erasure coding & over-provisioning (Lemma 7 requirement κ > 5/3)
- *  - LargeStakeholders + PSPConstraint: Step 1 of Definition 46 (PS-P)
- *  - FailureResilient: Ensures sufficient residual stake after crashes/faults
- *  - NextDisseminationDelay: “send to next leader first” (latency hint only)
- *  - SliceReconstructable: abstracts Reed–Solomon recovery threshold
+ * QUICK REFERENCE — Whitepaper anchors for this module
+ *  - §2.2 Rotor: :378–:406 (mechanics), Def. 6 :414 (success),
+ *    Lemma 7 :418 (κ>5/3), Lemma 8 :431 (δ..2δ), Lemma 9 :439 (bandwidth).
+ *  - §1.6 Cryptographic techniques: Reed–Solomon and Merkle (:267–:275).
+ *  - §3.1 Smart Sampling: PS‑P, Def. 46 :1154 (variance reduction vs IID).
+ * Related modules: `Blocks.tla` (§2.1 data hierarchy), `Certificates.tla`
+ * (thresholds/Σ stake), `Messages.tla` (typed message families).
  ***************************************************************************)
 
 =============================================================================
