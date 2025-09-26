@@ -307,17 +307,21 @@ GenerateCertificate(pool, slot) ==
 \* Trust boundary: validity is enforced when storing certificates via
 \* StoreCertificate (requires IsValidCertificate / CertificateWellFormed).
 \* This query assumes stored certs are valid and is a presence check.
-HasNotarizationCert(pool, slot, blockHash) ==
+\* Optional API consolidation (audit suggestion): a generic helper for
+\* block-scoped certificate queries, wrapped by specialized names for
+\* readability.
+HasBlockCertOfType(pool, slot, blockHash, certType) ==
     \E cert \in pool.certificates[slot] :
-        /\ cert.type = "NotarizationCert"
+        /\ cert.type = certType
         /\ cert.blockHash = blockHash
         /\ cert.slot = slot
 
-\* Check if pool has a notar-fallback certificate for a block
+\* Specialized wrappers for clarity
+HasNotarizationCert(pool, slot, blockHash) ==
+    HasBlockCertOfType(pool, slot, blockHash, "NotarizationCert")
+
 HasNotarFallbackCert(pool, slot, blockHash) ==
-    \E cert \in pool.certificates[slot] :
-        /\ cert.type = "NotarFallbackCert"
-        /\ cert.blockHash = blockHash
+    HasBlockCertOfType(pool, slot, blockHash, "NotarFallbackCert")
 
 \* Check if pool has a skip certificate for a slot
 HasSkipCert(pool, slot) ==
@@ -326,10 +330,7 @@ HasSkipCert(pool, slot) ==
 
 \* Check if pool has a fast-finalization certificate
 HasFastFinalizationCert(pool, slot, blockHash) ==
-    \E cert \in pool.certificates[slot] :
-        /\ cert.type = "FastFinalizationCert"
-        /\ cert.blockHash = blockHash
-        /\ cert.slot = slot
+    HasBlockCertOfType(pool, slot, blockHash, "FastFinalizationCert")
 
 \* Check if pool has a finalization certificate
 \* Clarification (Def. 14): This is a slot-level check. The finalized block
@@ -338,6 +339,13 @@ HasFastFinalizationCert(pool, slot, blockHash) ==
 HasFinalizationCert(pool, slot) ==
     \E cert \in pool.certificates[slot] :
         cert.type = "FinalizationCert"
+
+\* Optional typing helper (audit suggestion): Callers can assert this to make
+\* slot/block domains explicit in proof obligations without cluttering the
+\* query predicates above.
+BlockCertQueryTypesOK(slot, blockHash) ==
+    /\ slot \in Slots
+    /\ blockHash \in BlockHashes
 
 \* Readability helper (audit 0013): slow-path finalization guard from Def. 14
 \* Encodes the pairing "FinalizationCert(s) + NotarizationCert(s, h)".
