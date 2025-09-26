@@ -687,6 +687,7 @@ EmitParentReady ==
     \* Note: The model assumes certificates refer to p \in blocks (consistent with 
     \* how votes and certs are created), clarifying why p is quantified from blocks.
     /\ \E v \in CorrectNodes, s \in 1..MaxSlot, p \in blocks :
+         /\ p.slot < s  \* Only consider previous blocks as parents (Def. 15)
          /\ ShouldEmitParentReady(validators[v].pool, s, p.hash, p.slot)
          /\ ~HasState(validators[v], s, "ParentReady")
          /\ validators' = [validators EXCEPT ![v] = HandleParentReady(@, s, p.hash)]
@@ -1121,6 +1122,20 @@ ParentReadyImpliesCert ==
                 ShouldEmitParentReady(validators[v].pool, s, p.hash, p.slot)
 
 (***************************************************************************
+ * IMPLIED: ParentReady uses a previous block (model assurance)
+ *
+ * Audit mapping
+ * - Definition 15 says "previous block b"; make it explicit that the block
+ *   witnessing ParentReady for slot s must satisfy p.slot < s.
+ ***************************************************************************)
+ParentReadyUsesPreviousBlock ==
+    \A v \in CorrectNodes, s \in 1..MaxSlot:
+        (s > 1 /\ "ParentReady" \in validators[v].state[s]) =>
+            \E p \in blocks :
+                /\ p.slot < s
+                /\ ShouldEmitParentReady(validators[v].pool, s, p.hash, p.slot)
+
+(***************************************************************************
  * IMPLIED: BlockNotarized implies notarization certificate exists
  *
  * Whitepaper refs
@@ -1202,6 +1217,7 @@ Invariant ==
     /\ FinalizedAncestorClosure
     /\ BlockNotarizedImpliesCert
     /\ ParentReadyImpliesCert
+    /\ ParentReadyUsesPreviousBlock
     /\ FinalVoteImpliesBlockNotarized
     /\ TotalNotarStakeSanity
 

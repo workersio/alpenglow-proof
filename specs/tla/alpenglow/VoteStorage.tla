@@ -350,9 +350,12 @@ ShouldEmitBlockNotarized(pool, slot, blockHash) ==
  ***************************************************************************)
 ShouldEmitParentReady(pool, slot, parentHash, parentSlot) ==
     /\ IsFirstSlotOfWindow(slot)
+    /\ parentSlot < slot   \* "previous block" guard (Def. 15)
     /\ (HasNotarizationCert(pool, parentSlot, parentHash) \/
         HasNotarFallbackCert(pool, parentSlot, parentHash))
     /\ \A s \in (parentSlot+1)..(slot-1) : HasSkipCert(pool, s)
+        \* Note: (a)..(b) is empty when a > b, so if slot = parentSlot + 1
+        \* (adjacent), the universal quantification holds vacuously.
 
 (***************************************************************************
  * Event: SafeToNotar - DEFINITION 16 (Fallback events) - Page 21:
@@ -402,10 +405,12 @@ CanEmitSafeToSkip(pool, slot, alreadyVoted, votedSkip) ==
 \* INVARIANTS FOR VERIFICATION
 \* ============================================================================
 
-\* Pool state is properly typed
+\* Pool state is properly typed (strengthened per audit 0013)
 PoolTypeOK(pool) ==
     /\ DOMAIN pool.votes = Slots
     /\ \A s \in Slots : DOMAIN pool.votes[s] = Validators
+    /\ \A s \in Slots : \A v \in Validators : pool.votes[s][v] \subseteq Vote
+    /\ DOMAIN pool.certificates = Slots
     /\ \A s \in Slots : pool.certificates[s] \subseteq Certificate
 
 \* Alignment invariants (audit 0009): items stored match their slot/validator keys
