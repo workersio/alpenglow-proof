@@ -212,6 +212,8 @@ SkipStake(pool, slot) ==
         skipVotes == {v \in votes : v.type = "SkipVote"}
         validators == {v.validator : v \in skipVotes}
     IN CalculateStake(validators)
+\* Alias for readability (audit suggestion): emphasize the "initial" semantics
+InitialSkipStake(pool, slot) == SkipStake(pool, slot)
 
 \* Total notarization stake across ALL blocks in a slot
 \* Whitepaper §2.5, Definition 16: corresponds to Σ_b notar(b) and uses
@@ -446,6 +448,18 @@ NoSkipAndNotarDoubleCount(pool, s) ==
         skipVals == {vt.validator : vt \in skipVotes}
         notarVals == {vt.validator : vt \in notarVotes}
     IN skipVals \cap notarVals = {}
+
+\* Count-once lemma (audit suggestion): SkipStake equals the stake of unique
+\* validators with an initial SkipVote in the slot (mirrors TotalNotar lemma).
+SkipStakeEqualsUniqueSkipVoters(pool, s) ==
+    LET votes == GetVotesForSlot(pool, s)
+        sv == {vt \in votes : vt.type = "SkipVote"}
+        uniqVals == {vt.validator : vt \in sv}
+    IN SkipStake(pool, s) = CalculateStake(uniqVals)
+
+\* SafeToSkip arithmetic sanity (audit suggestion): expression is non-negative.
+SafeToSkipExpressionNonNegative(pool, s) ==
+    SkipStake(pool, s) + TotalNotarStake(pool, s) - MaxNotarStake(pool, s) >= 0
 
 \* Optional typing lemma (audit 0011): the per-block notar-stake values
 \* considered by MaxNotarStake are natural numbers, making the MaxNat domain
