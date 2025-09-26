@@ -190,16 +190,18 @@ GetVotesForSlot(pool, slot) ==
 GetVotesForSlotTypeOK(pool, slot) ==
     GetVotesForSlot(pool, slot) \subseteq Vote
 
-\* Count stake for notarization votes on a specific block
-\* IMPORTANT (Def. 16 clarification): Uses initial votes only (NotarVote),
-\* not notar-fallback votes, and enforces count-once-per-slot via deduplication.
+\* Count stake for notarization votes on a specific block (notar(b))
+\* Whitepaper §2.5, Definition 16: notar(b) over initial NotarVote only.
+\* IMPORTANT: Uses initial votes only (NotarVote), not notar-fallback votes.
+\* Count-once-per-slot is enforced via StakeFromVotes (UniqueValidators).
 \* Cross-link: alpenglow-whitepaper.md:554–:571 (pages 21–22).
 NotarStake(pool, slot, blockHash) ==
     LET votes == GetVotesForSlot(pool, slot)
-        notarVotes == {v \in votes : 
-            IsInitialNotarVote(v) /\ v.blockHash = blockHash}
-        validators == {v.validator : v \in notarVotes}
-    IN CalculateStake(validators)
+        notarVotes == {v \in votes :
+            /\ IsInitialNotarVote(v)
+            /\ v.slot = slot            \* explicit slot guard for clarity
+            /\ v.blockHash = blockHash}
+    IN StakeFromVotes(notarVotes)
 
 \* Count stake for skip votes in a slot
 \* IMPORTANT (Def. 16 clarification): Uses initial votes only (SkipVote),
@@ -454,6 +456,14 @@ BlockNotarStakesAreNat(pool, s) ==
         blocks == {v.blockHash : v \in notarVotes}
         stakes == {NotarStake(pool, s, b) : b \in blocks}
     IN stakes \subseteq Nat
+
+\* Optional local sanity (audit NotarStake): NotarStake equals the
+\* StakeFromVotes formulation over initial NotarVote without the explicit
+\* slot guard (redundant because GetVotesForSlot is slot-scoped).
+NotarStakeMatchesStakeFromVotes(pool, s, b) ==
+    LET votes == GetVotesForSlot(pool, s)
+        nv == {v \in votes : /\ IsInitialNotarVote(v) /\ v.blockHash = b}
+    IN NotarStake(pool, s, b) = StakeFromVotes(nv)
 
 \* Multiplicity rules are respected
 MultiplicityRulesRespected(pool) ==
