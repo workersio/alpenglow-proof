@@ -336,6 +336,7 @@ HandleParentReady(validator, slot, parentHash) ==
  *
  * Note: We accept the block `b` (available at the call site) and use the
  * block-typed wrapper to preserve slot–hash pairing by construction.
+ * Inline reference: Alg. 1 L16–L20; Def. 16.
  ***************************************************************************)
 
 HandleSafeToNotar(validator, b) ==
@@ -430,5 +431,19 @@ TimeoutsScheduledInFutureAfterParentReady(v, s, h) ==
     LET after == HandleParentReady(v, s, h)
         first == FirstSlotOfWindow(s)
     IN \A i \in WindowSlots(first) : after.timeouts[i] > v.clock
+
+\* ============================================================================
+\* LOCAL SAFETY (Lemma 22): No mixing finalization and fallback per-slot
+\* ============================================================================
+
+\* Lemma 22 (validator-local form): a slot marked finalized (ItsOver)
+\* never also records fallback/skip activity (BadWindow), and conversely.
+\* These reflect Algorithm 1 (L16–L20, L21–L25) guards and TryFinal’s
+\* precondition (~BadWindow), making the mutual exclusion explicit.
+Lemma22_ItsOverImpliesNotBadWindow(validator) ==
+    \A s \in Slots : HasState(validator, s, "ItsOver") => ~HasState(validator, s, "BadWindow")
+
+Lemma22_BadWindowImpliesNotItsOver(validator) ==
+    \A s \in Slots : HasState(validator, s, "BadWindow") => ~HasState(validator, s, "ItsOver")
 
 =============================================================================

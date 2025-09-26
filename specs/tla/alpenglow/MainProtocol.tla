@@ -897,6 +897,18 @@ CertificateNonEquivocation ==
             c1.blockHash = c2.blockHash
 
 (***************************************************************************
+ * LEMMA 22 — no mixing finalization with fallback in the same slot
+ *
+ * Explanation
+ * - Validator-local mutual exclusion: ItsOver and BadWindow never co-exist
+ *   in a slot. Encoded via VotorCore’s per-validator predicates.
+ *************************************************************************)
+NoMixFinalizationAndFallback ==
+    \A v \in CorrectNodes :
+        Lemma22_ItsOverImpliesNotBadWindow(validators[v]) /\
+        Lemma22_BadWindowImpliesNotItsOver(validators[v])
+
+(***************************************************************************
  * SKIP VS BLOCK-CERT EXCLUSION — mutual exclusion per slot
  *
  * Explanation
@@ -1220,6 +1232,17 @@ ItsOverWitness ==
         ("ItsOver" \in validators[v].state[s])
             => (\E vt \in validators[v].pool.votes[s][v] : vt.type = "FinalVote")
 
+(***************************************************************************
+ * TRACE AIDS — fallback vote visibility from local Pool (non-functional)
+ *
+ * Purpose
+ * - Surface locally emitted fallback votes for debugging/model checking
+ *   without changing protocol semantics. These are derived observables.
+ *************************************************************************)
+FallbackVotesTrace(v, s) ==
+    { vt \in validators[v].pool.votes[s][v] :
+        vt.type \in {"NotarFallbackVote", "SkipFallbackVote"} }
+
 (* --------------------------------------------------------------------------
  * FINALIZED ANCESTOR CLOSURE — finalized sets are ancestry-closed
  *
@@ -1304,6 +1327,7 @@ Invariant ==
     /\ VotedNotarTagConsistency
     /\ BadWindowWitness
     /\ ItsOverWitness
+    /\ NoMixFinalizationAndFallback
     /\ TotalNotarStakeSanity
 
 =============================================================================
