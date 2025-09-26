@@ -1058,6 +1058,29 @@ BasicLiveness ==
              \E b \in blocks : b.slot > 0 /\ b \in finalized[v])
 
 (***************************************************************************
+ * TRYFINAL PROGRESS — BlockNotarized + local vote ⇒ FinalVote eventually
+ *
+ * Audit 0016 suggestion
+ * - If a correct node has observed BlockNotarized(s, h) and later also has a
+ *   local NotarVote for the same h in slot s, and the slot is not marked
+ *   BadWindow, then it eventually issues/stores FinalVote(s) in its Pool.
+ *
+ * Explanation
+ * - This captures the model’s expectation that once TryFinal’s guard holds
+ *   (BlockNotarized ∧ VotedForBlock ∧ ¬BadWindow), weak fairness on the
+ *   scheduling of event emissions and handlers leads to FinalVote(s).
+ *************************************************************************)
+TryFinalProgress ==
+    \A v \in CorrectNodes :
+    \A s \in 1..MaxSlot :
+        ( /\ HasState(validators[v], s, "BlockNotarized")
+          /\ ~HasState(validators[v], s, "BadWindow")
+          /\ (\E h \in BlockNotarizedHashes(validators[v], s) :
+                  VotedForBlock(validators[v], s, h))
+        ) ~>
+        (<> (\E vt \in validators[v].pool.votes[s][v] : IsFinalVote(vt)))
+
+(***************************************************************************
  * PROGRESS — highest finalized slot keeps increasing after GST
  ***************************************************************************)
 Progress ==

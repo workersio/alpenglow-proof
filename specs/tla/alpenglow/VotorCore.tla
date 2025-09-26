@@ -122,6 +122,21 @@ VotedForBlock(validator, slot, blockHash) ==
         /\ vote.type = "NotarVote"
         /\ vote.blockHash = blockHash
 
+\* Derived helpers (audit 0016 suggestion): expose the hash associated
+\* with a BlockNotarized state via the Pool certificate for readability
+\* in properties and invariants, without parameterizing the state tag.
+BlockNotarizedHashes(validator, slot) ==
+    IF HasState(validator, slot, "BlockNotarized")
+    THEN { h \in BlockHashes : HasNotarizationCert(validator.pool, slot, h) }
+    ELSE {}
+
+\* Optional chooser when uniqueness is enforced by Pool invariants.
+\* Returns NoBlock when the set is empty. Domain: BlockHashes ∪ {NoBlock}.
+BlockNotarizedHashOpt(validator, slot) ==
+    IF BlockNotarizedHashes(validator, slot) = {}
+    THEN NoBlock
+    ELSE CHOOSE h \in BlockNotarizedHashes(validator, slot) : TRUE
+
 
 \* ============================================================================
 \* TRYFINAL - Try to cast finalization vote (Algorithm 2, lines 18-21)
