@@ -116,14 +116,6 @@ vars == <<validators, blocks, messages, byzantineNodes, time, finalized, blockAv
 \* Get correct (non-Byzantine) validators
 CorrectNodes == Validators \ byzantineNodes
 
-\* Relays chosen by Rotor that are correct
-\* DELETE: not referenced elsewhere in the spec/model
-RotorCorrectRelays(relays) == relays \cap CorrectNodes
-
-\* Definition 6 (§2.2): Rotor succeeds if ≥ γ correct relays participate
-\* DELETE: not referenced elsewhere in the spec/model
-EnoughCorrectRelays(leader, relays) == RotorSuccessful(leader, relays, CorrectNodes)
-
 \* Repair trigger (Algorithm 4; §2.8). Include fast-finalization to cover fast-only
 \* implementations. See also Blokstor repair mention: `alpenglow-whitepaper.md:470`.
 NeedsBlockRepair(pool, block) ==
@@ -320,44 +312,6 @@ HonestProposeBlock(leader, slot, parent) ==
        ]
        IN \* Hint: ExtendsChain(newBlock, blocks)
           /\ LeaderMatchesSchedule(newBlock)
-          /\ IsValidBlock(newBlock)
-          /\ blocks' = blocks \cup {newBlock}
-          /\ blockAvailability' = [blockAvailability EXCEPT ![leader] = @ \cup {newBlock}]
-          /\ UNCHANGED <<validators, messages, byzantineNodes, time, finalized>>
-
-(***************************************************************************
- * HONEST PROPOSE BLOCK (optimistic) — Algorithm 3 optimization
- *
- * Whitepaper refs
- * - Text on optimistic building: `alpenglow-whitepaper.md:727` • §2.7
- * - Algorithm 3: `:759`.
- *
- * Explanation
- * - Allow the leader to begin building at the first slot of a window as soon
- *   as the ParentReady predicate would hold (even before the event is emitted).
- * - Disabled by default; included for comparison with the strict variant.
-***************************************************************************)
-\* Optimistic proposal also requires having the parent locally (Rotor handoff).
-\* DELETE: alternative proposer action not used in Next
-HonestProposeBlockOptimistic(leader, slot, parent) ==
-    /\ leader \in CorrectNodes
-    /\ parent \in blocks
-    /\ parent \in blockAvailability[leader]
-    /\ slot \in Slots
-    /\ slot > parent.slot
-    /\ slot <= MaxSlot
-    /\ Cardinality(blocks) < MaxBlocks
-    \* Parent readiness check via predicate (Def. 15, p. 21) for first slots
-    /\ IsFirstSlotOfWindow(slot)
-        => ShouldEmitParentReady(validators[leader].pool, slot, parent.hash, parent.slot)
-    /\ LET newBlock == [
-           slot |-> slot,
-           hash |-> CHOOSE h \in BlockHashes :
-                    h \notin {b.hash : b \in blocks},
-           parent |-> parent.hash,
-           leader |-> leader
-       ]
-       IN /\ LeaderMatchesSchedule(newBlock)
           /\ IsValidBlock(newBlock)
           /\ blocks' = blocks \cup {newBlock}
           /\ blockAvailability' = [blockAvailability EXCEPT ![leader] = @ \cup {newBlock}]
@@ -711,8 +665,7 @@ Next ==
     \/ EmitParentReady
     \/ \E v \in byzantineNodes : ByzantineAction(v)
     \* Note: `ProcessTimeout` is handled via `AdvanceTime` -> `AdvanceClock`.
-    \* The optional optimistic proposer variant is defined as
-    \* `HonestProposeBlockOptimistic` and not enabled by default.
+    \* Proposer uses the strict ParentReady‑gated variant (Alg. 3).
     \/ \E l \in Validators, s \in 1..MaxSlot, p \in blocks : HonestProposeBlock(l, s, p)
     \/ \E l \in Validators, s \in 1..MaxSlot, p \in blocks : ByzantineProposeBlock(l, s, p)
     \/ DeliverVote
@@ -1278,17 +1231,6 @@ ItsOverWitness ==
         ("ItsOver" \in validators[v].state[s])
             => (\E vt \in validators[v].pool.votes[s][v] : vt.type = "FinalVote")
 
-(***************************************************************************
- * TRACE AIDS — fallback vote visibility from local Pool (non-functional)
- *
- * Purpose
- * - Surface locally emitted fallback votes for debugging/model checking
- *   without changing protocol semantics. These are derived observables.
- *************************************************************************)
-\* DELETE: trace-only helper not referenced by invariants or spec
-FallbackVotesTrace(v, s) ==
-    { vt \in validators[v].pool.votes[s][v] :
-        vt.type \in {"NotarFallbackVote", "SkipFallbackVote"} }
 
 (* --------------------------------------------------------------------------
  * FINALIZED ANCESTOR CLOSURE — finalized sets are ancestry-closed

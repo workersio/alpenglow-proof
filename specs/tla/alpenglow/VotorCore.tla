@@ -141,16 +141,6 @@ BlockNotarizedHashes(validator, slot) ==
     THEN { h \in BlockHashes : HasNotarizationCert(validator.pool, slot, h) }
     ELSE {}
 
-\* Optional chooser when uniqueness is enforced by Pool invariants
-\* (Def. 13 stores a single notarization certificate per slot/hash).
-\* Returns NoBlock when the set is empty. Domain: BlockHashes ∪ {NoBlock}.
-\* DELETE: helper not referenced elsewhere
-BlockNotarizedHashOpt(validator, slot) ==
-    IF BlockNotarizedHashes(validator, slot) = {}
-    THEN NoBlock
-    ELSE CHOOSE h \in BlockNotarizedHashes(validator, slot) : TRUE
-
-
 \* ============================================================================
 \* TRYFINAL - Try to cast finalization vote (Alg. 2, L18–21; Def. 14–15)
 \* ============================================================================
@@ -438,19 +428,6 @@ ValidatorStateOK(validator) ==
 ParentReadyConsistency(validator) ==
     \A s \in Slots : HasState(validator, s, "ParentReady") <=> validator.parentReady[s] # NoBlock
 
-\* Readability lemma: If ParentReady holds in slot s, then the companion
-\* field carries a concrete block hash (follows from Def. 18 + typing).
-\* DELETE: readability lemma unused by spec/invariants
-ParentReadyImpliesHashSet(validator) ==
-    \A s \in Slots : HasState(validator, s, "ParentReady") => validator.parentReady[s] \in BlockHashes
-
-\* Linking lemma: witnessing our initial notar vote for hash `h` in slot `s`
-\* via local Pool implies the slot-local `Voted` flag is set. This reflects
-\* Alg. 2 (L12–15) where TRYNOTAR both stores the vote and updates state.
-\* DELETE: linking lemma unused by spec/invariants
-PoolInitialNotarVoteImpliesVoted(validator) ==
-    \A s \in Slots : \A h \in BlockHashes :
-        VotedForBlock(validator, s, h) => HasState(validator, s, "Voted")
 
 PendingBlocksSingleton(validator) ==
     \A s \in Slots : Cardinality(validator.pendingBlocks[s]) <= 1
@@ -472,31 +449,6 @@ THEOREM TrySkipWindowProducesValidSkipVotes ==
         ValidatorStateOK(validator) /\ ~HasState(validator, s, "Voted")
             => IsValidVote(CreateSkipVoteForSlot(validator.id, s))
 
-\* Post-condition lemma: After TRYSKIPWINDOW(v, s), every previously-unvoted
-\* k in the same window gains {Voted, BadWindow} and clears pending.
-\* DELETE: strengthening lemma unused by spec/invariants
-TrySkipWindowSetsFlagsAndClearsPending(v, s) ==
-    LET after == TrySkipWindow(v, s)
-    IN \A k \in WindowSlots(s) :
-        (~HasState(v, k, "Voted") /\ k \in Slots)
-            => /\ HasState(after, k, "Voted")
-               /\ HasState(after, k, "BadWindow")
-               /\ after.pendingBlocks[k] = {}
-
-\* Idempotence lemma: applying TRYSKIPWINDOW twice is a no-op after the first
-\* application (Def. 12 multiplicity + state flags).
-\* DELETE: idempotence lemma unused by spec/invariants
-TrySkipWindowIdempotent(v, s) ==
-    TrySkipWindow(TrySkipWindow(v, s), s) = TrySkipWindow(v, s)
-
-\* Optional verification: after HandleParentReady, each timeout for the
-\* leader window is strictly greater than the pre-call clock (Def. 17).
-\* DELETE: timing lemma unused by spec/invariants
-TimeoutsScheduledInFutureAfterParentReady(v, s, h) ==
-    LET after == HandleParentReady(v, s, h)
-        first == FirstSlotOfWindow(s)
-    IN \A i \in WindowSlots(first) : after.timeouts[i] > v.clock
-
 \* ============================================================================
 \* LOCAL SAFETY (Lemma 22): No mixing finalization and fallback per-slot
 \* ============================================================================
@@ -510,36 +462,5 @@ Lemma22_ItsOverImpliesNotBadWindow(validator) ==
 
 Lemma22_BadWindowImpliesNotItsOver(validator) ==
     \A s \in Slots : HasState(validator, s, "BadWindow") => ~HasState(validator, s, "ItsOver")
-
-\* ============================================================================
-\* FINALIZATION GUARD INVARIANT (maps Alg. 2 L18–21)
-\* ============================================================================
-
-\* If a validator has issued its finalization vote for a slot (ItsOver),
-\* then TryFinal’s guard held: the slot is notarized, the validator voted
-\* for the notarized hash, and no fallback occurred in that slot/window.
-\* Mirrors Algorithm 2 (L18–21) and aids TLC.
-\* DELETE: strengthening lemma unused by spec/invariants
-FinalVoteIssuanceImpliesPrereqs(validator) ==
-    \A s \in Slots :
-        HasState(validator, s, "ItsOver") =>
-            /\ HasState(validator, s, "BlockNotarized")
-            /\ ~HasState(validator, s, "BadWindow")
-            /\ \E h \in BlockHashes :
-                    HasNotarizationCert(validator.pool, s, h)
-                    /\ VotedForBlock(validator, s, h)
-
-\* ============================================================================
-\* NO FINAL VOTE AFTER BADWINDOW (from Alg. 2 guard + Def. 12)
-\* ============================================================================
-
-\* Verification aid: once BadWindow holds for a slot, the validator does not
-\* store a FinalVote for that slot in its Pool. This follows from TryFinal’s
-\* guard (~BadWindow) and Definition 12’s multiplicity rules, and makes the
-\* safety argument explicit for model checking.
-\* DELETE: strengthening lemma unused by spec/invariants
-NoFinalVoteStoredAfterBadWindow(validator) ==
-    \A s \in Slots : HasState(validator, s, "BadWindow") =>
-        Cardinality({ v \in validator.pool.votes[s][validator.id] : v.type = "FinalVote" }) = 0
 
 =============================================================================

@@ -98,10 +98,6 @@ IsValidBlock(b) ==
 \* Two different blocks for the same slot (safety lemmas 23–24):
 \* - Used to express and rule out slot-level conflicts via certificates.
 \* - See §2.4 Lemma 23/24 and Theorem 1 (single chain).
-\* DELETE: defined but not referenced elsewhere
-ConflictingBlocks(b1, b2) ==
-    /\ b1.slot = b2.slot     \* Same slot
-    /\ b1.hash # b2.hash     \* Different blocks!
 
 \* Whitepaper refs: slots and leaders (§1.1 :53), hashing (Def. 4 :357),
 \* uniqueness in notarization/finalization (Lemma 24 :855, Thm. 1 :930).
@@ -179,7 +175,6 @@ IsAncestor(b1, b2, allBlocks) ==
     IN b1 = b2 \/ ReachableFrom(b2)  \* A block is its own ancestor
 
 \* Descendant is the inverse of ancestor (Def. 5 :363).
-\* DELETE: helper not used by current spec
 IsDescendant(b1, b2, allBlocks) == 
     IsAncestor(b2, b1, allBlocks)
 
@@ -266,21 +261,10 @@ THEOREM FirstSlotOfWindowInSlots ==
 \* Ordering-sensitive operations rely on the slot field or ancestry relations.
 
 \* Query whether a chain has a block at a specific slot
-\* DELETE: utility not referenced elsewhere
-HasBlockAtSlot(slot, chain) == \E b \in chain : b.slot = slot
 
 \* Select the (unique) block at a specific slot in a chain.
-\* Precondition: HasBlockAtSlot(slot, chain). If multiple blocks exist in the
-\* set at the same slot, this CHOOSE is nondeterministic; use only for chains
-\* that are unique-per-slot or after enforcing such an invariant.
-\* DELETE: selection helper currently unused
-BlockAtSlot(slot, chain) == CHOOSE b \in chain : b.slot = slot
 
 \* Complete chain (ancestors) from genesis to b (Def. 5 :363).
-\* DELETE: alias for GetAncestors; currently unused
-GetChain(b, allBlocks) ==
-    GetAncestors(b, allBlocks)
-    \* Precondition: `allBlocks` contains the ancestry of `b` (e.g., finalized).
 
 \* Select the tip (maximum-slot element) of a non-empty chain
 Tip(chain) == CHOOSE x \in chain : \A y \in chain : x.slot >= y.slot
