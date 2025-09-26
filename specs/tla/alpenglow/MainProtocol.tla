@@ -1207,6 +1207,19 @@ FinalizedAncestorClosure ==
     \A v \in Validators : \A b \in finalized[v] :
         GetAncestors(b, blocks) \subseteq finalized[v]
 
+(***************************************************************************
+ * REPRESENTATION INVARIANTS — audit 0015 (InitValidatorState)
+ *
+ * Explanation
+ * - Document the split representation for parameterized state objects and
+ *   the intended singleton-pending-blocks discipline.
+ *************************************************************************)
+ParentReadyConsistencyAll ==
+    \A v \in Validators : ParentReadyConsistency(validators[v])
+
+PendingBlocksSingletonAll ==
+    \A v \in Validators : PendingBlocksSingleton(validators[v])
+
 \* ============================================================================
 \* STATE CONSTRAINTS (For bounded model checking)
 \* ============================================================================
@@ -1258,6 +1271,8 @@ Invariant ==
     /\ ParentReadyUsesPreviousBlock
     /\ FinalVoteImpliesBlockNotarized
     /\ VotedConsistency
+    /\ ParentReadyConsistencyAll
+    /\ PendingBlocksSingletonAll
     /\ VotedNotarTagConsistency
     /\ BadWindowWitness
     /\ ItsOverWitness

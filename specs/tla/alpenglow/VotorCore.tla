@@ -23,6 +23,10 @@ ASSUME
     /\ DeltaTimeout \in Nat \ {0}
     /\ DeltaBlock \in Nat \ {0}
 
+\* Alias types for clarity (audit 0015 suggestion)
+TimeTS == Nat
+TimeoutTS == Nat
+
 \* ============================================================================
 \* VOTOR STATE (Definition 18 from whitepaper)
 \* ============================================================================
@@ -71,11 +75,16 @@ ValidatorState == [
     parentReady: [Slots -> BlockHashes \cup {NoBlock}], \* Parent hash per slot
     pendingBlocks: [Slots -> SUBSET Block],         \* Blocks to retry
     pool: PoolState,                                \* Vote/certificate storage
-    clock: Nat,                                     \* Local clock
-    timeouts: [Slots -> Nat]                        \* Scheduled timeouts
+    clock: TimeTS,                                  \* Local clock
+    timeouts: [Slots -> TimeoutTS]                  \* Scheduled timeouts
 ]
 
-\* Initialize validator state
+\* Initialize validator state (Definition 18)
+\* Commentary: Per Def. 18, per-slot state starts empty. Parameterized
+\* state objects (ParentReady(h), VotedNotar(h), BlockNotarized(h)) are
+\* represented via boolean tags in `state[s]` with their bound hashes
+\* carried in companion structures (e.g., `parentReady[s]`) or event
+\* parameters; see notes above.
 InitValidatorState(validatorId) == [
     id |-> validatorId,
     state |-> [s \in Slots |-> {}],
@@ -345,8 +354,15 @@ ValidatorStateOK(validator) ==
     /\ validator.parentReady \in [Slots -> BlockHashes \cup {NoBlock}]
     /\ validator.pendingBlocks \in [Slots -> SUBSET Block]
     /\ PoolTypeOK(validator.pool)
-    /\ validator.clock \in Nat
-    /\ validator.timeouts \in [Slots -> Nat]
+    /\ validator.clock \in TimeTS
+    /\ validator.timeouts \in [Slots -> TimeoutTS]
+
+\* Representation invariants (audit 0015 suggestion)
+ParentReadyConsistency(validator) ==
+    \A s \in Slots : HasState(validator, s, "ParentReady") <=> validator.parentReady[s] # NoBlock
+
+PendingBlocksSingleton(validator) ==
+    \A s \in Slots : Cardinality(validator.pendingBlocks[s]) <= 1
 
 \* Optional lemma (audit suggestion): votes produced for valid blocks are
 \* valid by construction (content-only, signatures abstracted).
