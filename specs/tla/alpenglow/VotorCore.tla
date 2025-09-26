@@ -72,7 +72,7 @@ StateObject == {
 ValidatorState == [
     id: Validators,                                  \* Validator identifier
     state: [Slots -> SUBSET StateObject],           \* State flags per slot
-    parentReady: [Slots -> BlockHashes \cup {NoBlock}], \* Parent hash per slot
+    parentReady: [Slots -> BlockHashes \cup {NoBlock}], \* Parent hash per slot (Def. 18: models ParentReady(h) binding)
     pendingBlocks: [Slots -> SUBSET Block],         \* Blocks to retry
                                                    \* Modeling note: The whitepaper (Alg.1 L5)
                                                    \* buffers a single pending block per slot.
@@ -315,16 +315,19 @@ HandleParentReady(validator, slot, parentHash) ==
     LET newValidator == AddState(validator, slot, "ParentReady")
         withParent == [newValidator EXCEPT !.parentReady[slot] = parentHash]
         afterCheck == CheckPendingBlocks(withParent)
-        windowSlots == WindowSlots(slot)
+        \* Self-contained per Def. 17: compute window using its first slot
+        first == FirstSlotOfWindow(slot)
+        windowSlots == WindowSlots(first)
         \* Set timeouts for all slots in window
         RECURSIVE SetTimeouts(_,_)
         SetTimeouts(val, slots) ==
             IF slots = {} THEN val
             ELSE
                 LET s == CHOOSE x \in slots : TRUE
-                    timeout == val.clock + DeltaTimeout + ((s - slot + 1) * DeltaBlock)
+                    timeout == val.clock + DeltaTimeout + ((s - first + 1) * DeltaBlock)
                 IN SetTimeouts([val EXCEPT !.timeouts[s] = timeout], slots \ {s})
-    IN SetTimeouts(afterCheck, windowSlots \cap Slots)
+        \* Note: WindowSlots already ranges over production slots; no extra \cap Slots needed
+    IN SetTimeouts(afterCheck, windowSlots)
 
 (***************************************************************************
  * Handle SafeToNotar event (Whitepaper Algorithm 1, lines 16–20).
@@ -419,5 +422,13 @@ THEOREM TrySkipWindowProducesValidSkipVotes ==
     \A validator, s \in Slots :
         ValidatorStateOK(validator) /\ ~HasState(validator, s, "Voted")
             => IsValidVote(CreateSkipVoteForSlot(validator.id, s))
+
+\* Optional verification predicate (audit 0016): After scheduling in
+\* HandleParentReady, each timeout for the leader window is strictly
+\* greater than the pre-call clock (Def. 17, with DeltaTimeout > 0).
+TimeoutsScheduledInFutureAfterParentReady(v, s, h) ==
+    LET after == HandleParentReady(v, s, h)
+        first == FirstSlotOfWindow(s)
+    IN \A i \in WindowSlots(first) : after.timeouts[i] > v.clock
 
 =============================================================================

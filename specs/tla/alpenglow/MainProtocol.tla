@@ -682,6 +682,7 @@ EmitSafeToSkip ==
  *
  * Explanation
  * - Mark the first slot of a new leader window once predecessors are certified.
+ * - First-slot guard enforced by ShouldEmitParentReady (uses IsFirstSlotOfWindow).
  ***************************************************************************)
 EmitParentReady ==
     \* Note: The model assumes certificates refer to p \in blocks (consistent with 
