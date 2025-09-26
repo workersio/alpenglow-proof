@@ -38,6 +38,8 @@ TimeoutTS == Nat
  *   Implementation: boolean flag; the bound hash `h` is recorded in
  *   `parentReady[slot]` and used by guards.
  * - Voted: Cast initial vote (notar or skip) in this slot.
+ *   Modeling note: not explicitly enumerated in Def. 18, but referenced
+ *   by Algorithm 1/2 to gate re-voting. Included to mirror the pseudo-code.
  * - VotedNotarTag: Bookkeeping tag set when casting a notarization vote.
  *   Implementation: unparameterized tag; the specific block hash is
  *   witnessed by the stored NotarVote in Pool and queried via
@@ -77,7 +79,12 @@ ValidatorState == [
                                                    \* Modeling note: The whitepaper (Alg.1 L5)
                                                    \* buffers a single pending block per slot.
                                                    \* We model this as a set for generality and
-                                                   \* idempotence; `MainProtocol.ReceiveBlock`
+                                                   \* idempotence. Due to nondeterministic delivery
+                                                   \* there may be multiple candidates buffered; the
+                                                   \* guards in TRYNOTAR and the sweep in
+                                                   \* CHECKPENDINGBLOCKS ensure only one initial
+                                                   \* vote per slot (Pool multiplicity) and that the
+                                                   \* set is eventually cleared upon success. `MainProtocol.ReceiveBlock`
                                                    \* delivers only the first complete block per
                                                    \* slot to Algorithm 1 in this model. See also
                                                    \* `PendingBlocksSingleton` for the intended
@@ -108,10 +115,12 @@ InitValidatorState(validatorId) == [
 \* ============================================================================
 
 \* Check if validator has a specific state in slot
+\* Precondition: `slot \in Slots` (enforced by callers and ValidatorStateOK).
 HasState(validator, slot, stateObj) ==
     stateObj \in validator.state[slot]
 
 \* Add state object to validator's slot
+\* Precondition: `slot \in Slots` (enforced by callers and ValidatorStateOK).
 AddState(validator, slot, stateObj) ==
     [validator EXCEPT !.state[slot] = validator.state[slot] \union {stateObj}]
 
@@ -119,7 +128,7 @@ AddState(validator, slot, stateObj) ==
 VotedForBlock(validator, slot, blockHash) ==
     \E vote \in GetVotesForSlot(validator.pool, slot) :
         /\ vote.validator = validator.id
-        /\ vote.type = "NotarVote"
+        /\ IsInitialNotarVote(vote)
         /\ vote.blockHash = blockHash
 
 \* Derived helpers (audit 0016 suggestion): expose the hash associated
@@ -368,14 +377,24 @@ HandleSafeToNotar(validator, b) ==
  ***************************************************************************)
 
 HandleSafeToSkip(validator, slot) ==
-    LET skipResult == TrySkipWindow(validator, slot)
-    IN
-        IF ~HasState(skipResult, slot, "ItsOver") THEN
-            LET vote == CreateSkipFallbackVote(skipResult.id, slot)
-                newValidator == AddState(skipResult, slot, "BadWindow")
-                poolWithVote == StoreVote(newValidator.pool, vote)
-            IN [newValidator EXCEPT !.pool = poolWithVote]
-        ELSE skipResult
+    \* Defensive guard (audit 0017): under the spec’s emission guards this
+    \* handler is never invoked when BadWindow already holds. Early return
+    \* avoids redundant work if called out-of-contract.
+    IF HasState(validator, slot, "BadWindow") THEN validator
+    ELSE
+        \* Clarity (audit 0017): TRYSKIPWINDOW acts on other unvoted slots
+        \* in the window. Because SafeToSkip requires "already voted in s"
+        \* (Def. 16 precondition), it will not skip s itself.
+        LET skipResult == TrySkipWindow(validator, slot)
+        IN
+            IF ~HasState(skipResult, slot, "ItsOver") THEN
+                LET vote == CreateSkipFallbackVote(skipResult.id, slot)
+                    newValidator == AddState(skipResult, slot, "BadWindow")
+                    poolWithVote == StoreVote(newValidator.pool, vote)
+                IN [newValidator EXCEPT 
+                        !.pool = poolWithVote,
+                        !.pendingBlocks[slot] = {}]
+            ELSE skipResult
 
 \* ============================================================================
 \* CLOCK AND TIMEOUT MANAGEMENT
@@ -417,6 +436,21 @@ ValidatorStateOK(validator) ==
 \* Representation invariants (audit 0015 suggestion)
 ParentReadyConsistency(validator) ==
     \A s \in Slots : HasState(validator, s, "ParentReady") <=> validator.parentReady[s] # NoBlock
+
+\* Readability lemma (audit 2025-09-25 ValidatorStateOK suggestion):
+\* If ParentReady holds in slot s, then the companion field carries a
+\* concrete block hash (follows from ParentReadyConsistency and typing).
+ParentReadyImpliesHashSet(validator) ==
+    \A s \in Slots : HasState(validator, s, "ParentReady") => validator.parentReady[s] \in BlockHashes
+
+\* Linking lemma (audit 2025-09-25): witnessing our initial notar vote for
+\* block hash `h` in slot `s` via the local Pool implies we have recorded the
+\* slot-local `Voted` flag. This reflects TryNotar's atomic update that stores
+\* the vote and sets state, and clarifies the intended coupling between Pool
+\* and state.
+PoolInitialNotarVoteImpliesVoted(validator) ==
+    \A s \in Slots : \A h \in BlockHashes :
+        VotedForBlock(validator, s, h) => HasState(validator, s, "Voted")
 
 PendingBlocksSingleton(validator) ==
     \A s \in Slots : Cardinality(validator.pendingBlocks[s]) <= 1
@@ -492,5 +526,17 @@ FinalVoteIssuanceImpliesPrereqs(validator) ==
             /\ \E h \in BlockHashes :
                     HasNotarizationCert(validator.pool, s, h)
                     /\ VotedForBlock(validator, s, h)
+
+\* ============================================================================
+\* NO FINAL VOTE AFTER BADWINDOW (audit 0017)
+\* ============================================================================
+
+\* Verification aid: once BadWindow holds for a slot, the validator does not
+\* store a FinalVote for that slot in its Pool. This follows from TryFinal’s
+\* guard (~BadWindow) and Definition 12’s multiplicity rules, and makes the
+\* safety argument explicit for model checking.
+NoFinalVoteStoredAfterBadWindow(validator) ==
+    \A s \in Slots : HasState(validator, s, "BadWindow") =>
+        Cardinality({ v \in validator.pool.votes[s][validator.id] : v.type = "FinalVote" }) = 0
 
 =============================================================================

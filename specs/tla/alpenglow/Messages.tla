@@ -154,6 +154,13 @@ IsFinalVote(vote) ==
 IsInitialVote(vote) ==
     vote.type \in {"NotarVote", "SkipVote"}
 
+\* Audit ergonomics (2025-09-25): explicit predicate for the single
+\* initial notarization vote type to avoid duplicating the string literal
+\* across modules (e.g., VotorCore, VoteStorage) and to improve
+\* readability of intent in guards/queries.
+IsInitialNotarVote(vote) ==
+    vote.type = "NotarVote"
+
 \* Is this a fallback vote (safety mechanism)?
 IsFallbackVote(vote) ==
     vote.type \in {"NotarFallbackVote", "SkipFallbackVote"}

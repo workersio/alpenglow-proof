@@ -1154,6 +1154,9 @@ TypeInvariant ==
     /\ finalized \in [Validators -> SUBSET blocks]
     /\ blockAvailability \in [Validators -> SUBSET blocks]
     /\ \A v \in Validators : ValidatorStateOK(validators[v])
+    \* Certificates validity (Table 6) as a baseline type/shape property
+    /\ \A v \in Validators : \A s \in 1..MaxSlot :
+            AllCertificatesValid(validators[v].pool.certificates[s])
 
 (***************************************************************************
  * IMPLIED: ParentReady implies requisite certificates exist

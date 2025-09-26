@@ -197,7 +197,7 @@ GetVotesForSlotTypeOK(pool, slot) ==
 NotarStake(pool, slot, blockHash) ==
     LET votes == GetVotesForSlot(pool, slot)
         notarVotes == {v \in votes : 
-            v.type = "NotarVote" /\ v.blockHash = blockHash}
+            IsInitialNotarVote(v) /\ v.blockHash = blockHash}
         validators == {v.validator : v \in notarVotes}
     IN CalculateStake(validators)
 
@@ -216,7 +216,7 @@ SkipStake(pool, slot) ==
 \* count-once-per-slot semantics per Definition 12 (deduplicate validators).
 TotalNotarStake(pool, slot) ==
     LET votes == GetVotesForSlot(pool, slot)
-        notarVotes == {v \in votes : v.type = "NotarVote"}
+        notarVotes == {v \in votes : IsInitialNotarVote(v)}
     IN StakeFromVotes(notarVotes)
 
 \* Maximum notarization stake for any single block in a slot
@@ -224,7 +224,7 @@ TotalNotarStake(pool, slot) ==
 \* term used in `CanEmitSafeToSkip` (see alpenglow-whitepaper.md:571).
 MaxNotarStake(pool, slot) ==
     LET votes == GetVotesForSlot(pool, slot)
-        notarVotes == {v \in votes : v.type = "NotarVote"}
+        notarVotes == {v \in votes : IsInitialNotarVote(v)}
         blocks == {v.blockHash : v \in notarVotes}
     IN IF blocks = {} THEN 0
        ELSE LET stakes == {NotarStake(pool, slot, b) : b \in blocks}
@@ -440,7 +440,7 @@ VotesTypeOK(pool) ==
 NoSkipAndNotarDoubleCount(pool, s) ==
     LET votes == GetVotesForSlot(pool, s)
         skipVotes == {vt \in votes : vt.type = "SkipVote"}
-        notarVotes == {vt \in votes : vt.type = "NotarVote"}
+        notarVotes == {vt \in votes : IsInitialNotarVote(vt)}
         skipVals == {vt.validator : vt \in skipVotes}
         notarVals == {vt.validator : vt \in notarVotes}
     IN skipVals \cap notarVals = {}
@@ -450,7 +450,7 @@ NoSkipAndNotarDoubleCount(pool, s) ==
 \* explicit. This follows from CalculateStake: Validators → Nat.
 BlockNotarStakesAreNat(pool, s) ==
     LET votes == GetVotesForSlot(pool, s)
-        notarVotes == {v \in votes : v.type = "NotarVote"}
+        notarVotes == {v \in votes : IsInitialNotarVote(v)}
         blocks == {v.blockHash : v \in notarVotes}
         stakes == {NotarStake(pool, s, b) : b \in blocks}
     IN stakes \subseteq Nat
@@ -521,7 +521,7 @@ THEOREM StoreVotePreservesMultiplicity ==
 \* validators that cast a NotarVote in the slot (Σ over projection).
 TotalNotarStakeEqualsUniqueNotarVoters(pool, s) ==
     LET votes == GetVotesForSlot(pool, s)
-        nv == {vt \in votes : vt.type = "NotarVote"}
+        nv == {vt \in votes : IsInitialNotarVote(vt)}
         uniqVals == {vt.validator : vt \in nv}
     IN TotalNotarStake(pool, s) = CalculateStake(uniqVals)
 
