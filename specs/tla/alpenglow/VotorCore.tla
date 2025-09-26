@@ -148,6 +148,14 @@ BlockNotarizedHashOpt(validator, slot) ==
  * fallback activity in the window (`BadWindow`).
  ***************************************************************************)
 
+(*
+ * Modeling note (audit 0016): The whitepaper expresses the guard using
+ * parameterized state (e.g., VotedNotar(hash(b))). Here, the hash binding
+ * is carried by the BlockNotarized event and enforced via Pool queries:
+ * we check VotedForBlock(_, s, blockHash) instead of storing a
+ * parameterized VotedNotar(h) flag. This is equivalent to Algorithm 2
+ * lines 18–21; see also Definition 15 (BlockNotarized event).
+ *)
 TryFinal(validator, slot, blockHash) ==
     LET canVote ==
             /\ HasState(validator, slot, "BlockNotarized")
@@ -208,6 +216,9 @@ TryNotar(validator, block) ==
 (***************************************************************************
  * Skip all unvoted slots in the window, per Whitepaper Algorithm 2
  * (lines 22–27). Triggered by timeouts or fallback events.
+ * Cross-refs: Def. 18 (BadWindow semantics), Def. 12 (StoreVote multiplicity
+ * and idempotence). Network broadcast is modeled elsewhere (MainProtocol).
+ * Typing note: `validator.id \in Validators` is guaranteed by ValidatorStateOK.
  ***************************************************************************)
 
 TrySkipWindow(validator, slot) ==
@@ -424,6 +435,22 @@ THEOREM TrySkipWindowProducesValidSkipVotes ==
         ValidatorStateOK(validator) /\ ~HasState(validator, s, "Voted")
             => IsValidVote(CreateSkipVoteForSlot(validator.id, s))
 
+\* Post-condition lemma (audit 0016): After TrySkipWindow(v, s), every slot
+\* k in the same window that was previously unvoted gains {Voted, BadWindow}
+\* and has its pending blocks cleared.
+TrySkipWindowSetsFlagsAndClearsPending(v, s) ==
+    LET after == TrySkipWindow(v, s)
+    IN \A k \in WindowSlots(s) :
+        (~HasState(v, k, "Voted") /\ k \in Slots)
+            => /\ HasState(after, k, "Voted")
+               /\ HasState(after, k, "BadWindow")
+               /\ after.pendingBlocks[k] = {}
+
+\* Idempotence lemma (audit 0016): applying TrySkipWindow twice is a no-op
+\* after the first application (StoreVote multiplicity + state flags).
+TrySkipWindowIdempotent(v, s) ==
+    TrySkipWindow(TrySkipWindow(v, s), s) = TrySkipWindow(v, s)
+
 \* Optional verification predicate (audit 0016): After scheduling in
 \* HandleParentReady, each timeout for the leader window is strictly
 \* greater than the pre-call clock (Def. 17, with DeltaTimeout > 0).
@@ -445,5 +472,22 @@ Lemma22_ItsOverImpliesNotBadWindow(validator) ==
 
 Lemma22_BadWindowImpliesNotItsOver(validator) ==
     \A s \in Slots : HasState(validator, s, "BadWindow") => ~HasState(validator, s, "ItsOver")
+
+\* ============================================================================
+\* FINALIZATION GUARD INVARIANT (audit 0016)
+\* ============================================================================
+
+\* If a validator has issued its finalization vote for a slot (ItsOver),
+\* then TryFinal’s guard held: the slot is notarized, the validator voted
+\* for the notarized hash, and no fallback occurred in that slot/window.
+\* This mirrors Algorithm 2 (lines 18–21) and aids TLC.
+FinalVoteIssuanceImpliesPrereqs(validator) ==
+    \A s \in Slots :
+        HasState(validator, s, "ItsOver") =>
+            /\ HasState(validator, s, "BlockNotarized")
+            /\ ~HasState(validator, s, "BadWindow")
+            /\ \E h \in BlockHashes :
+                    HasNotarizationCert(validator.pool, s, h)
+                    /\ VotedForBlock(validator, s, h)
 
 =============================================================================
