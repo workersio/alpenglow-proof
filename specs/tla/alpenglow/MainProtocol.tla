@@ -239,7 +239,7 @@ GenerateCertificateAction(v, slot) ==
                     ELSE IF (\E c \in candidates : c.type = "NotarizationCert")
                          THEN CHOOSE c \in candidates : c.type = "NotarizationCert"
                          ELSE CHOOSE c \in candidates : TRUE
-             IN /\ messages' = messages \union {cert}
+             IN /\ messages' = messages \cup {cert}
                 /\ validators' = [validators EXCEPT ![v].pool = StoreCertificate(validators[v].pool, cert)]
     /\ UNCHANGED <<blocks, byzantineNodes, time, finalized, blockAvailability>>
 
@@ -262,7 +262,7 @@ FinalizeBlock(v, block) ==
            slot == block.slot
        IN \/ HasFastFinalizationCert(pool, slot, block.hash)
           \/ CanFinalizeSlow(pool, slot, block.hash)
-    /\ finalized' = [finalized EXCEPT ![v] = finalized[v] \union GetAncestors(block, blocks)]
+    /\ finalized' = [finalized EXCEPT ![v] = finalized[v] \cup GetAncestors(block, blocks)]
     /\ UNCHANGED <<validators, blocks, messages, byzantineNodes, time, blockAvailability>>
 
 (***************************************************************************
@@ -281,7 +281,7 @@ ByzantineAction(v) ==
         /\ IsValidVote(vote)
         /\ vote.validator = v
         /\ vote.slot <= MaxSlot
-        /\ messages' = messages \union {vote}
+        /\ messages' = messages \cup {vote}
     /\ UNCHANGED <<validators, blocks, byzantineNodes, time, finalized, blockAvailability>>
 
 (***************************************************************************
@@ -319,8 +319,8 @@ HonestProposeBlock(leader, slot, parent) ==
        IN \* Hint: ExtendsChain(newBlock, blocks)
           /\ LeaderMatchesSchedule(newBlock)
           /\ IsValidBlock(newBlock)
-          /\ blocks' = blocks \union {newBlock}
-          /\ blockAvailability' = [blockAvailability EXCEPT ![leader] = @ \union {newBlock}]
+          /\ blocks' = blocks \cup {newBlock}
+          /\ blockAvailability' = [blockAvailability EXCEPT ![leader] = @ \cup {newBlock}]
           /\ UNCHANGED <<validators, messages, byzantineNodes, time, finalized>>
 
 (***************************************************************************
@@ -356,8 +356,8 @@ HonestProposeBlockOptimistic(leader, slot, parent) ==
        ]
        IN /\ LeaderMatchesSchedule(newBlock)
           /\ IsValidBlock(newBlock)
-          /\ blocks' = blocks \union {newBlock}
-          /\ blockAvailability' = [blockAvailability EXCEPT ![leader] = @ \union {newBlock}]
+          /\ blocks' = blocks \cup {newBlock}
+          /\ blockAvailability' = [blockAvailability EXCEPT ![leader] = @ \cup {newBlock}]
           /\ UNCHANGED <<validators, messages, byzantineNodes, time, finalized>>
 
 (***************************************************************************
@@ -386,11 +386,11 @@ ByzantineProposeBlock(leader, slot, parent) ==
            leader |-> leader
        ]
        IN /\ LeaderMatchesSchedule(newBlock)
-          /\ blocks' = blocks \union {newBlock}
+          /\ blocks' = blocks \cup {newBlock}
           /\ \E recipients \in SUBSET Validators :
                 blockAvailability' =
                     [w \in Validators |->
-                        IF w \in recipients THEN blockAvailability[w] \union {newBlock}
+                        IF w \in recipients THEN blockAvailability[w] \cup {newBlock}
                         ELSE blockAvailability[w]]
           /\ UNCHANGED <<validators, messages, byzantineNodes, time, finalized>>
 
@@ -442,7 +442,7 @@ RotorDisseminateSuccess(block) ==
           /\ blockAvailability' =
                 [w \in Validators |->
                     IF w \in CorrectNodes
-                    THEN blockAvailability[w] \union {block}
+                    THEN blockAvailability[w] \cup {block}
                     ELSE blockAvailability[w]]
           /\ UNCHANGED <<validators, blocks, messages, byzantineNodes, time, finalized>>
 
@@ -471,7 +471,7 @@ RotorFailInsufficientRelays(block) ==
           /\ ~RotorSuccessful(block.leader, relays, CorrectNodes)
           /\ blockAvailability' = [w \in Validators |->
                                         IF w \in relays
-                                        THEN blockAvailability[w] \union {block}
+                                        THEN blockAvailability[w] \cup {block}
                                         ELSE blockAvailability[w]]
           /\ UNCHANGED <<validators, blocks, messages, byzantineNodes, time, finalized>>
 
@@ -492,7 +492,7 @@ RotorFailByzantineLeader(block) ==
     /\ \E recipients \in SUBSET Validators :
           /\ blockAvailability' = [w \in Validators |->
                                         IF w \in recipients
-                                        THEN blockAvailability[w] \union {block}
+                                        THEN blockAvailability[w] \cup {block}
                                         ELSE blockAvailability[w]]
           /\ UNCHANGED <<validators, blocks, messages, byzantineNodes, time, finalized>>
 
@@ -529,7 +529,7 @@ RepairBlock(v, block, supplier) ==
     /\ NeedsBlockRepair(validators[v].pool, block)
     /\ supplier \in CorrectNodes
     /\ block \in blockAvailability[supplier]
-    /\ blockAvailability' = [blockAvailability EXCEPT ![v] = @ \union {block}]
+    /\ blockAvailability' = [blockAvailability EXCEPT ![v] = @ \cup {block}]
     /\ UNCHANGED <<validators, blocks, messages, byzantineNodes, time, finalized>>
 
 
@@ -598,7 +598,7 @@ BroadcastLocalVote ==
        IN 
           /\ vt \notin messages
           /\ \E w \in Validators : vt \notin validators[w].pool.votes[vt.slot][vt.validator]
-          /\ messages' = messages \union {vt}
+          /\ messages' = messages \cup {vt}
     /\ UNCHANGED <<validators, blocks, byzantineNodes, time, finalized, blockAvailability>>
 
 (***************************************************************************
@@ -945,6 +945,17 @@ TransitCertificatesValid ==
     \A c \in messages : c \in Certificate => IsValidCertificate(c)
 
 (***************************************************************************
+ * TRANSIT VOTES VALID in-flight votes are well-formed
+ *
+ * Audit suggestion (messages well-typed): ensure every vote present in the
+ * network set `messages` satisfies IsValidVote. Complements
+ * TransitCertificatesValid for certificates.
+ *************************************************************************)
+ 
+TransitVotesValid ==
+    \A v \in messages : v \in Vote => IsValidVote(v)
+
+(***************************************************************************
  * LOCAL VOTES WELL-FORMED — correct nodes' own votes are valid and
  * match their recorded slot. This captures the intended well-formedness
  * of locally created votes and guards against slot–hash pairing mistakes
@@ -1148,7 +1159,7 @@ WindowFinalization(s) ==
 TypeInvariant ==
     /\ validators \in [Validators -> ValidatorState]
     /\ blocks \subseteq Block
-    /\ messages \subseteq (Vote \union Certificate)
+    /\ messages \subseteq (Vote \cup Certificate)
     /\ byzantineNodes \subseteq Validators
     /\ time \in Nat
     /\ finalized \in [Validators -> SUBSET blocks]
@@ -1310,6 +1321,7 @@ Invariant ==
     /\ PoolSkipVsBlockExclusion
     /\ HonestNonEquivocation
     /\ TransitCertificatesValid
+    /\ TransitVotesValid
     /\ LocalVotesWellFormed
     /\ PoolFastPathImplication
     /\ PoolFinalizationImpliesNotarizationPresent

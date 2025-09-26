@@ -122,7 +122,7 @@ HasState(validator, slot, stateObj) ==
 \* Add state object to validator's slot
 \* Precondition: `slot \in Slots` (enforced by callers and ValidatorStateOK).
 AddState(validator, slot, stateObj) ==
-    [validator EXCEPT !.state[slot] = validator.state[slot] \union {stateObj}]
+    [validator EXCEPT !.state[slot] = validator.state[slot] \cup {stateObj}]
 
 \* Check if validator voted for a specific block
 VotedForBlock(validator, slot, blockHash) ==
@@ -297,7 +297,7 @@ HandleBlock(validator, block) ==
         ELSE IF ~HasState(validator, slot, "Voted") THEN
             \* Store as pending to retry later
             [validator EXCEPT !.pendingBlocks[slot] = 
-                validator.pendingBlocks[slot] \union {block}]  \* Set union deduplicates; idempotent buffering
+                validator.pendingBlocks[slot] \cup {block}]  \* Set union deduplicates; idempotent buffering
         ELSE validator
 
 (***************************************************************************

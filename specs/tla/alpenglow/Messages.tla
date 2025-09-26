@@ -54,12 +54,19 @@ VoteType == {
     "FinalVote"            \* Second-round finalization vote
 }
 
+\* Optional symbolic names for vote tags (audit suggestion)
+NotarVoteT == "NotarVote"
+NotarFallbackVoteT == "NotarFallbackVote"
+SkipVoteT == "SkipVote"
+SkipFallbackVoteT == "SkipFallbackVote"
+FinalVoteT == "FinalVote"
+
 \* Structure of a vote message
 Vote == [
     type: VoteType,                           \* Which of the 5 vote types
     validator: Validators,                    \* Who is voting
     slot: Slots,                             \* Which slot this vote is for
-    blockHash: BlockHashes \union {NoBlock}  \* What block (NoBlock for skips)
+    blockHash: BlockHashes \cup {NoBlock}  \* What block (NoBlock for skips)
 ]
 
 \* ============================================================================
@@ -79,7 +86,7 @@ Vote == [
 \* Definition 11 (Table 5): NotarVote — validator immediately approves
 \* block `blockHash` for slot `slot`.
 CreateNotarVote(validator, slot, blockHash) ==
-    [type |-> "NotarVote",
+    [type |-> NotarVoteT,
      validator |-> validator,
      slot |-> slot,
      blockHash |-> blockHash]
@@ -88,7 +95,7 @@ CreateNotarVote(validator, slot, blockHash) ==
 \* the same block once enough peers voted.
 \* Note: signatures are abstracted; this records logical content only.
 CreateNotarFallbackVote(validator, slot, blockHash) ==
-    [type |-> "NotarFallbackVote",
+    [type |-> NotarFallbackVoteT,
      validator |-> validator,
      slot |-> slot,
      blockHash |-> blockHash]
@@ -97,7 +104,7 @@ CreateNotarFallbackVote(validator, slot, blockHash) ==
 \* Whitepaper Table 5: skip votes carry no block reference; we encode this by
 \* setting `blockHash = NoBlock` and enforce it via IsValidVote.
 CreateSkipVote(validator, slot) ==
-    [type |-> "SkipVote",
+    [type |-> SkipVoteT,
      validator |-> validator,
      slot |-> slot,
      blockHash |-> NoBlock]  \* Skip votes don't reference a block
@@ -108,7 +115,7 @@ CreateSkipVote(validator, slot) ==
 \* after attempting to skip unvoted slots; Definition 16 (Fallback events)
 \* specifies the SafeToSkip preconditions that gate this emission.
 CreateSkipFallbackVote(validator, slot) ==
-    [type |-> "SkipFallbackVote",
+    [type |-> SkipFallbackVoteT,
      validator |-> validator,
      slot |-> slot,
      blockHash |-> NoBlock]
@@ -118,7 +125,7 @@ CreateSkipFallbackVote(validator, slot) ==
 \* (slot-scoped finalization). We encode slot scoping by setting
 \* `blockHash |-> NoBlock` so FinalVote(s) carries only the slot.
 CreateFinalVote(validator, slot) ==
-    [type |-> "FinalVote",
+    [type |-> FinalVoteT,
      validator |-> validator,
      slot |-> slot,
      blockHash |-> NoBlock]  \* Slot-scoped finalization vote (FinalVote(s))
@@ -139,27 +146,27 @@ CreateSkipVoteForSlot(v, s) == CreateSkipVote(v, s)
 \* Alias note: "IsApprovalVote" is the preferred name (audit suggestion)
 \* to avoid confusion with "initial notarization"; keep both for clarity.
 IsNotarVote(vote) ==
-    vote.type \in {"NotarVote", "NotarFallbackVote"}
+    vote.type \in {NotarVoteT, NotarFallbackVoteT}
 IsApprovalVote(vote) == IsNotarVote(vote)
 
 \* Does this vote skip the slot (initial or fallback)?
 IsSkipVote(vote) ==
-    vote.type \in {"SkipVote", "SkipFallbackVote"}
+    vote.type \in {SkipVoteT, SkipFallbackVoteT}
 
 \* Is this a finalization vote?
 IsFinalVote(vote) ==
-    vote.type = "FinalVote"
+    vote.type = FinalVoteT
 
 \* Initial votes are the ones counted once per slot (Definition 12 / Lemma 20).
 IsInitialVote(vote) ==
-    vote.type \in {"NotarVote", "SkipVote"}
+    vote.type \in {NotarVoteT, SkipVoteT}
 
 \* Audit ergonomics (2025-09-25): explicit predicate for the single
 \* initial notarization vote type to avoid duplicating the string literal
 \* across modules (e.g., VotorCore, VoteStorage) and to improve
 \* readability of intent in guards/queries.
 IsInitialNotarVote(vote) ==
-    vote.type = "NotarVote"
+    vote.type = NotarVoteT
 
 \* Is this a fallback vote (safety mechanism)?
 IsFallbackVote(vote) ==
@@ -198,7 +205,7 @@ CertificateType == {
 Certificate == [
     type: CertificateType,                    \* Which certificate type
     slot: Slots,                              \* Which slot
-    blockHash: BlockHashes \union {NoBlock},  \* Which block (or NoBlock)
+    blockHash: BlockHashes \cup {NoBlock},  \* Which block (or NoBlock)
     votes: SUBSET Vote                        \* The votes in this certificate
 ]
 

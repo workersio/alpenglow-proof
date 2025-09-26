@@ -115,7 +115,7 @@ StoreVote(pool, vote) ==
         IN
             \* Idempotence: set union ensures duplicate deliveries are harmless.
             \* Re-storing an identical vote has no effect on Pool state.
-            [pool EXCEPT !.votes[slot][validator] = existingVotes \union {vote}]
+            [pool EXCEPT !.votes[slot][validator] = existingVotes \cup {vote}]
     ELSE
         pool  \* Don't store if multiplicity rules violated
 
@@ -166,7 +166,7 @@ StoreCertificate(pool, cert) ==
        /\ CertificateWellFormed(cert)
     THEN
         [pool EXCEPT !.certificates[cert.slot] = 
-            pool.certificates[cert.slot] \union {cert}]
+            pool.certificates[cert.slot] \cup {cert}]
     ELSE
         pool
 
