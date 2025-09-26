@@ -47,7 +47,10 @@ CONSTANTS
     ByzantineCount,     \* Number of Byzantine validators (< 20% of stake)
     GST,                \* Global Stabilization Time
     MaxSlot,            \* Maximum slot for bounded model checking
-    MaxBlocks           \* Maximum blocks for bounded model checking
+    MaxBlocks,          \* Maximum blocks for bounded model checking
+    \* Bounded-time finalization latency parameters (whitepaper §1.3, §1.5, §2.6)
+    Delta80,            \* Models δ80% (time unit consistent with `time`)
+    Delta60             \* Models δ60% (time unit consistent with `time`)
 
 (***************************************************************************
  * Constants — model parameters and paper assumptions
@@ -73,6 +76,8 @@ ASSUME
     /\ MaxBlocks \in Nat \ {0}
     /\ Cardinality(Validators) = NumValidators
     /\ Slots = 0..MaxSlot   \* Centralize epoch bound: finite slot domain (includes genesis slot 0)
+    /\ Delta80 \in Nat \ {0}
+    /\ Delta60 \in Nat \ {0}
 
 \* ============================================================================
 \* SYSTEM STATE VARIABLES
@@ -83,11 +88,17 @@ VARIABLES
     blocks,             \* Set of all blocks in the system
     messages,           \* Set of messages in transit
     byzantineNodes,     \* Set of Byzantine validator IDs
+    unresponsiveNodes,  \* Set of honest-but-unresponsive validator IDs
     time,               \* Global time (for modeling synchrony)
     finalized,          \* Map: Validators -> Set of finalized blocks
-    blockAvailability   \* Map: Validators -> Set of reconstructed blocks
+    blockAvailability,  \* Map: Validators -> Set of reconstructed blocks
+    \* Ghost timers to enforce bounded-time finalization (min(δ80%, 2δ60%)).
+    \* They record the first model time at which a block (slot s, hash h)
+    \* becomes available to ≥80% or ≥60% of stake, respectively.
+    avail80Start,       \* [1..MaxSlot -> [BlockHashes -> Nat]]; 0 means “not started”
+    avail60Start        \* [1..MaxSlot -> [BlockHashes -> Nat]]; 0 means “not started”
 
-vars == <<validators, blocks, messages, byzantineNodes, time, finalized, blockAvailability>>
+vars == <<validators, blocks, messages, byzantineNodes, unresponsiveNodes, time, finalized, blockAvailability, avail80Start, avail60Start>>
 
 (***************************************************************************
  * State variables — correspondence to the paper
@@ -113,8 +124,8 @@ vars == <<validators, blocks, messages, byzantineNodes, time, finalized, blockAv
 \* HELPER FUNCTIONS
 \* ============================================================================
 
-\* Get correct (non-Byzantine) validators
-CorrectNodes == Validators \ byzantineNodes
+\* Get correct, responsive validators (non-Byzantine and not unresponsive)
+CorrectNodes == Validators \ (byzantineNodes \cup unresponsiveNodes)
 
 \* Repair trigger (Algorithm 4; §2.8). Include fast-finalization to cover fast-only
 \* implementations. See also Blokstor repair mention: `alpenglow-whitepaper.md:470`.
@@ -128,14 +139,32 @@ NeedsBlockRepair(pool, block) ==
 \* Check if we're after GST (network is stable; §1.5/§2.10)
 AfterGST == time >= GST
 
-\* Calculate total Byzantine stake
-ByzantineStake ==
-    LET byzVals == byzantineNodes
-    IN CalculateStake(byzVals)
-
 \* Assumption 1: Byzantine stake < 20% of total (`alpenglow-whitepaper.md:107`)
-ByzantineStakeOK ==
-    ByzantineStake * 100 < TotalStake * 20
+\* (used inline in Init/Invariant/Liveness properties)
+\* Honest participation bound: at most 20% unresponsive stake (used inline)
+
+\* ============================================================================
+\* AVAILABILITY-STAKE HELPERS (for bounded-time finalization)
+\* ============================================================================
+
+(***************************************************************************
+ * AvailabilityStakeFor(s, h): stake of validators that currently have block
+ * (slot s, hash h) in their `blockAvailability`. This abstracts the
+ * whitepaper’s δ_θ notion (Section 1.5 at :241) by detecting when a block
+ * has reached ≥θ% stake of nodes.
+ ***************************************************************************)
+ExistsBlockAt(s, h) == \E b \in blocks : b.slot = s /\ b.hash = h
+
+AvailabilityStakeFor(s, h) ==
+    LET holders == { v \in CorrectNodes :
+                        \E b \in blockAvailability[v] : b.slot = s /\ b.hash = h }
+    IN CalculateStake(holders)
+
+AvailMeets(s, h, thetaPercent) ==
+    MeetsThreshold(AvailabilityStakeFor(s, h), thetaPercent)
+
+Avail80Now(s, h) == AvailMeets(s, h, 80)
+Avail60Now(s, h) == AvailMeets(s, h, 60)
 
 \* ============================================================================
 \* INITIAL STATE
@@ -168,10 +197,14 @@ Init ==
     /\ blocks = {GenesisBlock}
     /\ messages = {}
     /\ byzantineNodes \in {S \in SUBSET Validators : Cardinality(S) = ByzantineCount}
-    /\ ByzantineStakeOK
+    /\ unresponsiveNodes \in SUBSET (Validators \ byzantineNodes)
+    /\ (CalculateStake(byzantineNodes) * 100) < (TotalStake * 20)
+    /\ (CalculateStake(unresponsiveNodes) * 100) <= (TotalStake * 20)
     /\ time = 0
     /\ finalized = [v \in Validators |-> {}]
     /\ blockAvailability = [v \in Validators |-> {GenesisBlock}]
+    /\ avail80Start = [s \in 1..MaxSlot |-> [h \in BlockHashes |-> 0]]
+    /\ avail60Start = [s \in 1..MaxSlot |-> [h \in BlockHashes |-> 0]]
 
 \* ============================================================================
 \* ACTIONS (State Transitions)
@@ -201,7 +234,7 @@ ReceiveBlock(v, block) ==
     /\ ~HasState(validators[v], block.slot, "BlockSeen")
     /\ validators' = [validators EXCEPT ![v] =
                          AddState(HandleBlock(validators[v], block), block.slot, "BlockSeen")]
-    /\ UNCHANGED <<blocks, messages, byzantineNodes, time, finalized, blockAvailability>>
+    /\ UNCHANGED <<blocks, messages, byzantineNodes, unresponsiveNodes, time, finalized, blockAvailability, avail80Start, avail60Start>>
 
 (***************************************************************************
  * GENERATE CERTIFICATE — aggregate and broadcast (Definition 13)
@@ -235,7 +268,7 @@ GenerateCertificateAction(v, slot) ==
                          ELSE CHOOSE c \in candidates : TRUE
              IN /\ messages' = messages \cup {cert}
                 /\ validators' = [validators EXCEPT ![v].pool = StoreCertificate(validators[v].pool, cert)]
-    /\ UNCHANGED <<blocks, byzantineNodes, time, finalized, blockAvailability>>
+    /\ UNCHANGED <<blocks, byzantineNodes, unresponsiveNodes, time, finalized, blockAvailability, avail80Start, avail60Start>>
 
 (***************************************************************************
  * FINALIZE BLOCK — fast vs slow (Definition 14)
@@ -257,7 +290,7 @@ FinalizeBlock(v, block) ==
        IN \/ HasFastFinalizationCert(pool, slot, block.hash)
           \/ CanFinalizeSlow(pool, slot, block.hash)
     /\ finalized' = [finalized EXCEPT ![v] = finalized[v] \cup GetAncestors(block, blocks)]
-    /\ UNCHANGED <<validators, blocks, messages, byzantineNodes, time, blockAvailability>>
+    /\ UNCHANGED <<validators, blocks, messages, byzantineNodes, unresponsiveNodes, time, blockAvailability, avail80Start, avail60Start>>
 
 (***************************************************************************
  * BYZANTINE ACTION — adversary can inject arbitrary votes
@@ -276,7 +309,7 @@ ByzantineAction(v) ==
         /\ vote.validator = v
         /\ vote.slot <= MaxSlot
         /\ messages' = messages \cup {vote}
-    /\ UNCHANGED <<validators, blocks, byzantineNodes, time, finalized, blockAvailability>>
+    /\ UNCHANGED <<validators, blocks, byzantineNodes, unresponsiveNodes, time, finalized, blockAvailability, avail80Start, avail60Start>>
 
 (***************************************************************************
  * HONEST PROPOSE BLOCK (strict) — Algorithm 3 with ParentReady gating
@@ -315,7 +348,7 @@ HonestProposeBlock(leader, slot, parent) ==
           /\ IsValidBlock(newBlock)
           /\ blocks' = blocks \cup {newBlock}
           /\ blockAvailability' = [blockAvailability EXCEPT ![leader] = @ \cup {newBlock}]
-          /\ UNCHANGED <<validators, messages, byzantineNodes, time, finalized>>
+          /\ UNCHANGED <<validators, messages, byzantineNodes, unresponsiveNodes, time, finalized, avail80Start, avail60Start>>
 
 (***************************************************************************
  * BYZANTINE PROPOSE BLOCK — equivocation/withholding by faulty leaders
@@ -349,7 +382,7 @@ ByzantineProposeBlock(leader, slot, parent) ==
                     [w \in Validators |->
                         IF w \in recipients THEN blockAvailability[w] \cup {newBlock}
                         ELSE blockAvailability[w]]
-          /\ UNCHANGED <<validators, messages, byzantineNodes, time, finalized>>
+          /\ UNCHANGED <<validators, messages, byzantineNodes, unresponsiveNodes, time, finalized, avail80Start, avail60Start>>
 
 (***************************************************************************
  * ADVANCE TIME — partial-synchrony timers (Definition 17)
@@ -369,7 +402,25 @@ AdvanceTime ==
                         IF w \in CorrectNodes
                         THEN AdvanceClock(validators[w], time')
                         ELSE validators[w]]
-    /\ UNCHANGED <<blocks, messages, byzantineNodes, finalized, blockAvailability>>
+    /\ avail80Start' =
+        [s \in 1..MaxSlot |->
+            [h \in BlockHashes |->
+                IF avail80Start[s][h] # 0 THEN avail80Start[s][h]
+                ELSE IF ExistsBlockAt(s, h) /\ Avail80Now(s, h)
+                     THEN time'
+                     ELSE 0
+            ]
+        ]
+    /\ avail60Start' =
+        [s \in 1..MaxSlot |->
+            [h \in BlockHashes |->
+                IF avail60Start[s][h] # 0 THEN avail60Start[s][h]
+                ELSE IF ExistsBlockAt(s, h) /\ Avail60Now(s, h)
+                     THEN time'
+                     ELSE 0
+            ]
+        ]
+    /\ UNCHANGED <<blocks, messages, byzantineNodes, unresponsiveNodes, finalized, blockAvailability>>
 
 (***************************************************************************
  * ROTOR DISSEMINATION (SUCCESS) — distribute to all correct nodes
@@ -400,7 +451,7 @@ RotorDisseminateSuccess(block) ==
                                 IF w \in CorrectNodes
                                 THEN blockAvailability[w] \cup {block}
                                 ELSE blockAvailability[w]]
-                      /\ UNCHANGED <<validators, blocks, messages, byzantineNodes, time, finalized>>
+                      /\ UNCHANGED <<validators, blocks, messages, byzantineNodes, unresponsiveNodes, time, finalized, avail80Start, avail60Start>>
 
 (***************************************************************************
  * ROTOR FAILURE (insufficient correct relays) — partial dissemination
@@ -430,7 +481,7 @@ RotorFailInsufficientRelays(block) ==
                                                 IF w \in relays
                                                 THEN blockAvailability[w] \cup {block}
                                                 ELSE blockAvailability[w]]
-                      /\ UNCHANGED <<validators, blocks, messages, byzantineNodes, time, finalized>>
+                      /\ UNCHANGED <<validators, blocks, messages, byzantineNodes, unresponsiveNodes, time, finalized, avail80Start, avail60Start>>
 
 (***************************************************************************
  * ROTOR FAILURE (Byzantine leader) — arbitrary dissemination/withholding
@@ -451,7 +502,7 @@ RotorFailByzantineLeader(block) ==
                                         IF w \in recipients
                                         THEN blockAvailability[w] \cup {block}
                                         ELSE blockAvailability[w]]
-          /\ UNCHANGED <<validators, blocks, messages, byzantineNodes, time, finalized>>
+          /\ UNCHANGED <<validators, blocks, messages, byzantineNodes, unresponsiveNodes, time, finalized, avail80Start, avail60Start>>
 
 (***************************************************************************
  * ROTOR NO-DISSEMINATION — immediate fail case
@@ -465,7 +516,7 @@ RotorFailByzantineLeader(block) ==
 RotorNoDissemination(block) ==
     /\ block \in blocks
     /\ block.leader \in byzantineNodes
-    /\ UNCHANGED <<validators, blocks, messages, byzantineNodes, time, finalized, blockAvailability>>
+    /\ UNCHANGED <<validators, blocks, messages, byzantineNodes, unresponsiveNodes, time, finalized, blockAvailability, avail80Start, avail60Start>>
 
 
 (***************************************************************************
@@ -487,7 +538,7 @@ RepairBlock(v, block, supplier) ==
     /\ supplier \in CorrectNodes
     /\ block \in blockAvailability[supplier]
     /\ blockAvailability' = [blockAvailability EXCEPT ![v] = @ \cup {block}]
-    /\ UNCHANGED <<validators, blocks, messages, byzantineNodes, time, finalized>>
+    /\ UNCHANGED <<validators, blocks, messages, byzantineNodes, time, finalized, avail80Start, avail60Start>>
 
 
 (***************************************************************************
@@ -512,7 +563,7 @@ DeliverVote ==
           /\ validators' = [w \in Validators |->
                                [validators[w] EXCEPT
                                    !.pool = StoreVote(@, vmsg)]]
-    /\ UNCHANGED <<blocks, byzantineNodes, time, finalized, blockAvailability>>
+    /\ UNCHANGED <<blocks, byzantineNodes, unresponsiveNodes, time, finalized, blockAvailability, avail80Start, avail60Start>>
 
 (***************************************************************************
  * DELIVER CERTIFICATE — store and propagate (Definition 13)
@@ -530,7 +581,7 @@ DeliverCertificate ==
           /\ validators' = [w \in Validators |->
                                [validators[w] EXCEPT
                                    !.pool = StoreCertificate(@, cmsg)]]
-    /\ UNCHANGED <<blocks, byzantineNodes, time, finalized, blockAvailability>>
+    /\ UNCHANGED <<blocks, byzantineNodes, unresponsiveNodes, time, finalized, blockAvailability, avail80Start, avail60Start>>
 
 (***************************************************************************
  * BROADCAST LOCAL VOTE — ensure eventual delivery of own votes
@@ -556,7 +607,7 @@ BroadcastLocalVote ==
           /\ vt \notin messages
           /\ \E w \in Validators : vt \notin validators[w].pool.votes[vt.slot][vt.validator]
           /\ messages' = messages \cup {vt}
-    /\ UNCHANGED <<validators, blocks, byzantineNodes, time, finalized, blockAvailability>>
+    /\ UNCHANGED <<validators, blocks, byzantineNodes, unresponsiveNodes, time, finalized, blockAvailability, avail80Start, avail60Start>>
 
 (***************************************************************************
  * EVENT: BLOCK NOTARIZED — when Pool holds a notar cert
@@ -574,7 +625,7 @@ EmitBlockNotarized ==
          /\ ~HasState(validators[v], b.slot, "BlockNotarized")
          /\ validators' = [validators EXCEPT ![v] =
                                HandleBlockNotarized(@, b.slot, b.hash)]
-    /\ UNCHANGED <<blocks, messages, byzantineNodes, time, finalized, blockAvailability>> \* Finalization votes broadcasted by BroadcastLocalVote
+    /\ UNCHANGED <<blocks, messages, byzantineNodes, unresponsiveNodes, time, finalized, blockAvailability, avail80Start, avail60Start>> \* Finalization votes broadcasted by BroadcastLocalVote
 
  (***************************************************************************
  * EVENT: SAFE TO NOTAR — fallback inequality (Definition 16)
@@ -599,7 +650,7 @@ EmitSafeToNotar ==
             IN CanEmitSafeToNotar(validators[v].pool, s, b.hash, b.parent, alreadyVoted, votedForB)
          /\ ~HasState(validators[v], s, "BadWindow") \* Prevents re-emitting after a fallback vote was cast
          /\ validators' = [validators EXCEPT ![v] = HandleSafeToNotar(@, b)]
-    /\ UNCHANGED <<blocks, messages, byzantineNodes, time, finalized, blockAvailability>>
+    /\ UNCHANGED <<blocks, messages, byzantineNodes, unresponsiveNodes, time, finalized, blockAvailability, avail80Start, avail60Start>>
 
  (***************************************************************************
  * EVENT: SAFE TO SKIP — fallback inequality (Definition 16)
@@ -629,7 +680,7 @@ EmitSafeToSkip ==
          /\ ~HasSkipCert(validators[v].pool, s) \* Avoid redundant skip-fallback voting when skip cert already exists
          /\ ~HasState(validators[v], s, "BadWindow") \* Prevents re-emitting after a fallback vote was cast
          /\ validators' = [validators EXCEPT ![v] = HandleSafeToSkip(@, s)]
-    /\ UNCHANGED <<blocks, messages, byzantineNodes, time, finalized, blockAvailability>>
+    /\ UNCHANGED <<blocks, messages, byzantineNodes, unresponsiveNodes, time, finalized, blockAvailability, avail80Start, avail60Start>>
 
  (***************************************************************************
  * EVENT: PARENT READY — first slot of a leader window (Definition 15)
@@ -649,7 +700,7 @@ EmitParentReady ==
          /\ ShouldEmitParentReady(validators[v].pool, s, p.hash, p.slot)
          /\ ~HasState(validators[v], s, "ParentReady")
          /\ validators' = [validators EXCEPT ![v] = HandleParentReady(@, s, p.hash)]
-    /\ UNCHANGED <<blocks, messages, byzantineNodes, time, finalized, blockAvailability>>
+    /\ UNCHANGED <<blocks, messages, byzantineNodes, unresponsiveNodes, time, finalized, blockAvailability, avail80Start, avail60Start>>
 
 \* ============================================================================
 \* NEXT STATE RELATION
@@ -1060,6 +1111,39 @@ BasicLiveness ==
              \E b \in blocks : b.slot > 0 /\ b \in finalized[v])
 
 (***************************************************************************
+ * FAST PATH (ONE ROUND) — >=80% responsive stake implies fast finalization
+ *
+ * Whitepaper refs
+ * - Sections 1.3 and 2.6: one-round finalization with >=80% participating
+ *   stake; Tables 5–6 thresholds (NotarVote 80% => FastFinalizationCert).
+ *
+ * Explanation
+ * - Once a FastFinalizationCert exists for a block b in slot s (i.e., >=80%
+ *   stake on NotarVote for b), the protocol can finalize b in that same
+ *   round without a slow-path FinalizationCert. Under post-GST fairness,
+ *   some correct node will eventually execute FinalizeBlock on b.
+ *
+ * Notes
+ * - We quantify over blocks present in the model state and restrict to
+ *   production slots (1..MaxSlot). The antecedent uses presence of a fast
+ *   certificate in any correct node’s Pool, which captures the 
+ *   ">=80% responsive stake" condition operationally.
+ ***************************************************************************)
+
+\* Liveness property (enabled in MC.cfg PROPERTIES)
+FastCertExistsAt(s, h) ==
+    \E v \in CorrectNodes : HasFastFinalizationCert(validators[v].pool, s, h)
+
+BlockHashFinalizedAt(s, h) ==
+    \E v \in CorrectNodes : \E b \in blocks : b.slot = s /\ b.hash = h /\ b \in finalized[v]
+
+FastPathOneRound ==
+    \A s \in 1..MaxSlot :
+    \A h \in BlockHashes :
+        ((time >= GST /\ FastCertExistsAt(s, h)) ~>
+            BlockHashFinalizedAt(s, h))
+
+(***************************************************************************
  * TRYFINAL PROGRESS — BlockNotarized + local vote ⇒ FinalVote eventually
  *
  * Audit 0016 suggestion
@@ -1094,6 +1178,18 @@ Progress ==
                                  ELSE CHOOSE s \in {b.slot : b \in finalized[v]} :
                                           \A s2 \in {b.slot : b \in finalized[v]} : s >= s2
              IN <>(\E b \in blocks : b.slot > currentMax /\ b \in finalized[v]))
+
+(***************************************************************************
+ * SLOW-PATH LIVENESS (≥60% responsive) — progress after GST
+ *
+ * Explanation
+ * - Under the stake premises encoded by ByzantineStakeOK and UnresponsiveStakeOK,
+ *   at least 60% of stake is responsive and honest. Combined with the fairness
+ *   constraints (AfterGST), the protocol makes progress (finalizes higher slots).
+ ***************************************************************************)
+\* Liveness property (enabled in MC.cfg PROPERTIES)
+\* Stake assumptions are enforced in Init/Invariant; see comments above.
+Liveness60Responsive == Progress
 
 (***************************************************************************
  * THEOREM 2 — window-level liveness (Section 2.10)
@@ -1140,9 +1236,12 @@ TypeInvariant ==
     /\ blocks \subseteq Block
     /\ messages \subseteq (Vote \cup Certificate)
     /\ byzantineNodes \subseteq Validators
+    /\ unresponsiveNodes \subseteq Validators
     /\ time \in Nat
     /\ finalized \in [Validators -> SUBSET blocks]
     /\ blockAvailability \in [Validators -> SUBSET blocks]
+    /\ avail80Start \in [1..MaxSlot -> [BlockHashes -> Nat]]
+    /\ avail60Start \in [1..MaxSlot -> [BlockHashes -> Nat]]
     /\ \A v \in Validators : ValidatorStateOK(validators[v])
     \* Certificates validity (Table 6) as a baseline type/shape property
     /\ \A v \in Validators : \A s \in 1..MaxSlot :
@@ -1259,6 +1358,40 @@ PendingBlocksSingletonAll ==
 PendingBlocksSlotAlignedAll ==
     \A v \in Validators : PendingBlocksSlotAligned(validators[v])
 
+(***************************************************************************
+ * BOUNDED-TIME FINALIZATION — min(δ80%, 2δ60%) after distribution
+ *
+ * Whitepaper refs
+ * - Section 1.3 (:126) and §1.5 (:241): δ_θ definition and latency intuition.
+ * - §2.6: concurrent 80% one-round and 60% two-round finalization paths.
+ *
+ * Explanation
+ * - We record, per (slot,hash), the first model time at which a block has
+ *   been disseminated to ≥80% (resp. ≥60%) stake via `avail80Start` and
+ *   `avail60Start`. The following invariants assert that by the time the
+ *   model time exceeds those start times by Delta80 (resp. 2·Delta60), some
+ *   correct node has finalized that block (BlockHashFinalizedAt).
+ *
+ * Notes
+ * - These are safety-style invariants (deadline cannot be exceeded without
+ *   finalization) instead of temporal "within k" operators, which allows
+ *   TLC to check bounded-time claims with the existing `time` variable.
+ ***************************************************************************)
+
+EffectiveStart(start) == IF start = 0 THEN 0 ELSE IF start < GST THEN GST ELSE start
+
+BoundedFinalization80 ==
+    \A s \in 1..MaxSlot :
+    \A h \in BlockHashes :
+        LET st == EffectiveStart(avail80Start[s][h])
+        IN (st = 0) \/ (time <= st + Delta80) \/ BlockHashFinalizedAt(s, h)
+
+BoundedFinalization60 ==
+    \A s \in 1..MaxSlot :
+    \A h \in BlockHashes :
+        LET st == EffectiveStart(avail60Start[s][h])
+        IN (st = 0) \/ (time <= st + (2 * Delta60)) \/ BlockHashFinalizedAt(s, h)
+
 \* ============================================================================
 \* STATE CONSTRAINTS (For bounded model checking)
 \* ============================================================================
@@ -1295,7 +1428,9 @@ Invariant ==
     /\ PoolFastPathImplication
     /\ PoolFinalizationImpliesNotarizationPresent
     /\ CertificateBlockProvenance
-    /\ ByzantineStakeOK
+    /\ (CalculateStake(byzantineNodes) * 100 < TotalStake * 20)
+    /\ (CalculateStake(unresponsiveNodes) * 100 <= TotalStake * 20)
+    /\ (byzantineNodes \cap unresponsiveNodes) = {}
     /\ PoolMultiplicityOK
     /\ PoolCertificateUniqueness
     /\ PoolCertificatesValid
@@ -1324,5 +1459,7 @@ Invariant ==
     /\ ItsOverWitness
     /\ NoMixFinalizationAndFallback
     /\ TotalNotarStakeSanity
+    /\ BoundedFinalization80
+    /\ BoundedFinalization60
 
 =============================================================================
