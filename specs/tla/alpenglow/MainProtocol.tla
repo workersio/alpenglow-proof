@@ -1163,6 +1163,39 @@ FinalVoteImpliesBlockNotarized ==
         \A vt \in validators[v].pool.votes[s][v] :
             IsFinalVote(vt) => HasState(validators[v], s, "BlockNotarized")
 
+(***************************************************************************
+ * STATE–POOL WITNESSES — audit 0014 (Votor StateObject)
+ *
+ * Explanation
+ * - Connects Votor state flags to the existence of corresponding local votes
+ *   in Pool for correct nodes. These strengthen auditability and document
+ *   intended meanings of the flags.
+ *************************************************************************)
+VotedConsistency ==
+    \A v \in CorrectNodes :
+    \A s \in 1..MaxSlot :
+        ("Voted" \in validators[v].state[s])
+            => (\E vt \in validators[v].pool.votes[s][v] : IsInitialVote(vt))
+
+VotedNotarTagConsistency ==
+    \A v \in CorrectNodes :
+    \A s \in 1..MaxSlot :
+        ("VotedNotarTag" \in validators[v].state[s])
+            => (\E vt \in validators[v].pool.votes[s][v] : vt.type = "NotarVote")
+
+BadWindowWitness ==
+    \A v \in CorrectNodes :
+    \A s \in 1..MaxSlot :
+        ("BadWindow" \in validators[v].state[s])
+            => (\E vt \in validators[v].pool.votes[s][v] :
+                    vt.type \in {"SkipVote", "SkipFallbackVote", "NotarFallbackVote"})
+
+ItsOverWitness ==
+    \A v \in CorrectNodes :
+    \A s \in 1..MaxSlot :
+        ("ItsOver" \in validators[v].state[s])
+            => (\E vt \in validators[v].pool.votes[s][v] : vt.type = "FinalVote")
+
 (* --------------------------------------------------------------------------
  * FINALIZED ANCESTOR CLOSURE — finalized sets are ancestry-closed
  *
@@ -1224,6 +1257,10 @@ Invariant ==
     /\ ParentReadyImpliesCert
     /\ ParentReadyUsesPreviousBlock
     /\ FinalVoteImpliesBlockNotarized
+    /\ VotedConsistency
+    /\ VotedNotarTagConsistency
+    /\ BadWindowWitness
+    /\ ItsOverWitness
     /\ TotalNotarStakeSanity
 
 =============================================================================

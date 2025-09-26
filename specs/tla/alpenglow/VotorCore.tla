@@ -28,28 +28,41 @@ ASSUME
 \* ============================================================================
 
 (***************************************************************************
- * State objects that can be added to validator state:
- * - ParentReady(h): Ready to vote on blocks with parent h
- * - Voted: Cast initial vote (notar or skip) in this slot
- * - VotedNotar(h): Cast notarization vote for block h
- * - BlockNotarized(h): Pool holds notarization cert for h
- * - ItsOver: Cast finalization vote, no more votes in slot
- * - BadWindow: Cast skip or fallback vote
- * - BlockSeen: First Block(...) event consumed for this slot
+ * State objects that can be added to validator state (Def. 18), with
+ * implementation notes on parameterization:
+ * - ParentReady(h): Ready to vote on blocks with parent h.
+ *   Implementation: boolean flag; the bound hash `h` is recorded in
+ *   `parentReady[slot]` and used by guards.
+ * - Voted: Cast initial vote (notar or skip) in this slot.
+ * - VotedNotarTag: Bookkeeping tag set when casting a notarization vote.
+ *   Implementation: unparameterized tag; the specific block hash is
+ *   witnessed by the stored NotarVote in Pool and queried via
+ *   `VotedForBlock(..)` rather than reading the tag.
+ * - BlockNotarized(h): Pool has a notarization certificate for block h.
+ *   Implementation: boolean flag on the slot; the specific hash `h` is
+ *   carried by the BlockNotarized event parameter and passed to `TryFinal`.
+ * - ItsOver: Cast finalization vote; done with this slot.
+ * - BadWindow: Cast skip or fallback vote in this slot/window.
+ * - BlockSeen: First Block(...) event consumed for this slot.
+ *   Modeling note: not part of Def. 18; used only to ignore duplicate
+ *   Block deliveries in the model (leaders produce one block per slot).
  ***************************************************************************)
 
 StateObject == {
     "ParentReady",      \* Pool emitted ParentReady event
     "Voted",            \* Cast notarization or skip vote
-    "VotedNotar",       \* Cast notarization vote for specific block
+    "VotedNotarTag",    \* Local tag added when casting notar vote
     "BlockNotarized",   \* Pool has notarization certificate
     "ItsOver",          \* Cast finalization vote, done with slot
     "BadWindow",        \* Cast skip or fallback vote
     "BlockSeen"         \* First Block(...) event consumed for this slot
 }
 
-\* These flags are exactly the items listed in Definition 18 and let us track
-\* where each slot sits in the voting process.
+\* Commentary: Items correspond to Def. 18 but parameterized ones
+\* (ParentReady, VotedNotar, BlockNotarized) are represented by boolean
+\* flags, with the bound hash tracked via `parentReady[slot]`, Pool queries
+\* (e.g., `VotedForBlock`), or event parameters. `BlockSeen` is a modeling
+\* artifact for deduplicating Block delivery and is not a protocol state.
 
 \* Validator state structure
 ValidatorState == [
@@ -121,7 +134,7 @@ TryNotar(validator, block) ==
         IF canVote THEN
             LET vote == CreateNotarVoteForBlock(validator.id, block)
                 newState1 == AddState(validator, slot, "Voted")
-                newState2 == AddState(newState1, slot, "VotedNotar")
+                newState2 == AddState(newState1, slot, "VotedNotarTag")
                 poolWithVote == StoreVote(newState2.pool, vote)
             IN [newState2 EXCEPT 
                 !.pool = poolWithVote,
@@ -239,7 +252,8 @@ HandleTimeout(validator, slot) ==
 (***************************************************************************
  * Handle BlockNotarized event (Whitepaper Algorithm 1, lines 9–11).
  * Marks the slot as notarized and attempts to cast the slow-path
- * finalization vote.
+ * finalization vote. Note the flag is slot-scoped; the concrete `blockHash`
+ * carried by the event preserves the hash binding from the paper.
  ***************************************************************************)
 
 HandleBlockNotarized(validator, slot, blockHash) ==
