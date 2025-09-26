@@ -1220,6 +1220,9 @@ ParentReadyConsistencyAll ==
 PendingBlocksSingletonAll ==
     \A v \in Validators : PendingBlocksSingleton(validators[v])
 
+PendingBlocksSlotAlignedAll ==
+    \A v \in Validators : PendingBlocksSlotAligned(validators[v])
+
 \* ============================================================================
 \* STATE CONSTRAINTS (For bounded model checking)
 \* ============================================================================
@@ -1273,6 +1276,7 @@ Invariant ==
     /\ VotedConsistency
     /\ ParentReadyConsistencyAll
     /\ PendingBlocksSingletonAll
+    /\ PendingBlocksSlotAlignedAll
     /\ VotedNotarTagConsistency
     /\ BadWindowWitness
     /\ ItsOverWitness

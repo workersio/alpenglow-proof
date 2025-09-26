@@ -135,7 +135,9 @@ TryFinal(validator, slot, blockHash) ==
             LET vote == CreateFinalVote(validator.id, slot)
                 newState == AddState(validator, slot, "ItsOver")
                 poolWithVote == StoreVote(newState.pool, vote)
-            IN [newState EXCEPT !.pool = poolWithVote]
+            IN [newState EXCEPT 
+                    !.pool = poolWithVote,
+                    !.pendingBlocks[slot] = {}]  \* Clear pending for this slot once finalized (audit 0015 suggestion)
         ELSE validator
 
 \* ============================================================================
@@ -335,7 +337,10 @@ HandleSafeToSkip(validator, slot) ==
 
 \* Advance clock and process expired timeouts
 AdvanceClock(validator, newTime) ==
-    LET expiredTimeouts == {s \in Slots : 
+    \* Monotonic guard (audit 0015 suggestion): do not move clock backwards
+    IF newTime < validator.clock THEN validator
+    ELSE
+        LET expiredTimeouts == {s \in Slots : 
                             validator.timeouts[s] > 0 /\ 
                             validator.timeouts[s] <= newTime}
         RECURSIVE ProcessTimeouts(_,_)
@@ -345,7 +350,7 @@ AdvanceClock(validator, newTime) ==
                 LET s == CHOOSE x \in slots : TRUE
                     newVal == HandleTimeout(val, s)
                 IN ProcessTimeouts(newVal, slots \ {s})
-    IN [ProcessTimeouts(validator, expiredTimeouts) EXCEPT !.clock = newTime]
+        IN [ProcessTimeouts(validator, expiredTimeouts) EXCEPT !.clock = newTime]
 
 \* ============================================================================
 \* TYPE INVARIANT
@@ -366,6 +371,10 @@ ParentReadyConsistency(validator) ==
 
 PendingBlocksSingleton(validator) ==
     \A s \in Slots : Cardinality(validator.pendingBlocks[s]) <= 1
+
+\* Domain discipline for pending blocks (audit 0015 suggestion)
+PendingBlocksSlotAligned(validator) ==
+    \A s \in Slots : \A b \in validator.pendingBlocks[s] : b.slot = s
 
 \* Optional lemma (audit suggestion): votes produced for valid blocks are
 \* valid by construction (content-only, signatures abstracted).
