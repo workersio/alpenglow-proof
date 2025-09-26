@@ -1,0 +1,297 @@
+specs/tla/alpenglow/Blocks.tla	47	Block	20	specs/tla/alpenglow/VotorCore.tla:29:    DeltaBlock      \* Block time parameter (Def. 17; e.g., 400ms)
+specs/tla/alpenglow/Blocks.tla	60	GenesisBlock	3	specs/tla/alpenglow/MainProtocol.tla:174:    /\ blocks = {GenesisBlock}
+specs/tla/alpenglow/Blocks.tla	71	IsGenesis	2	specs/tla/alpenglow/Blocks.tla:91:    /\ (b.slot = 0 => IsGenesis(b))      \* If slot is 0, it must be the (unique) genesis shape
+specs/tla/alpenglow/Blocks.tla	85	IsValidBlock	9	specs/tla/alpenglow/VotorCore.tla:463:        IsValidBlock(b) => IsValidVote(CreateNotarVoteForBlock(v, b))
+specs/tla/alpenglow/Blocks.tla	101	ConflictingBlocks	1	
+specs/tla/alpenglow/Blocks.tla	112	ValidParentChild	3	specs/tla/alpenglow/Blocks.tla:82:\* - Parent existence and slot ordering are enforced by ValidParentChild and
+specs/tla/alpenglow/Blocks.tla	128	CreateNotarVoteForBlock	5	specs/tla/alpenglow/VotorCore.tla:215:            LET vote == CreateNotarVoteForBlock(validator.id, block)
+specs/tla/alpenglow/Blocks.tla	142	CreateNotarFallbackVoteForBlock	3	specs/tla/alpenglow/VotorCore.tla:367:            LET vote == CreateNotarFallbackVoteForBlock(skipResult.id, b)
+specs/tla/alpenglow/Blocks.tla	165	IsAncestor	5	specs/tla/alpenglow/Blocks.tla:182:    IsAncestor(b2, b1, allBlocks)
+specs/tla/alpenglow/Blocks.tla	181	IsDescendant	1	
+specs/tla/alpenglow/Blocks.tla	186	GetAncestors	5	specs/tla/alpenglow/Blocks.tla:160: *   ancestors operationally (FinalizeBlock unions GetAncestors).
+specs/tla/alpenglow/Blocks.tla	190	ComparableByAncestry	2	specs/tla/alpenglow/Blocks.tla:197:    ComparableByAncestry(b1, b2, allBlocks)
+specs/tla/alpenglow/Blocks.tla	196	InSameChain	2	specs/tla/alpenglow/Blocks.tla:309:        InSameChain(b1, b2, finalizedBlocks)
+specs/tla/alpenglow/Blocks.tla	211	WindowIndex	5	specs/tla/alpenglow/MC.tla:23:\* WindowIndex(0) = 0; WindowIndex(1) = 0; WindowIndex(2) = 0.
+specs/tla/alpenglow/Blocks.tla	216	Leader	15	specs/tla/alpenglow/Rotor.tla:10: *       • Leader encodes each slice into Γ shreds with a Merkle tree; any γ
+specs/tla/alpenglow/Blocks.tla	222	FirstSlotOfWindow	8	specs/tla/alpenglow/VotorCore.tla:339:        first == FirstSlotOfWindow(slot)
+specs/tla/alpenglow/Blocks.tla	227	IsFirstSlotOfWindow	8	specs/tla/alpenglow/VoteStorage.tla:376:    /\ IsFirstSlotOfWindow(slot)
+specs/tla/alpenglow/Blocks.tla	231	LeaderMatchesSchedule	5	specs/tla/alpenglow/Blocks.tla:84:\* - Schedule adherence is checked with LeaderMatchesSchedule(b) where needed.
+specs/tla/alpenglow/Blocks.tla	235	LeaderScheduleWindowConsistency	2	specs/tla/alpenglow/Blocks.tla:238:THEOREM LeaderScheduleWindowConsistency
+specs/tla/alpenglow/Blocks.tla	246	WindowSlots	8	specs/tla/alpenglow/VotorCore.tla:239:    LET windowSlots == WindowSlots(slot)
+specs/tla/alpenglow/Blocks.tla	267	HasBlockAtSlot	2	specs/tla/alpenglow/Blocks.tla:270:\* Precondition: HasBlockAtSlot(slot, chain). If multiple blocks exist in the
+specs/tla/alpenglow/Blocks.tla	273	BlockAtSlot	1	
+specs/tla/alpenglow/Blocks.tla	276	GetChain	1	
+specs/tla/alpenglow/Blocks.tla	281	Tip	2	specs/tla/alpenglow/Blocks.tla:287:    /\ LET tip == Tip(existingChain) IN
+specs/tla/alpenglow/Blocks.tla	285	ExtendsChain	2	specs/tla/alpenglow/MainProtocol.tla:319:       IN \* Hint: ExtendsChain(newBlock, blocks)
+specs/tla/alpenglow/Blocks.tla	296	AllBlocksValid	1	
+specs/tla/alpenglow/Blocks.tla	301	UniqueBlocksPerSlot	1	
+specs/tla/alpenglow/Blocks.tla	307	SingleChain	2	specs/tla/alpenglow/MainProtocol.tla:1286: * closure property relied upon by SingleChain over finalized sets.
+specs/tla/alpenglow/Blocks.tla	314	UniqueBlockHashes	2	specs/tla/alpenglow/MainProtocol.tla:1356:    /\ UniqueBlockHashes(blocks)
+specs/tla/alpenglow/Certificates.tla	47	FastFinalThreshold	3	specs/tla/alpenglow/Certificates.tla:139:    IN MeetsThreshold(StakeFromVotes(relevantVotes), FastFinalThreshold)
+specs/tla/alpenglow/Certificates.tla	48	DefaultThreshold	9	specs/tla/alpenglow/VoteStorage.tla:411:           \/ (MeetsThreshold(skip + notar, DefaultThreshold) /\ MeetsThreshold(notar, 20)))
+specs/tla/alpenglow/Certificates.tla	65	TotalStake	7	specs/tla/alpenglow/Rotor.tla:59:    /\ RotorMinRelayStake <= TotalStake
+specs/tla/alpenglow/Certificates.tla	76	CalculateStake	9	specs/tla/alpenglow/VoteStorage.tla:231:    IN CalculateStake(validators)
+specs/tla/alpenglow/Certificates.tla	87	UniqueValidators	4	specs/tla/alpenglow/VoteStorage.tla:215:\* Count once per slot via StakeFromVotes(UniqueValidators(...)).
+specs/tla/alpenglow/Certificates.tla	91	StakeFromVotes	15	specs/tla/alpenglow/VoteStorage.tla:215:\* Count once per slot via StakeFromVotes(UniqueValidators(...)).
+specs/tla/alpenglow/Certificates.tla	95	MeetsThreshold	14	specs/tla/alpenglow/VoteStorage.tla:410:       IN (MeetsThreshold(notar, 40)
+specs/tla/alpenglow/Certificates.tla	108	VotesFor	9	specs/tla/alpenglow/Certificates.tla:270:                     VotesFor(cert.votes, cert.slot, cert.blockHash, {"NotarVote"})
+specs/tla/alpenglow/Certificates.tla	134	CanCreateFastFinalizationCert	2	specs/tla/alpenglow/VoteStorage.tla:272:            IF CanCreateFastFinalizationCert(votes, slot, block) THEN
+specs/tla/alpenglow/Certificates.tla	148	CanCreateNotarizationCert	3	specs/tla/alpenglow/VoteStorage.tla:278:            ELSE IF CanCreateNotarizationCert(votes, slot, block) THEN
+specs/tla/alpenglow/Certificates.tla	165	CanCreateNotarFallbackCert	4	specs/tla/alpenglow/VoteStorage.tla:283:            ELSE IF CanCreateNotarFallbackCert(votes, slot, block) THEN
+specs/tla/alpenglow/Certificates.tla	178	CanCreateSkipCert	2	specs/tla/alpenglow/VoteStorage.tla:289:        skipCert == IF (blockCerts = {}) /\ CanCreateSkipCert(votes, slot)
+specs/tla/alpenglow/Certificates.tla	191	CanCreateFinalizationCert	2	specs/tla/alpenglow/VoteStorage.tla:296:        finalCert == IF CanCreateFinalizationCert(votes, slot) /\ (hasNotarNow \/ hasNotarStored)
+specs/tla/alpenglow/Certificates.tla	208	CanonicalizeSkipVotes	2	specs/tla/alpenglow/Certificates.tla:246:     votes |-> CanonicalizeSkipVotes(votes, slot)]
+specs/tla/alpenglow/Certificates.tla	217	CreateFastFinalizationCert	2	specs/tla/alpenglow/VoteStorage.tla:274:                    CreateFastFinalizationCert(votes, slot, block),
+specs/tla/alpenglow/Certificates.tla	224	CreateNotarizationCert	3	specs/tla/alpenglow/VoteStorage.tla:275:                    CreateNotarizationCert(votes, slot, block),
+specs/tla/alpenglow/Certificates.tla	231	CreateNotarFallbackCert	5	specs/tla/alpenglow/VoteStorage.tla:276:                    CreateNotarFallbackCert(votes, slot, block)
+specs/tla/alpenglow/Certificates.tla	242	CreateSkipCert	2	specs/tla/alpenglow/VoteStorage.tla:290:                     THEN {CreateSkipCert(votes, slot)}
+specs/tla/alpenglow/Certificates.tla	251	CreateFinalizationCert	2	specs/tla/alpenglow/VoteStorage.tla:297:                      THEN {CreateFinalizationCert(votes, slot)}
+specs/tla/alpenglow/Certificates.tla	267	IsValidCertificate	10	specs/tla/alpenglow/VoteStorage.tla:174:\* - Validate structure and thresholds (Certificates.IsValidCertificate).
+specs/tla/alpenglow/Certificates.tla	302	CertificateWellFormed	3	specs/tla/alpenglow/VoteStorage.tla:181:       /\ CertificateWellFormed(cert)
+specs/tla/alpenglow/Certificates.tla	331	FastFinalizationImpliesNotarization	1	
+specs/tla/alpenglow/Certificates.tla	343	NotarizationImpliesFallback	2	specs/tla/alpenglow/Certificates.tla:432:            NotarizationImpliesFallback(notarCert, fallbackCert)
+specs/tla/alpenglow/Certificates.tla	354	FastFinalizationVotesAreNotar	1	
+specs/tla/alpenglow/Certificates.tla	364	FallbackConstructorValidUnderGuard	1	
+specs/tla/alpenglow/Certificates.tla	373	NotarizationGuardImpliesFallbackGuard	1	
+specs/tla/alpenglow/Certificates.tla	383	ConflictingCertificates	2	specs/tla/alpenglow/Certificates.tla:413:        ~ConflictingCertificates(cert1, cert2)
+specs/tla/alpenglow/Certificates.tla	393	CrossTypeNotarConflict	1	
+specs/tla/alpenglow/Certificates.tla	406	AllCertificatesValid	3	specs/tla/alpenglow/MainProtocol.tla:1025:        AllCertificatesValid(validators[v].pool.certificates[s])
+specs/tla/alpenglow/Certificates.tla	411	NoConflictingCertificates	1	
+specs/tla/alpenglow/Certificates.tla	418	FastPathImplication	2	specs/tla/alpenglow/MainProtocol.tla:984:        FastPathImplication(validators[v].pool.certificates[s])
+specs/tla/alpenglow/Certificates.tla	428	NotarizationCascadeImplication	1	
+specs/tla/alpenglow/Certificates.tla	438	SkipVsBlockCertExclusion	4	specs/tla/alpenglow/VoteStorage.tla:151:\* Certificates.SkipVsBlockCertExclusion. See Table 6 (:507) and :532.
+specs/tla/alpenglow/Certificates.tla	445	AllCertificatesWellFormed	2	specs/tla/alpenglow/VoteStorage.tla:563:    \A s \in Slots : AllCertificatesWellFormed(pool.certificates[s])
+specs/tla/alpenglow/MC.tla	15	MC_StakeMap	2	specs/tla/alpenglow/MC.cfg:48:    StakeMap <- MC_StakeMap
+specs/tla/alpenglow/MC.tla	25	MC_WindowLeader	2	specs/tla/alpenglow/MC.cfg:45:    WindowLeader <- MC_WindowLeader
+specs/tla/alpenglow/MainProtocol.tla	90	vars	14	specs/tla/alpenglow/MainProtocol.tla:742:    /\ WF_vars(IF AfterGST THEN DeliverVote ELSE UNCHANGED vars)
+specs/tla/alpenglow/MainProtocol.tla	117	CorrectNodes	55	specs/tla/alpenglow/MainProtocol.tla:120:RotorCorrectRelays(relays) == relays specs/tla/alpenglow/MainProtocol.tla	120	RotorCorrectRelays	1	
+specs/tla/alpenglow/MainProtocol.tla	123	EnoughCorrectRelays	1	
+specs/tla/alpenglow/MainProtocol.tla	127	NeedsBlockRepair	2	specs/tla/alpenglow/MainProtocol.tla:529:    /\ NeedsBlockRepair(validators[v].pool, block)
+specs/tla/alpenglow/MainProtocol.tla	135	AfterGST	14	specs/tla/alpenglow/MainProtocol.tla:742:    /\ WF_vars(IF AfterGST THEN DeliverVote ELSE UNCHANGED vars)
+specs/tla/alpenglow/MainProtocol.tla	138	ByzantineStake	2	specs/tla/alpenglow/MainProtocol.tla:144:    ByzantineStake * 100 < TotalStake * 20
+specs/tla/alpenglow/MainProtocol.tla	143	ByzantineStakeOK	3	specs/tla/alpenglow/MainProtocol.tla:177:    /\ ByzantineStakeOK
+specs/tla/alpenglow/MainProtocol.tla	166	Init	4	specs/tla/alpenglow/MC.tla:31:\*     /\ Init
+specs/tla/alpenglow/MainProtocol.tla	202	ReceiveBlock	3	specs/tla/alpenglow/MainProtocol.tla:702:    \/  v \in Validators, b \in blocks : ReceiveBlock(v, b)
+specs/tla/alpenglow/MainProtocol.tla	225	GenerateCertificateAction	3	specs/tla/alpenglow/MainProtocol.tla:703:    \/  v \in Validators, s \in 1..MaxSlot : GenerateCertificateAction(v, s)
+specs/tla/alpenglow/MainProtocol.tla	258	FinalizeBlock	4	specs/tla/alpenglow/Blocks.tla:160: *   ancestors operationally (FinalizeBlock unions GetAncestors).
+specs/tla/alpenglow/MainProtocol.tla	278	ByzantineAction	2	specs/tla/alpenglow/MainProtocol.tla:709:    \/  v \in byzantineNodes : ByzantineAction(v)
+specs/tla/alpenglow/MainProtocol.tla	300	HonestProposeBlock	3	specs/tla/alpenglow/MainProtocol.tla:713:    \/  l \in Validators, s \in 1..MaxSlot, p \in blocks : HonestProposeBlock(l, s, p)
+specs/tla/alpenglow/MainProtocol.tla	339	HonestProposeBlockOptimistic	2	specs/tla/alpenglow/MainProtocol.tla:712:    \* `HonestProposeBlockOptimistic` and not enabled by default.
+specs/tla/alpenglow/MainProtocol.tla	374	ByzantineProposeBlock	2	specs/tla/alpenglow/MainProtocol.tla:714:    \/  l \in Validators, s \in 1..MaxSlot, p \in blocks : ByzantineProposeBlock(l, s, p)
+specs/tla/alpenglow/MainProtocol.tla	409	AdvanceTime	5	specs/tla/alpenglow/MainProtocol.tla:710:    \* Note: `ProcessTimeout` is handled via `AdvanceTime` -> `AdvanceClock`.
+specs/tla/alpenglow/MainProtocol.tla	428	RotorDisseminateSuccess	3	specs/tla/alpenglow/MainProtocol.tla:718:    \/  b \in blocks : RotorDisseminateSuccess(b)
+specs/tla/alpenglow/MainProtocol.tla	459	RotorFailInsufficientRelays	2	specs/tla/alpenglow/MainProtocol.tla:719:    \/  b \in blocks : RotorFailInsufficientRelays(b)
+specs/tla/alpenglow/MainProtocol.tla	489	RotorFailByzantineLeader	2	specs/tla/alpenglow/MainProtocol.tla:720:    \/  b \in blocks : RotorFailByzantineLeader(b)
+specs/tla/alpenglow/MainProtocol.tla	508	RotorNoDissemination	2	specs/tla/alpenglow/MainProtocol.tla:721:    \/  b \in blocks : RotorNoDissemination(b)
+specs/tla/alpenglow/MainProtocol.tla	525	RepairBlock	3	specs/tla/alpenglow/MainProtocol.tla:722:    \/  v \in Validators, b \in blocks, supplier \in Validators : RepairBlock(v, b, supplier)
+specs/tla/alpenglow/MainProtocol.tla	551	DeliverVote	5	specs/tla/alpenglow/VoteStorage.tla:124:    \* The ingress (DeliverVote) ensures `vote \in Vote /\ IsValidVote(vote)`.
+specs/tla/alpenglow/MainProtocol.tla	569	DeliverCertificate	4	specs/tla/alpenglow/MainProtocol.tla:200: *   by separate actions (BroadcastLocalVote, DeliverVote, DeliverCertificate).
+specs/tla/alpenglow/MainProtocol.tla	590	BroadcastLocalVote	5	specs/tla/alpenglow/MainProtocol.tla:200: *   by separate actions (BroadcastLocalVote, DeliverVote, DeliverCertificate).
+specs/tla/alpenglow/MainProtocol.tla	613	EmitBlockNotarized	3	specs/tla/alpenglow/MainProtocol.tla:705:    \/ EmitBlockNotarized
+specs/tla/alpenglow/MainProtocol.tla	636	EmitSafeToNotar	3	specs/tla/alpenglow/MainProtocol.tla:706:    \/ EmitSafeToNotar
+specs/tla/alpenglow/MainProtocol.tla	658	EmitSafeToSkip	3	specs/tla/alpenglow/MainProtocol.tla:707:    \/ EmitSafeToSkip
+specs/tla/alpenglow/MainProtocol.tla	687	EmitParentReady	3	specs/tla/alpenglow/MainProtocol.tla:708:    \/ EmitParentReady
+specs/tla/alpenglow/MainProtocol.tla	701	Next	3	specs/tla/alpenglow/MC.tla:34:\* SkippedSlotSpec == SkippedSlotInit /\ [][Next]_vars /\ Fairness
+specs/tla/alpenglow/MainProtocol.tla	740	Fairness	3	specs/tla/alpenglow/MC.tla:34:\* SkippedSlotSpec == SkippedSlotInit /\ [][Next]_vars /\ Fairness
+specs/tla/alpenglow/MainProtocol.tla	759	Spec	5	specs/tla/alpenglow/MC.cfg:2:\* To run the audit-recommended skipped-slot scenario, change Spec to SkippedSlotSpec.
+specs/tla/alpenglow/MainProtocol.tla	776	SafetyInvariant	3	specs/tla/alpenglow/MainProtocol.tla:821:ChainConsistency == SafetyInvariant
+specs/tla/alpenglow/MainProtocol.tla	788	NoConflictingFinalization	3	specs/tla/alpenglow/MainProtocol.tla:774: * - Equal-slot corollary captured by NoConflictingFinalization below.
+specs/tla/alpenglow/MainProtocol.tla	808	SafeToSkipPrecludesFastNow	2	specs/tla/alpenglow/MainProtocol.tla:1329:    /\ SafeToSkipPrecludesFastNow
+specs/tla/alpenglow/MainProtocol.tla	821	ChainConsistency	2	specs/tla/alpenglow/MainProtocol.tla:1330:    /\ ChainConsistency
+specs/tla/alpenglow/MainProtocol.tla	829	VoteUniqueness	2	specs/tla/alpenglow/MainProtocol.tla:1331:    /\ VoteUniqueness
+specs/tla/alpenglow/MainProtocol.tla	843	UniqueNotarization	2	specs/tla/alpenglow/MainProtocol.tla:1332:    /\ UniqueNotarization
+specs/tla/alpenglow/MainProtocol.tla	859	GlobalNotarizationUniqueness	2	specs/tla/alpenglow/MainProtocol.tla:1333:    /\ GlobalNotarizationUniqueness
+specs/tla/alpenglow/MainProtocol.tla	876	FinalizedImpliesNotarized	2	specs/tla/alpenglow/MainProtocol.tla:1334:    /\ FinalizedImpliesNotarized
+specs/tla/alpenglow/MainProtocol.tla	890	CertificateNonEquivocation	2	specs/tla/alpenglow/MainProtocol.tla:1335:    /\ CertificateNonEquivocation
+specs/tla/alpenglow/MainProtocol.tla	906	NoMixFinalizationAndFallback	2	specs/tla/alpenglow/MainProtocol.tla:1369:    /\ NoMixFinalizationAndFallback
+specs/tla/alpenglow/MainProtocol.tla	920	PoolSkipVsBlockExclusion	2	specs/tla/alpenglow/MainProtocol.tla:1336:    /\ PoolSkipVsBlockExclusion
+specs/tla/alpenglow/MainProtocol.tla	932	HonestNonEquivocation	2	specs/tla/alpenglow/MainProtocol.tla:1337:    /\ HonestNonEquivocation
+specs/tla/alpenglow/MainProtocol.tla	944	TransitCertificatesValid	3	specs/tla/alpenglow/MainProtocol.tla:952: * TransitCertificatesValid for certificates.
+specs/tla/alpenglow/MainProtocol.tla	955	TransitVotesValid	2	specs/tla/alpenglow/MainProtocol.tla:1339:    /\ TransitVotesValid
+specs/tla/alpenglow/MainProtocol.tla	964	LocalVotesWellFormed	2	specs/tla/alpenglow/MainProtocol.tla:1340:    /\ LocalVotesWellFormed
+specs/tla/alpenglow/MainProtocol.tla	981	PoolFastPathImplication	2	specs/tla/alpenglow/MainProtocol.tla:1341:    /\ PoolFastPathImplication
+specs/tla/alpenglow/MainProtocol.tla	994	PoolFinalizationImpliesNotarizationPresent	2	specs/tla/alpenglow/MainProtocol.tla:1342:    /\ PoolFinalizationImpliesNotarizationPresent
+specs/tla/alpenglow/MainProtocol.tla	1007	CertificateBlockProvenance	2	specs/tla/alpenglow/MainProtocol.tla:1343:    /\ CertificateBlockProvenance
+specs/tla/alpenglow/MainProtocol.tla	1015	PoolMultiplicityOK	2	specs/tla/alpenglow/MainProtocol.tla:1345:    /\ PoolMultiplicityOK
+specs/tla/alpenglow/MainProtocol.tla	1018	PoolCertificateUniqueness	2	specs/tla/alpenglow/MainProtocol.tla:1346:    /\ PoolCertificateUniqueness
+specs/tla/alpenglow/MainProtocol.tla	1022	PoolCertificatesValid	2	specs/tla/alpenglow/MainProtocol.tla:1347:    /\ PoolCertificatesValid
+specs/tla/alpenglow/MainProtocol.tla	1028	PoolCertificatesWellFormedOK	2	specs/tla/alpenglow/MainProtocol.tla:1348:    /\ PoolCertificatesWellFormedOK
+specs/tla/alpenglow/MainProtocol.tla	1033	PoolAlignmentOK	2	specs/tla/alpenglow/MainProtocol.tla:1349:    /\ PoolAlignmentOK
+specs/tla/alpenglow/MainProtocol.tla	1039	BucketSlotConsistencyOK	2	specs/tla/alpenglow/MainProtocol.tla:1350:    /\ BucketSlotConsistencyOK
+specs/tla/alpenglow/MainProtocol.tla	1044	PoolNotarFallbackBlockConsistencyOK	2	specs/tla/alpenglow/MainProtocol.tla:1351:    /\ PoolNotarFallbackBlockConsistencyOK
+specs/tla/alpenglow/MainProtocol.tla	1052	PoolSkipFallbackAfterInitialNotarOK	2	specs/tla/alpenglow/MainProtocol.tla:1352:    /\ PoolSkipFallbackAfterInitialNotarOK
+specs/tla/alpenglow/MainProtocol.tla	1059	TotalNotarStakeSanity	2	specs/tla/alpenglow/MainProtocol.tla:1370:    /\ TotalNotarStakeSanity
+specs/tla/alpenglow/MainProtocol.tla	1071	TimeoutsInFuture	3	specs/tla/alpenglow/VotorCore.tla:345:        \* timeout > pre-call clock. See MainProtocol.TimeoutsInFuture.
+specs/tla/alpenglow/MainProtocol.tla	1080	LocalClockMonotonic	2	specs/tla/alpenglow/MainProtocol.tla:1355:    /\ LocalClockMonotonic
+specs/tla/alpenglow/MainProtocol.tla	1086	RotorSelectSoundness	2	specs/tla/alpenglow/MainProtocol.tla:1353:    /\ RotorSelectSoundness
+specs/tla/alpenglow/MainProtocol.tla	1100	BasicLiveness	2	specs/tla/alpenglow/MC.cfg:60:\*     BasicLiveness
+specs/tla/alpenglow/MainProtocol.tla	1118	TryFinalProgress	1	
+specs/tla/alpenglow/MainProtocol.tla	1131	Progress	2	specs/tla/alpenglow/MC.cfg:61:\*     Progress
+specs/tla/alpenglow/MainProtocol.tla	1146	NoTimeoutsBeforeGST	3	specs/tla/alpenglow/MainProtocol.tla:1144: * - No pre-GST timeouts premise: captured via NoTimeoutsBeforeGST; see §2.10.
+specs/tla/alpenglow/MainProtocol.tla	1151	WindowFinalizedState	2	specs/tla/alpenglow/MainProtocol.tla:1166:        WindowFinalizedState(s)
+specs/tla/alpenglow/MainProtocol.tla	1164	WindowFinalization	1	
+specs/tla/alpenglow/MainProtocol.tla	1174	TypeInvariant	2	specs/tla/alpenglow/MainProtocol.tla:1326:    /\ TypeInvariant
+specs/tla/alpenglow/MainProtocol.tla	1193	ParentReadyImpliesCert	2	specs/tla/alpenglow/MainProtocol.tla:1359:    /\ ParentReadyImpliesCert
+specs/tla/alpenglow/MainProtocol.tla	1206	ParentReadyUsesPreviousBlock	2	specs/tla/alpenglow/MainProtocol.tla:1360:    /\ ParentReadyUsesPreviousBlock
+specs/tla/alpenglow/MainProtocol.tla	1219	BlockNotarizedImpliesCert	2	specs/tla/alpenglow/MainProtocol.tla:1358:    /\ BlockNotarizedImpliesCert
+specs/tla/alpenglow/MainProtocol.tla	1231	FinalVoteImpliesBlockNotarized	2	specs/tla/alpenglow/MainProtocol.tla:1361:    /\ FinalVoteImpliesBlockNotarized
+specs/tla/alpenglow/MainProtocol.tla	1245	VotedConsistency	2	specs/tla/alpenglow/MainProtocol.tla:1362:    /\ VotedConsistency
+specs/tla/alpenglow/MainProtocol.tla	1251	VotedNotarTagConsistency	2	specs/tla/alpenglow/MainProtocol.tla:1366:    /\ VotedNotarTagConsistency
+specs/tla/alpenglow/MainProtocol.tla	1257	BadWindowWitness	2	specs/tla/alpenglow/MainProtocol.tla:1367:    /\ BadWindowWitness
+specs/tla/alpenglow/MainProtocol.tla	1264	ItsOverWitness	2	specs/tla/alpenglow/MainProtocol.tla:1368:    /\ ItsOverWitness
+specs/tla/alpenglow/MainProtocol.tla	1277	FallbackVotesTrace	1	
+specs/tla/alpenglow/MainProtocol.tla	1288	FinalizedAncestorClosure	2	specs/tla/alpenglow/MainProtocol.tla:1357:    /\ FinalizedAncestorClosure
+specs/tla/alpenglow/MainProtocol.tla	1299	ParentReadyConsistencyAll	2	specs/tla/alpenglow/MainProtocol.tla:1363:    /\ ParentReadyConsistencyAll
+specs/tla/alpenglow/MainProtocol.tla	1302	PendingBlocksSingletonAll	2	specs/tla/alpenglow/MainProtocol.tla:1364:    /\ PendingBlocksSingletonAll
+specs/tla/alpenglow/MainProtocol.tla	1305	PendingBlocksSlotAlignedAll	2	specs/tla/alpenglow/MainProtocol.tla:1365:    /\ PendingBlocksSlotAlignedAll
+specs/tla/alpenglow/MainProtocol.tla	1312	StateConstraint	2	specs/tla/alpenglow/MC.cfg:55:CONSTRAINT StateConstraint
+specs/tla/alpenglow/MainProtocol.tla	1325	Invariant	2	specs/tla/alpenglow/MC.cfg:52:    Invariant
+specs/tla/alpenglow/Messages.tla	79	VoteType	3	specs/tla/alpenglow/Messages.tla:96:    type: VoteType,                           \* Which of the 5 vote types
+specs/tla/alpenglow/Messages.tla	88	NotarVoteT	5	specs/tla/alpenglow/Messages.tla:119:    [type |-> NotarVoteT,
+specs/tla/alpenglow/Messages.tla	89	NotarFallbackVoteT	3	specs/tla/alpenglow/Messages.tla:127:    [type |-> NotarFallbackVoteT,
+specs/tla/alpenglow/Messages.tla	90	SkipVoteT	4	specs/tla/alpenglow/Messages.tla:135:    [type |-> SkipVoteT,
+specs/tla/alpenglow/Messages.tla	91	SkipFallbackVoteT	3	specs/tla/alpenglow/Messages.tla:143:    [type |-> SkipFallbackVoteT,
+specs/tla/alpenglow/Messages.tla	92	FinalVoteT	3	specs/tla/alpenglow/Messages.tla:152:    [type |-> FinalVoteT,
+specs/tla/alpenglow/Messages.tla	95	Vote	24	specs/tla/alpenglow/VotorCore.tla:92:    pool: PoolState,                                   \* Vote/certificate storage
+specs/tla/alpenglow/Messages.tla	118	CreateNotarVote	2	specs/tla/alpenglow/Blocks.tla:129:    CreateNotarVote(v, b.slot, b.hash)
+specs/tla/alpenglow/Messages.tla	126	CreateNotarFallbackVote	2	specs/tla/alpenglow/Blocks.tla:143:    CreateNotarFallbackVote(v, b.slot, b.hash)
+specs/tla/alpenglow/Messages.tla	134	CreateSkipVote	3	specs/tla/alpenglow/Messages.tla:158:CreateSkipVoteForSlot(v, s) == CreateSkipVote(v, s)
+specs/tla/alpenglow/Messages.tla	142	CreateSkipFallbackVote	3	specs/tla/alpenglow/VotorCore.tla:391:                LET vote == CreateSkipFallbackVote(skipResult.id, slot)
+specs/tla/alpenglow/Messages.tla	151	CreateFinalVote	2	specs/tla/alpenglow/VotorCore.tla:180:            LET vote == CreateFinalVote(validator.id, slot)
+specs/tla/alpenglow/Messages.tla	158	CreateSkipVoteForSlot	3	specs/tla/alpenglow/VotorCore.tla:249:                            vote == CreateSkipVoteForSlot(val.id, s)
+specs/tla/alpenglow/Messages.tla	170	IsNotarVote	3	specs/tla/alpenglow/Messages.tla:172:IsApprovalVote(vote) == IsNotarVote(vote)
+specs/tla/alpenglow/Messages.tla	172	IsApprovalVote	4	specs/tla/alpenglow/Messages.tla:168:\* Alias note: "IsApprovalVote" is the preferred name (audit suggestion)
+specs/tla/alpenglow/Messages.tla	175	IsSkipVote	5	specs/tla/alpenglow/Messages.tla:247:    /\ (IsSkipVote(vote) \/ IsFinalVote(vote) => vote.blockHash = NoBlock)
+specs/tla/alpenglow/Messages.tla	179	IsFinalVote	5	specs/tla/alpenglow/Messages.tla:247:    /\ (IsSkipVote(vote) \/ IsFinalVote(vote) => vote.blockHash = NoBlock)
+specs/tla/alpenglow/Messages.tla	183	IsInitialVote	8	specs/tla/alpenglow/VoteStorage.tla:99:            ~ v \in existingVotes : IsInitialVote(v)
+specs/tla/alpenglow/Messages.tla	187	IsInitialNotarVote	10	specs/tla/alpenglow/VotorCore.tla:133:        /\ IsInitialNotarVote(vote)
+specs/tla/alpenglow/Messages.tla	191	IsFallbackVote	1	
+specs/tla/alpenglow/Messages.tla	195	IsVoteForBlock	6	specs/tla/alpenglow/Messages.tla:299:        /\ IsVoteForBlock(v, blockHash)}
+specs/tla/alpenglow/Messages.tla	216	CertificateType	3	specs/tla/alpenglow/Messages.tla:229:    type: CertificateType,                    \* Which certificate type
+specs/tla/alpenglow/Messages.tla	228	Certificate	16	specs/tla/alpenglow/VoteStorage.tla:65:    certificates: [Slots -> SUBSET Certificate]      \* Certificates by slot (see Def. 12/13)
+specs/tla/alpenglow/Messages.tla	242	IsValidVote	24	specs/tla/alpenglow/VotorCore.tla:463:        IsValidBlock(b) => IsValidVote(CreateNotarVoteForBlock(v, b))
+specs/tla/alpenglow/Messages.tla	272	ConflictingVotes	1	
+specs/tla/alpenglow/Messages.tla	284	GetVotesByType	1	
+specs/tla/alpenglow/Messages.tla	288	GetVotesBySlot	1	
+specs/tla/alpenglow/Messages.tla	292	GetVotesByValidator	1	
+specs/tla/alpenglow/Messages.tla	296	GetVotesForBlock	1	
+specs/tla/alpenglow/Rotor.tla	87	DeterministicBinCount	9	specs/tla/alpenglow/Rotor.tla:31: *       • Step 1: `DeterministicBinCount`, `LargeStakeholders`, and exact
+specs/tla/alpenglow/Rotor.tla	91	LargeStakeholders	3	specs/tla/alpenglow/Rotor.tla:31: *       • Step 1: `DeterministicBinCount`, `LargeStakeholders`, and exact
+specs/tla/alpenglow/Rotor.tla	94	LargeStakeholdersInNeeders	5	specs/tla/alpenglow/Rotor.tla:107:    LET large == LargeStakeholdersInNeeders(needers)
+specs/tla/alpenglow/Rotor.tla	97	TotalDeterministicBins	1	
+specs/tla/alpenglow/Rotor.tla	106	TotalDeterministicBinsExact	8	specs/tla/alpenglow/Rotor.tla:118:    LET deterministicTotal == TotalDeterministicBinsExact(needers)
+specs/tla/alpenglow/Rotor.tla	117	RemainingBins	2	specs/tla/alpenglow/Rotor.tla:133:        remainingBins == RemainingBins(needers)
+specs/tla/alpenglow/Rotor.tla	130	PSPBinAssignmentPossible	1	
+specs/tla/alpenglow/Rotor.tla	140	DeterministicIndices	1	
+specs/tla/alpenglow/Rotor.tla	149	PartitionWeights	4	specs/tla/alpenglow/Rotor.tla:33: *       • Steps 2–3: `PartitionWeights` + per‑bin eligibility to abstract
+specs/tla/alpenglow/Rotor.tla	163	EligibleInBin	2	specs/tla/alpenglow/Rotor.tla:185:            CHOOSE v \in EligibleInBin(part, j) : TRUE
+specs/tla/alpenglow/Rotor.tla	164	PSPBinAssignment	2	specs/tla/alpenglow/Rotor.tla:218:\* beyond membership. This is already enforced by PSPBinAssignment's construction
+specs/tla/alpenglow/Rotor.tla	192	BinsToRelaySet	7	specs/tla/alpenglow/Rotor.tla:257:        /\ ResilienceOK(BinsToRelaySet(bins)) }
+specs/tla/alpenglow/Rotor.tla	197	RequiredResilientStake	1	
+specs/tla/alpenglow/Rotor.tla	202	FailureResilient	2	specs/tla/alpenglow/Rotor.tla:250:ResilienceOK(relays) == FailureResilient(relays)
+specs/tla/alpenglow/Rotor.tla	209	PSPConstraint	3	specs/tla/alpenglow/Rotor.tla:219:\* but deliberately not required here to keep PSPConstraint minimal per audit.
+specs/tla/alpenglow/Rotor.tla	223	SumBinCounts	4	specs/tla/alpenglow/Rotor.tla:222:RECURSIVE SumBinCounts(_, _)
+specs/tla/alpenglow/Rotor.tla	229	CountingLemma	1	
+specs/tla/alpenglow/Rotor.tla	235	ZeroCountLowerBound	1	
+specs/tla/alpenglow/Rotor.tla	241	StructuralBinOK	3	specs/tla/alpenglow/Rotor.tla:256:        /\ StructuralBinOK(bins, needers, nextLeader)
+specs/tla/alpenglow/Rotor.tla	250	ResilienceOK	3	specs/tla/alpenglow/Rotor.tla:257:        /\ ResilienceOK(BinsToRelaySet(bins)) }
+specs/tla/alpenglow/Rotor.tla	254	BinCandidates	6	specs/tla/alpenglow/Rotor.tla:261:    LET candBins == BinCandidates(needers, nextLeader)
+specs/tla/alpenglow/Rotor.tla	260	PSPSelect	2	specs/tla/alpenglow/Rotor.tla:290:            LET psSelection == PSPSelect(needers, nextLeader)
+specs/tla/alpenglow/Rotor.tla	269	RotorBinAssignmentPossible	3	specs/tla/alpenglow/Rotor.tla:286:    ELSE IF ~RotorBinAssignmentPossible(needers, nextLeader)
+specs/tla/alpenglow/Rotor.tla	284	RotorSelect	4	specs/tla/alpenglow/Rotor.tla:253:\* Used as an existence/feasibility witness for `RotorSelect`.
+specs/tla/alpenglow/Rotor.tla	301	SliceReconstructable	1	
+specs/tla/alpenglow/Rotor.tla	309	RotorSuccessful	3	specs/tla/alpenglow/Rotor.tla:36: *       • `RotorSuccessful` counts distinct relays (set view; conservative).
+specs/tla/alpenglow/Rotor.tla	317	CorrectAssignmentsCount	2	specs/tla/alpenglow/Rotor.tla:322:    /\ CorrectAssignmentsCount(bins, correctNodes) >= GammaDataShreds
+specs/tla/alpenglow/Rotor.tla	320	RotorSuccessfulBins	6	specs/tla/alpenglow/Rotor.tla:37: *       • `RotorSuccessfulBins` counts by‑bin assignments (Γ multiplicity),
+specs/tla/alpenglow/Rotor.tla	328	SliceDelivered	1	
+specs/tla/alpenglow/Rotor.tla	338	OnPath	2	specs/tla/alpenglow/Rotor.tla:340:NextDisseminationDelay(relays, nextLeader) == IF OnPath(nextLeader, relays) THEN 0 ELSE 1
+specs/tla/alpenglow/Rotor.tla	340	NextDisseminationDelay	3	specs/tla/alpenglow/Rotor.tla:39: *   - `NextDisseminationDelay` records the “send to next leader first” latency
+specs/tla/alpenglow/Rotor.tla	347	RotorSelectSound	2	specs/tla/alpenglow/MainProtocol.tla:1091:        IN RotorSelectSound(b, needers, nextLeader)
+specs/tla/alpenglow/VoteStorage.tla	40	MaxInitialVotes	2	specs/tla/alpenglow/VoteStorage.tla:506:        IN /\ Cardinality({vt \in votes : IsInitialVote(vt)}) <= MaxInitialVotes
+specs/tla/alpenglow/VoteStorage.tla	41	MaxNotarFallbacks	3	specs/tla/alpenglow/VoteStorage.tla:107:            Cardinality({v \in existingVotes : v.type = "NotarFallbackVote"}) < MaxNotarFallbacks
+specs/tla/alpenglow/VoteStorage.tla	42	MaxSkipFallbacks	3	specs/tla/alpenglow/VoteStorage.tla:111:            Cardinality({v \in existingVotes : v.type = "SkipFallbackVote"}) < MaxSkipFallbacks
+specs/tla/alpenglow/VoteStorage.tla	43	MaxFinalVotes	3	specs/tla/alpenglow/VoteStorage.tla:115:            Cardinality({v \in existingVotes : v.type = "FinalVote"}) < MaxFinalVotes
+specs/tla/alpenglow/VoteStorage.tla	46	NotarTypes	9	specs/tla/alpenglow/VoteStorage.tla:167:           [] cert.type \in NotarTypes ->
+specs/tla/alpenglow/VoteStorage.tla	63	PoolState	3	specs/tla/alpenglow/VotorCore.tla:92:    pool: PoolState,                                   \* Vote/certificate storage
+specs/tla/alpenglow/VoteStorage.tla	69	InitPool	2	specs/tla/alpenglow/VotorCore.tla:108:    pool |-> InitPool,
+specs/tla/alpenglow/VoteStorage.tla	91	CanStoreVote	4	specs/tla/alpenglow/VoteStorage.tla:125:    IF IsValidVote(vote) /\ CanStoreVote(pool, vote) THEN
+specs/tla/alpenglow/VoteStorage.tla	121	StoreVote	9	specs/tla/alpenglow/VotorCore.tla:182:                poolWithVote == StoreVote(newState.pool, vote)
+specs/tla/alpenglow/VoteStorage.tla	152	CanStoreCertificate	5	specs/tla/alpenglow/VoteStorage.tla:179:    IF CanStoreCertificate(pool, cert)
+specs/tla/alpenglow/VoteStorage.tla	177	StoreCertificate	4	specs/tla/alpenglow/VoteStorage.tla:305:\* Query helpers assume StoreCertificate enforces validity/structure; these
+specs/tla/alpenglow/VoteStorage.tla	191	NotarFamilyUniqueBlockPerSlot	1	
+specs/tla/alpenglow/VoteStorage.tla	201	MaxNat	3	specs/tla/alpenglow/VoteStorage.tla:250:            IN MaxNat(stakes)
+specs/tla/alpenglow/VoteStorage.tla	205	GetVotesForSlot	19	specs/tla/alpenglow/VotorCore.tla:131:     vote \in GetVotesForSlot(validator.pool, slot) :
+specs/tla/alpenglow/VoteStorage.tla	210	GetVotesForSlotTypeOK	2	specs/tla/alpenglow/VoteStorage.tla:458:    \A s \in Slots : GetVotesForSlotTypeOK(pool, s)
+specs/tla/alpenglow/VoteStorage.tla	216	NotarStake	8	specs/tla/alpenglow/VoteStorage.tla:249:       ELSE LET stakes == {NotarStake(pool, slot, b) : b \in blocks}
+specs/tla/alpenglow/VoteStorage.tla	227	SkipStake	9	specs/tla/alpenglow/VoteStorage.tla:233:InitialSkipStake(pool, slot) == SkipStake(pool, slot)
+specs/tla/alpenglow/VoteStorage.tla	233	InitialSkipStake	1	
+specs/tla/alpenglow/VoteStorage.tla	237	TotalNotarStake	7	specs/tla/alpenglow/VoteStorage.tla:254:    TotalNotarStake(pool, slot) - MaxNotarStake(pool, slot)
+specs/tla/alpenglow/VoteStorage.tla	244	MaxNotarStake	3	specs/tla/alpenglow/VoteStorage.tla:254:    TotalNotarStake(pool, slot) - MaxNotarStake(pool, slot)
+specs/tla/alpenglow/VoteStorage.tla	253	NonMaxNotarStake	2	specs/tla/alpenglow/VoteStorage.tla:429:           nonMaxNotar == NonMaxNotarStake(pool, slot)
+specs/tla/alpenglow/VoteStorage.tla	264	GenerateCertificate	2	specs/tla/alpenglow/MainProtocol.tla:230:           certs == GenerateCertificate(pool, slot)
+specs/tla/alpenglow/VoteStorage.tla	309	HasBlockCertOfType	4	specs/tla/alpenglow/VoteStorage.tla:317:    HasBlockCertOfType(pool, slot, blockHash, "NotarizationCert")
+specs/tla/alpenglow/VoteStorage.tla	316	HasNotarizationCert	8	specs/tla/alpenglow/VotorCore.tla:141:    THEN { h \in BlockHashes : HasNotarizationCert(validator.pool, slot, h) }
+specs/tla/alpenglow/VoteStorage.tla	319	HasNotarFallbackCert	4	specs/tla/alpenglow/VoteStorage.tla:379:        HasNotarFallbackCert(pool, parentSlot, parentHash))
+specs/tla/alpenglow/VoteStorage.tla	323	HasSlotCertOfType	3	specs/tla/alpenglow/VoteStorage.tla:333:    HasSlotCertOfType(pool, slot, "SkipCert")
+specs/tla/alpenglow/VoteStorage.tla	332	HasSkipCert	3	specs/tla/alpenglow/VoteStorage.tla:380:    /\ \A s \in (parentSlot+1)..(slot-1) : HasSkipCert(pool, s)
+specs/tla/alpenglow/VoteStorage.tla	336	HasFastFinalizationCert	3	specs/tla/alpenglow/MainProtocol.tla:130:    IN HasFastFinalizationCert(pool, slot, hash)
+specs/tla/alpenglow/VoteStorage.tla	341	HasFinalizationCert	2	specs/tla/alpenglow/VoteStorage.tla:352:    /\ HasFinalizationCert(pool, slot)
+specs/tla/alpenglow/VoteStorage.tla	345	BlockCertQueryTypesOK	1	
+specs/tla/alpenglow/VoteStorage.tla	351	CanFinalizeSlow	2	specs/tla/alpenglow/MainProtocol.tla:264:          \/ CanFinalizeSlow(pool, slot, block.hash)
+specs/tla/alpenglow/VoteStorage.tla	365	ShouldEmitBlockNotarized	2	specs/tla/alpenglow/MainProtocol.tla:616:         /\ ShouldEmitBlockNotarized(validators[v].pool, b.slot, b.hash)
+specs/tla/alpenglow/VoteStorage.tla	375	ShouldEmitParentReady	7	specs/tla/alpenglow/VoteStorage.tla:401:    \* used where parentSlot is not directly available; ShouldEmitParentReady
+specs/tla/alpenglow/VoteStorage.tla	396	ParentFallbackReady	2	specs/tla/alpenglow/VoteStorage.tla:407:    /\ ParentFallbackReady(pool, slot, parentHash)
+specs/tla/alpenglow/VoteStorage.tla	404	CanEmitSafeToNotar	3	specs/tla/alpenglow/MainProtocol.tla:634: *   the CanEmitSafeToNotar guard above (aid to model checking).
+specs/tla/alpenglow/VoteStorage.tla	425	CanEmitSafeToSkip	3	specs/tla/alpenglow/MainProtocol.tla:671:            IN CanEmitSafeToSkip(validators[v].pool, s, alreadyVoted, votedSkip)
+specs/tla/alpenglow/VoteStorage.tla	437	PoolTypeOK	2	specs/tla/alpenglow/VotorCore.tla:432:    /\ PoolTypeOK(validator.pool)
+specs/tla/alpenglow/VoteStorage.tla	445	PoolVotesSlotValidatorAligned	2	specs/tla/alpenglow/MainProtocol.tla:1035:        /\ PoolVotesSlotValidatorAligned(validators[v].pool)
+specs/tla/alpenglow/VoteStorage.tla	450	PoolCertificatesSlotAligned	3	specs/tla/alpenglow/VoteStorage.tla:454:BucketSlotConsistency(pool) == PoolCertificatesSlotAligned(pool)
+specs/tla/alpenglow/VoteStorage.tla	454	BucketSlotConsistency	2	specs/tla/alpenglow/MainProtocol.tla:1040:    \A v \in Validators : BucketSlotConsistency(validators[v].pool)
+specs/tla/alpenglow/VoteStorage.tla	457	VotesTypeOK	1	
+specs/tla/alpenglow/VoteStorage.tla	465	NoSkipAndNotarDoubleCount	1	
+specs/tla/alpenglow/VoteStorage.tla	475	SkipStakeEqualsUniqueSkipVoters	1	
+specs/tla/alpenglow/VoteStorage.tla	482	SafeToSkipExpressionNonNegative	1	
+specs/tla/alpenglow/VoteStorage.tla	487	BlockNotarStakesAreNat	1	
+specs/tla/alpenglow/VoteStorage.tla	496	NotarStakeMatchesStakeFromVotes	1	
+specs/tla/alpenglow/VoteStorage.tla	503	MultiplicityRulesRespected	5	specs/tla/alpenglow/VoteStorage.tla:573: * If a vote is valid and allowed by CanStoreVote, MultiplicityRulesRespected
+specs/tla/alpenglow/VoteStorage.tla	514	NotarFallbackBlockConsistencyAt	2	specs/tla/alpenglow/MainProtocol.tla:1047:        NotarFallbackBlockConsistencyAt(validators[v].pool, s, v)
+specs/tla/alpenglow/VoteStorage.tla	523	SkipFallbackAfterInitialNotarAt	2	specs/tla/alpenglow/MainProtocol.tla:1055:        SkipFallbackAfterInitialNotarAt(validators[v].pool, s, v)
+specs/tla/alpenglow/VoteStorage.tla	533	CertificateUniqueness	2	specs/tla/alpenglow/MainProtocol.tla:1019:    \A v \in Validators : CertificateUniqueness(validators[v].pool)
+specs/tla/alpenglow/VoteStorage.tla	550	PoolFastImpliesNotarSubset	1	
+specs/tla/alpenglow/VoteStorage.tla	562	CertificatesWellFormed	2	specs/tla/alpenglow/MainProtocol.tla:1029:    \A v \in Validators : CertificatesWellFormed(validators[v].pool)
+specs/tla/alpenglow/VoteStorage.tla	567	FinalizationImpliesNotarizationPresent	2	specs/tla/alpenglow/MainProtocol.tla:997:        FinalizationImpliesNotarizationPresent(validators[v].pool, s)
+specs/tla/alpenglow/VoteStorage.tla	583	TotalNotarStakeEqualsUniqueNotarVoters	2	specs/tla/alpenglow/MainProtocol.tla:1062:        TotalNotarStakeEqualsUniqueNotarVoters(validators[v].pool, s)
+specs/tla/alpenglow/VotorCore.tla	36	TimeTS	3	specs/tla/alpenglow/VotorCore.tla:93:    clock: TimeTS,                                     \* Local clock
+specs/tla/alpenglow/VotorCore.tla	37	TimeoutTS	3	specs/tla/alpenglow/VotorCore.tla:94:    timeouts: [Slots -> TimeoutTS]                     \* Scheduled timeouts
+specs/tla/alpenglow/VotorCore.tla	61	StateObject	4	specs/tla/alpenglow/VotorCore.tla:81:    state: [Slots -> SUBSET StateObject],               \* State flags per slot
+specs/tla/alpenglow/VotorCore.tla	79	ValidatorState	3	specs/tla/alpenglow/MainProtocol.tla:82:    validators,         \* Map: Validators -> ValidatorState
+specs/tla/alpenglow/VotorCore.tla	103	InitValidatorState	4	specs/tla/alpenglow/MainProtocol.tla:160: *   certificate. Each validator starts from `InitValidatorState` and records
+specs/tla/alpenglow/VotorCore.tla	119	HasState	37	specs/tla/alpenglow/VotorCore.tla:140:    IF HasState(validator, slot, "BlockNotarized")
+specs/tla/alpenglow/VotorCore.tla	124	AddState	12	specs/tla/alpenglow/VotorCore.tla:181:                newState == AddState(validator, slot, "ItsOver")
+specs/tla/alpenglow/VotorCore.tla	130	VotedForBlock	11	specs/tla/alpenglow/VotorCore.tla:52: *   the stored NotarVote (Def. 12) and checked by `VotedForBlock(..)`.
+specs/tla/alpenglow/VotorCore.tla	139	BlockNotarizedHashes	4	specs/tla/alpenglow/VotorCore.tla:148:    IF BlockNotarizedHashes(validator, slot) = {}
+specs/tla/alpenglow/VotorCore.tla	147	BlockNotarizedHashOpt	1	
+specs/tla/alpenglow/VotorCore.tla	173	TryFinal	8	specs/tla/alpenglow/VotorCore.tla:222:                afterFinal == TryFinal(withVote, slot, block.hash)  \* Immediately attempt finalization (Alg. 2 line 15)
+specs/tla/alpenglow/VotorCore.tla	200	TryNotar	6	specs/tla/alpenglow/VotorCore.tla:269:                                    /\  b \in val.pendingBlocks[s] : TryNotar(val, b) # val }
+specs/tla/alpenglow/VotorCore.tla	238	TrySkipWindow	6	specs/tla/alpenglow/VotorCore.tla:315:           TrySkipWindow(cleared, slot)
+specs/tla/alpenglow/VotorCore.tla	264	CheckPendingBlocks	3	specs/tla/alpenglow/VotorCore.tla:298:            CheckPendingBlocks(tryResult)  \* Successfully voted; re-evaluate pending
+specs/tla/alpenglow/VotorCore.tla	293	HandleBlock	2	specs/tla/alpenglow/MainProtocol.tla:209:                         AddState(HandleBlock(validators[v], block), block.slot, "BlockSeen")]
+specs/tla/alpenglow/VotorCore.tla	310	HandleTimeout	2	specs/tla/alpenglow/VotorCore.tla:419:                    newVal == HandleTimeout(val, s)
+specs/tla/alpenglow/VotorCore.tla	324	HandleBlockNotarized	2	specs/tla/alpenglow/MainProtocol.tla:619:                               HandleBlockNotarized(@, b.slot, b.hash)]
+specs/tla/alpenglow/VotorCore.tla	334	HandleParentReady	4	specs/tla/alpenglow/VotorCore.tla:487:\* Optional verification: after HandleParentReady, each timeout for the
+specs/tla/alpenglow/VotorCore.tla	362	HandleSafeToNotar	2	specs/tla/alpenglow/MainProtocol.tla:644:         /\ validators' = [validators EXCEPT ![v] = HandleSafeToNotar(@, b)]
+specs/tla/alpenglow/VotorCore.tla	379	HandleSafeToSkip	2	specs/tla/alpenglow/MainProtocol.tla:674:         /\ validators' = [validators EXCEPT ![v] = HandleSafeToSkip(@, s)]
+specs/tla/alpenglow/VotorCore.tla	404	AdvanceClock	3	specs/tla/alpenglow/MainProtocol.tla:413:                        THEN AdvanceClock(validators[w], time')
+specs/tla/alpenglow/VotorCore.tla	427	ValidatorStateOK	5	specs/tla/alpenglow/VotorCore.tla:118:\* Precondition: `slot \in Slots` (enforced by callers and ValidatorStateOK).
+specs/tla/alpenglow/VotorCore.tla	437	ParentReadyConsistency	2	specs/tla/alpenglow/MainProtocol.tla:1300:    \A v \in Validators : ParentReadyConsistency(validators[v])
+specs/tla/alpenglow/VotorCore.tla	442	ParentReadyImpliesHashSet	1	
+specs/tla/alpenglow/VotorCore.tla	448	PoolInitialNotarVoteImpliesVoted	1	
+specs/tla/alpenglow/VotorCore.tla	452	PendingBlocksSingleton	3	specs/tla/alpenglow/VotorCore.tla:91:    \* `PendingBlocksSingleton` and `...SlotAligned`.
+specs/tla/alpenglow/VotorCore.tla	456	PendingBlocksSlotAligned	2	specs/tla/alpenglow/MainProtocol.tla:1306:    \A v \in Validators : PendingBlocksSlotAligned(validators[v])
+specs/tla/alpenglow/VotorCore.tla	474	TrySkipWindowSetsFlagsAndClearsPending	1	
+specs/tla/alpenglow/VotorCore.tla	484	TrySkipWindowIdempotent	1	
+specs/tla/alpenglow/VotorCore.tla	489	TimeoutsScheduledInFutureAfterParentReady	1	
+specs/tla/alpenglow/VotorCore.tla	502	Lemma22_ItsOverImpliesNotBadWindow	2	specs/tla/alpenglow/MainProtocol.tla:908:        Lemma22_ItsOverImpliesNotBadWindow(validators[v]) /\
+specs/tla/alpenglow/VotorCore.tla	505	Lemma22_BadWindowImpliesNotItsOver	2	specs/tla/alpenglow/MainProtocol.tla:909:        Lemma22_BadWindowImpliesNotItsOver(validators[v])
+specs/tla/alpenglow/VotorCore.tla	516	FinalVoteIssuanceImpliesPrereqs	1	
+specs/tla/alpenglow/VotorCore.tla	533	NoFinalVoteStoredAfterBadWindow	1	

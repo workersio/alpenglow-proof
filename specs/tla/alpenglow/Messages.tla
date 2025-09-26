@@ -188,6 +188,7 @@ IsInitialNotarVote(vote) ==
     vote.type = NotarVoteT
 
 \* Is this a fallback vote (safety mechanism gated by Def. 16 :554)?
+\* DELETE: helper currently unused
 IsFallbackVote(vote) ==
     vote.type \in {"NotarFallbackVote", "SkipFallbackVote"}
 
@@ -269,6 +270,7 @@ THEOREM SkipVoteCreationIsValid ==
 
 \* Check if two votes conflict (double-initial per slot/validator).
 \* Mirrors Def. 12’s “store once” and Lemma 20 :820 (one initial vote/slot).
+\* DELETE: conflict check not referenced anywhere
 ConflictingVotes(vote1, vote2) ==
     /\ vote1.validator = vote2.validator
     /\ vote1.slot = vote2.slot
@@ -281,18 +283,22 @@ ConflictingVotes(vote1, vote2) ==
 \* ============================================================================
 
 \* Get all votes of a specific type from a set
+\* DELETE: general query helper not used
 GetVotesByType(votes, voteType) ==
     {v \in votes : v.type = voteType}
 
 \* Get all votes for a specific slot
+\* DELETE: general query helper not used
 GetVotesBySlot(votes, slot) ==
     {v \in votes : v.slot = slot}
 
 \* Get all votes from a specific validator
+\* DELETE: general query helper not used
 GetVotesByValidator(votes, validator) ==
     {v \in votes : v.validator = validator}
 
 \* Get all votes supporting a specific block (approval-only by shape)
+\* DELETE: general query helper not used
 GetVotesForBlock(votes, slot, blockHash) ==
     {v \in votes : 
         /\ v.slot = slot

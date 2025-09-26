@@ -117,9 +117,11 @@ vars == <<validators, blocks, messages, byzantineNodes, time, finalized, blockAv
 CorrectNodes == Validators \ byzantineNodes
 
 \* Relays chosen by Rotor that are correct
+\* DELETE: not referenced elsewhere in the spec/model
 RotorCorrectRelays(relays) == relays \cap CorrectNodes
 
 \* Definition 6 (§2.2): Rotor succeeds if ≥ γ correct relays participate
+\* DELETE: not referenced elsewhere in the spec/model
 EnoughCorrectRelays(leader, relays) == RotorSuccessful(leader, relays, CorrectNodes)
 
 \* Repair trigger (Algorithm 4; §2.8). Include fast-finalization to cover fast-only
@@ -336,6 +338,7 @@ HonestProposeBlock(leader, slot, parent) ==
  * - Disabled by default; included for comparison with the strict variant.
 ***************************************************************************)
 \* Optimistic proposal also requires having the parent locally (Rotor handoff).
+\* DELETE: alternative proposer action not used in Next
 HonestProposeBlockOptimistic(leader, slot, parent) ==
     /\ leader \in CorrectNodes
     /\ parent \in blocks
@@ -1097,6 +1100,7 @@ RotorSelectSoundness ==
 (***************************************************************************
  * BASIC LIVENESS — after GST, something new finalizes eventually
  ***************************************************************************)
+\* Liveness property (enabled in MC.cfg PROPERTIES)
 BasicLiveness ==
     (time >= GST) ~> 
         (\E v \in Validators :
@@ -1115,6 +1119,7 @@ BasicLiveness ==
  *   (BlockNotarized ∧ VotedForBlock ∧ ¬BadWindow), weak fairness on the
  *   scheduling of event emissions and handlers leads to FinalVote(s).
  *************************************************************************)
+\* Liveness helper (enabled in MC.cfg PROPERTIES)
 TryFinalProgress ==
     \A v \in CorrectNodes :
     \A s \in 1..MaxSlot :
@@ -1128,6 +1133,7 @@ TryFinalProgress ==
 (***************************************************************************
  * PROGRESS — highest finalized slot keeps increasing after GST
  ***************************************************************************)
+\* Liveness property (enabled in MC.cfg PROPERTIES)
 Progress ==
     (time >= GST) ~>
         (\A v \in Validators :
@@ -1161,9 +1167,14 @@ WindowFinalizedState(s) ==
  * timeouts, and post-GST delivery/fairness), every slot in the leader’s
  * window is eventually finalized by all correct nodes (Thm. 2).
  *)
+\* Window-level liveness (quantified form added below)
 WindowFinalization(s) ==
     (IsFirstSlotOfWindow(s) /\ Leader(s) \in CorrectNodes /\ NoTimeoutsBeforeGST(s) /\ time >= GST) ~>
         WindowFinalizedState(s)
+
+\* Quantified window-liveness (for MC.cfg PROPERTIES)
+WindowFinalizationAll ==
+    \A s \in 1..MaxSlot : WindowFinalization(s)
 
 \* Window liveness properties (if any) are defined in the MC harness.
 
@@ -1274,6 +1285,7 @@ ItsOverWitness ==
  * - Surface locally emitted fallback votes for debugging/model checking
  *   without changing protocol semantics. These are derived observables.
  *************************************************************************)
+\* DELETE: trace-only helper not referenced by invariants or spec
 FallbackVotesTrace(v, s) ==
     { vt \in validators[v].pool.votes[s][v] :
         vt.type \in {"NotarFallbackVote", "SkipFallbackVote"} }
@@ -1354,6 +1366,8 @@ Invariant ==
     /\ TimeoutsInFuture
     /\ LocalClockMonotonic
     /\ UniqueBlockHashes(blocks)
+    /\ AllBlocksValid(blocks)
+    /\ (\A v \in Validators : UniqueBlocksPerSlot(finalized[v]))
     /\ FinalizedAncestorClosure
     /\ BlockNotarizedImpliesCert
     /\ ParentReadyImpliesCert

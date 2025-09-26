@@ -188,6 +188,7 @@ StoreCertificate(pool, cert) ==
 \* Cross-type coherence (derivable from Table 6 & Def. 13): within a slot,
 \* all notar-family certificates (Notarization/NotarFallback/FastFinalization)
 \* refer to the same blockHash. This aligns with §2.5’s slow/fast semantics.
+\* DELETE: local uniqueness helper not used elsewhere
 NotarFamilyUniqueBlockPerSlot(pool, s) ==
     LET notarBs == {c.blockHash : c \in {d \in pool.certificates[s] : d.type \in NotarTypes}}
     IN Cardinality(notarBs) <= 1
@@ -230,6 +231,7 @@ SkipStake(pool, slot) ==
         validators == {v.validator : v \in skipVotes}
     IN CalculateStake(validators)
 \* Alias for readability (audit suggestion): emphasize the "initial" semantics
+\* DELETE: alias, unused by current spec
 InitialSkipStake(pool, slot) == SkipStake(pool, slot)
 
 \* Σ_b NOTAR(b) — sum over all blocks in slot (Def. 16; :554)
@@ -342,6 +344,7 @@ HasFinalizationCert(pool, slot) ==
     HasSlotCertOfType(pool, slot, "FinalizationCert")
 
 \* Optional typing helper for proof obligations: make slot/block domains explicit.
+\* DELETE: typing helper unused
 BlockCertQueryTypesOK(slot, blockHash) ==
     /\ slot \in Slots
     /\ blockHash \in BlockHashes
@@ -454,6 +457,7 @@ PoolCertificatesSlotAligned(pool) ==
 BucketSlotConsistency(pool) == PoolCertificatesSlotAligned(pool)
 
 \* Aggregated votes are well-typed
+\* DELETE: typing helper unused
 VotesTypeOK(pool) ==
     \A s \in Slots : GetVotesForSlotTypeOK(pool, s)
 
@@ -462,6 +466,7 @@ VotesTypeOK(pool) ==
 \* from those with an initial NotarVote (any block). This makes explicit the
 \* property relied upon by Def. 16 arithmetic: SkipStake and NotarStake never
 \* count the same validator in the same slot.
+\* DELETE: strengthening invariant unused
 NoSkipAndNotarDoubleCount(pool, s) ==
     LET votes == GetVotesForSlot(pool, s)
         skipVotes == {vt \in votes : vt.type = "SkipVote"}
@@ -472,6 +477,7 @@ NoSkipAndNotarDoubleCount(pool, s) ==
 
 \* Count-once lemma: SkipStake equals the stake of unique validators with an
 \* initial SkipVote in the slot (mirrors the TotalNotar lemma).
+\* DELETE: lemma unused
 SkipStakeEqualsUniqueSkipVoters(pool, s) ==
     LET votes == GetVotesForSlot(pool, s)
         sv == {vt \in votes : vt.type = "SkipVote"}
@@ -479,11 +485,13 @@ SkipStakeEqualsUniqueSkipVoters(pool, s) ==
     IN SkipStake(pool, s) = CalculateStake(uniqVals)
 
 \* SafeToSkip arithmetic sanity: expression is non-negative.
+\* DELETE: arithmetic sanity unused
 SafeToSkipExpressionNonNegative(pool, s) ==
     SkipStake(pool, s) + TotalNotarStake(pool, s) - MaxNotarStake(pool, s) >= 0
 
 \* Typing lemma: per-block notar-stake values are natural numbers, matching
 \* the MaxNat domain (CalculateStake: Validators → Nat).
+\* DELETE: typing lemma unused
 BlockNotarStakesAreNat(pool, s) ==
     LET votes == GetVotesForSlot(pool, s)
         notarVotes == {v \in votes : IsInitialNotarVote(v)}
@@ -493,6 +501,7 @@ BlockNotarStakesAreNat(pool, s) ==
 
 \* Local sanity: NotarStake equals StakeFromVotes over initial NotarVote when
 \* using the slot’s aggregated votes (explicit slot guard is redundant).
+\* DELETE: redundancy check unused
 NotarStakeMatchesStakeFromVotes(pool, s, b) ==
     LET votes == GetVotesForSlot(pool, s)
         nv == {v \in votes : /\ IsInitialNotarVote(v) /\ v.blockHash = b}
@@ -547,6 +556,7 @@ CertificateUniqueness(pool) ==
  * implies a NotarizationCert for the same block, with vote-subset inclusion.
  * This scopes the cross-node timing statement to a single Pool state.
  *************************************************************************)
+\* DELETE: unused; MainProtocol uses Certificates.FastPathImplication
 PoolFastImpliesNotarSubset(pool, s, h) ==
     LET certs == pool.certificates[s]
     IN \A fastCert \in certs :

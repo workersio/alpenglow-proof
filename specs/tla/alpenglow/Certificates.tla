@@ -328,6 +328,7 @@ CertificateWellFormed(cert) ==
  * would produce from a consistent local view in slot s. Different nodes may
  * include different concrete vote sets due to timing, but thresholds coexist.
  ***************************************************************************)
+\* DELETE: documentation-only lemma; not referenced elsewhere
 FastFinalizationImpliesNotarization(fastCert, notarCert) ==
     /\ fastCert.type = "FastFinalizationCert"
     /\ notarCert.type = "NotarizationCert"
@@ -340,6 +341,7 @@ FastFinalizationImpliesNotarization(fastCert, notarCert) ==
  * If a NotarizationCert exists for (slot, block), the NotarFallbackCert for
  * the same (slot, block) is also constructible (60% threshold holds either way).
  ***************************************************************************)
+\* DELETE: documentation-only lemma; not referenced elsewhere
 NotarizationImpliesFallback(notarCert, fallbackCert) ==
     /\ notarCert.type = "NotarizationCert"
     /\ fallbackCert.type = "NotarFallbackCert"
@@ -351,6 +353,7 @@ NotarizationImpliesFallback(notarCert, fallbackCert) ==
  * Enforced by constructors; IsValidCertificate computes stake from the
  * relevant NotarVote subset, ignoring any extraneous votes.
  ***************************************************************************)
+\* DELETE: sanity lemma unused by model/invariants
 FastFinalizationVotesAreNotar(cert) ==
     cert.type = "FastFinalizationCert" =>
     \A v \in cert.votes : v.type = "NotarVote"
@@ -361,6 +364,7 @@ FastFinalizationVotesAreNotar(cert) ==
  * certificate with those votes yields a valid certificate. This matches
  * Pool behavior (§2.5, Def. 13) when thresholds are met.
  ***************************************************************************)
+\* DELETE: constructor lemma unused by model/invariants
 FallbackConstructorValidUnderGuard(votes, s, b) ==
     CanCreateNotarFallbackCert(votes, s, b)
         => IsValidCertificate(CreateNotarFallbackCert(votes, s, b))
@@ -370,6 +374,7 @@ FallbackConstructorValidUnderGuard(votes, s, b) ==
  * Matches the paper’s implication chain (80% ⇒ 60% notar ⇒ 60% fallback;
  * §2.4–§2.5).
  ***************************************************************************)
+\* DELETE: implication lemma unused by model/invariants
 NotarizationGuardImpliesFallbackGuard(votes, s, b) ==
     CanCreateNotarizationCert(votes, s, b)
         => CanCreateNotarFallbackCert(votes, s, b)
@@ -380,6 +385,7 @@ NotarizationGuardImpliesFallbackGuard(votes, s, b) ==
 \* is enforced by Pool storage rules and system invariants elsewhere.
 \* Whitepaper anchors: §2.5 Def. 13 (one certificate per type per block/slot)
 \* and Def. 14 (unique notarized block per slot for slow finalization).
+\* DELETE: conflict predicate not referenced elsewhere
 ConflictingCertificates(cert1, cert2) ==
     /\ cert1.slot = cert2.slot           \* Same slot
     /\ cert1.type = cert2.type           \* Same type
@@ -390,6 +396,7 @@ ConflictingCertificates(cert1, cert2) ==
 \* same slot. Within Pool, CanStoreCertificate already forbids such states by
 \* requiring a single blockHash across Notarization/NotarFallback/FastFinalization
 \* for a slot (Pool §2.5; Def. 13).
+\* DELETE: cross-type conflict helper unused
 CrossTypeNotarConflict(c1, c2) ==
     LET NotarTypes == {"NotarizationCert", "NotarFallbackCert", "FastFinalizationCert"}
     IN /\ c1.slot = c2.slot
@@ -408,6 +415,7 @@ AllCertificatesValid(certificates) ==
 
 \* No conflicting certificates should exist (Pool §2.5; Def. 13–14)
 \* Intended domain: apply to Pool’s certificates[slot] sets.
+\* DELETE: unused invariant helper (uniqueness enforced by Pool)
 NoConflictingCertificates(certificates) ==
     \A cert1, cert2 \in certificates :
         ~ConflictingCertificates(cert1, cert2)
@@ -425,6 +433,7 @@ FastPathImplication(certificates) ==
             /\ notarCert.votes \subseteq fastCert.votes
 
 \* Notarization cascade: every notarization implies a corresponding fallback
+\* DELETE: unused invariant helper
 NotarizationCascadeImplication(certificates) ==
     \A notarCert \in certificates :
         notarCert.type = "NotarizationCert" =>

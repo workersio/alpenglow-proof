@@ -60,6 +60,7 @@ ASSUME
     /\ RotorMaxFailedRelayStake \in Nat
     /\ RotorMaxFailedRelayStake < RotorMinRelayStake   \* Ensure residual stake after failures
     /\ MaxSlicesPerBlock \in Nat \ {0}
+
 \* Semantics and references:
 \*  - Γ, γ encode the erasure‑coding parameters (§1.6 :267; §2.2 :382–:385).
 \*  - κ > 5/3 encodes the over‑provisioning used in Lemma 7 (rotor resilience).
@@ -93,6 +94,7 @@ LargeStakeholders(S) == { v \in S : DeterministicBinCount(v) >= 1 }
 LargeStakeholdersInNeeders(needers) == LargeStakeholders(needers)
 
 \* Total deterministic bins Σ_{v∈needers} ⌊ρ_v·Γ⌋ (Step 1; Def. 46)
+\* DELETE: unused counting helper (kept for readability)
 TotalDeterministicBins(needers) ==
     LET RECURSIVE SumDet(_)
         SumDet(S) ==
@@ -126,6 +128,7 @@ RemainingBins(needers) ==
 THEOREM DeterministicBinsBound == TotalDeterministicBinsExact(DOMAIN StakeMap) <= GammaTotalShreds
 
 \* Helper: Check if PS-P bin assignment is feasible
+\* DELETE: feasibility helper not referenced elsewhere
 PSPBinAssignmentPossible(needers, nextLeader) ==
     LET largeStakeholders == LargeStakeholdersInNeeders(needers)
         remainingNeeders == needers \ largeStakeholders
@@ -136,6 +139,7 @@ PSPBinAssignmentPossible(needers, nextLeader) ==
            nextLeader \in largeStakeholders \/ nextLeader \in remainingNeeders)
 
 \* Deterministic bin indices (first d bins are PS-P Step 1 allocations)
+\* DELETE: index helper not used by callers
 DeterministicIndices(needers) == 1..TotalDeterministicBinsExact(needers)
 
 \* Bin assignment: 1..Γ → needers
@@ -160,6 +164,7 @@ PartitionWeights(needers) ==
                 [ j \in idx |-> [ v \in remainingNeeders |-> StakeMap[v] ] ]
 
 EligibleInBin(part, j) == { v \in DOMAIN part[j] : part[j][v] > 0 }
+\* DELETE: explicit bin assignment witness unused by callers
 PSPBinAssignment(needers, nextLeader) ==
     \* Always returns a total function on 1..Γ. Duplicates across bins are allowed
     \* (PS-P permits repeated selection when |needers| < Γ), and Step 2/3 sampling
@@ -193,6 +198,7 @@ BinsToRelaySet(bins) ==
 
 \* Minimum residual stake required after worst allowed relay failures.
 \* Alias of `RotorMinRelayStake` for clarity and compatibility.
+\* DELETE: alias not used; retained for documentation
 RequiredResilientStake == RotorMinRelayStake
 
 \* Stake‑based resilience guard (specification‑level, not mandated by the paper):
@@ -225,12 +231,14 @@ SumBinCounts(bins, S) ==
          Cardinality({ j \in DOMAIN bins : bins[j] = v }) + SumBinCounts(bins, S \ {v})
 
 \* The total multiplicity across distinct image values sums to Γ
+\* DELETE: internal lemma not used elsewhere
 CountingLemma(bins) ==
     DOMAIN bins = 1..GammaTotalShreds =>
         LET img == { bins[j] : j \in DOMAIN bins } IN
             SumBinCounts(bins, img) = GammaTotalShreds
 
 \* Trivial separation of small/large cases
+\* DELETE: trivial bound lemma unused
 ZeroCountLowerBound(bins, v) ==
     DeterministicBinCount(v) = 0 => Cardinality({ j \in DOMAIN bins : bins[j] = v }) >= 0
 
@@ -297,6 +305,7 @@ RotorSelect(block, needers, nextLeader) ==
  * A slice is reconstructable once γ distinct shreds for the same Merkle root
  * are received and validated. We abstract per‑shred Merkle checks here.
  ***************************************************************************)
+\* DELETE: threshold helper not referenced by model
 SliceReconstructable(receivedShredsCount) ==
     receivedShredsCount >= GammaDataShreds
 
@@ -324,6 +333,7 @@ RotorSuccessfulBins(leader, bins, correctNodes) ==
  * SLICE DELIVERY MODEL (§2.2 :382–:406)
  * Abstract two‑hop delivery: leader → relays → all nodes that still need it.
  ***************************************************************************)
+\* DELETE: simplified delivery predicate not used
 SliceDelivered(slice, relays, correctNodes) ==
     /\ slice.leader \in correctNodes  \* Leader is correct
     /\ Cardinality(relays \cap correctNodes) >= GammaDataShreds  \* Enough correct relays
