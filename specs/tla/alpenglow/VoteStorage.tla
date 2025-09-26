@@ -25,6 +25,9 @@ MaxNotarFallbacks == 3       \* Up to three notar-fallback votes
 MaxSkipFallbacks == 1        \* First skip-fallback vote
 MaxFinalVotes == 1           \* First finalization vote
 
+\* Reusable set of notarization-family certificate types (Table 6)
+NotarTypes == {"NotarizationCert", "NotarFallbackCert", "FastFinalizationCert"}
+
 \* ============================================================================
 \* POOL STATE STRUCTURE
 \* ============================================================================
@@ -134,7 +137,6 @@ CanStoreCertificate(pool, cert) ==
     LET 
         slot == cert.slot
         existing == pool.certificates[slot]
-        NotarTypes == {"NotarizationCert", "NotarFallbackCert", "FastFinalizationCert"}
         HasBlockCert == (\E c \in existing : c.type \in NotarTypes)
     IN
         CASE cert.type = "SkipCert" ->
@@ -462,12 +464,20 @@ MultiplicityRulesRespected(pool) ==
            /\ Cardinality({vt \in votes : vt.type = "SkipFallbackVote"}) <= MaxSkipFallbacks
            /\ Cardinality({vt \in votes : vt.type = "FinalVote"}) <= MaxFinalVotes
 
-\* Certificate uniqueness is maintained
+\* Certificate uniqueness (strengthened to match Definition 13)
+\* - At most one SkipCert and one FinalizationCert per slot.
+\* - For notarization-family types, at most one per (type, blockHash) per slot.
+\* - Cross-type consistency: all notarization-family certs in a slot, if any,
+\*   must reference the same blockHash.
 CertificateUniqueness(pool) ==
     \A s \in Slots :
-        \A c1, c2 \in pool.certificates[s] :
-            (c1.type = c2.type /\ c1.slot = c2.slot) =>
-            (c1.type \in {"SkipCert", "FinalizationCert"} \/ c1.blockHash = c2.blockHash)
+      /\ \A t \in {"SkipCert", "FinalizationCert"} :
+            Cardinality({c \in pool.certificates[s] : c.type = t}) <= 1
+      /\ \A t \in NotarTypes :
+            \A b \in BlockHashes :
+                Cardinality({c \in pool.certificates[s] : c.type = t /\ c.blockHash = b}) <= 1
+      /\ LET notarBs == {c.blockHash : c \in {d \in pool.certificates[s] : d.type \in NotarTypes}}
+         IN Cardinality(notarBs) <= 1
 
 (***************************************************************************
  * Pool-scoped lemma (audit suggestion): For the certificates stored in a

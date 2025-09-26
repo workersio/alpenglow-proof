@@ -1000,6 +1000,10 @@ PoolCertificatesValid ==
     \A s \in 1..MaxSlot :
         AllCertificatesValid(validators[v].pool.certificates[s])
 
+\* All stored certificates are structurally well-formed (Vote relevance)
+PoolCertificatesWellFormedOK ==
+    \A v \in Validators : CertificatesWellFormed(validators[v].pool)
+
 \* Pool alignment invariants (audit 0009): slot/validator alignment for votes,
 \* and slot alignment for certificates across all validators.
 PoolAlignmentOK ==
@@ -1209,6 +1213,7 @@ Invariant ==
     /\ PoolMultiplicityOK
     /\ PoolCertificateUniqueness
     /\ PoolCertificatesValid
+    /\ PoolCertificatesWellFormedOK
     /\ PoolAlignmentOK
     /\ BucketSlotConsistencyOK
     /\ RotorSelectSoundness
