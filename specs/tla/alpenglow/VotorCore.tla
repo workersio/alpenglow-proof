@@ -114,6 +114,30 @@ VotedForBlock(validator, slot, blockHash) ==
         /\ vote.type = "NotarVote"
         /\ vote.blockHash = blockHash
 
+
+\* ============================================================================
+\* TRYFINAL - Try to cast finalization vote (Algorithm 2, lines 18-21)
+\* ============================================================================
+
+(***************************************************************************
+ * Vote to finalize a notarized block. Mirrors Whitepaper Algorithm 2
+ * (lines 18–21): requires notarization, our own notar vote, and no
+ * fallback activity in the window (`BadWindow`).
+ ***************************************************************************)
+
+TryFinal(validator, slot, blockHash) ==
+    LET canVote ==
+            /\ HasState(validator, slot, "BlockNotarized")
+            /\ VotedForBlock(validator, slot, blockHash)
+            /\ ~HasState(validator, slot, "BadWindow")
+    IN
+        IF canVote THEN
+            LET vote == CreateFinalVote(validator.id, slot)
+                newState == AddState(validator, slot, "ItsOver")
+                poolWithVote == StoreVote(newState.pool, vote)
+            IN [newState EXCEPT !.pool = poolWithVote]
+        ELSE validator
+
 \* ============================================================================
 \* TRYNOTAR - Try to cast notarization vote (Algorithm 2, lines 7-17)
 \* ============================================================================
@@ -145,32 +169,11 @@ TryNotar(validator, block) ==
                 newState1 == AddState(validator, slot, "Voted")
                 newState2 == AddState(newState1, slot, "VotedNotarTag")
                 poolWithVote == StoreVote(newState2.pool, vote)
-            IN [newState2 EXCEPT 
-                !.pool = poolWithVote,
-                !.pendingBlocks[slot] = validator.pendingBlocks[slot] \ {block}]
-        ELSE validator
-
-\* ============================================================================
-\* TRYFINAL - Try to cast finalization vote (Algorithm 2, lines 18-21)
-\* ============================================================================
-
-(***************************************************************************
- * Vote to finalize a notarized block. Mirrors Whitepaper Algorithm 2
- * (lines 18–21): requires notarization, our own notar vote, and no
- * fallback activity in the window (`BadWindow`).
- ***************************************************************************)
-
-TryFinal(validator, slot, blockHash) ==
-    LET canVote ==
-            /\ HasState(validator, slot, "BlockNotarized")
-            /\ VotedForBlock(validator, slot, blockHash)
-            /\ ~HasState(validator, slot, "BadWindow")
-    IN
-        IF canVote THEN
-            LET vote == CreateFinalVote(validator.id, slot)
-                newState == AddState(validator, slot, "ItsOver")
-                poolWithVote == StoreVote(newState.pool, vote)
-            IN [newState EXCEPT !.pool = poolWithVote]
+                withVote == [newState2 EXCEPT 
+                             !.pool = poolWithVote,
+                             !.pendingBlocks[slot] = {}]  \* Clear all pending blocks for this slot (Alg. 2 line 14)
+                afterFinal == TryFinal(withVote, slot, block.hash)  \* Immediately attempt finalization (Alg. 2 line 15)
+            IN afterFinal
         ELSE validator
 
 \* ============================================================================
