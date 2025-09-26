@@ -210,22 +210,23 @@ TrySkipWindow(validator, slot) ==
         ELSE validator
 
 \* ============================================================================
-\* CHECK PENDING BLOCKS (Whitepaper Algorithm 1, lines 28–30)
+\* CHECK PENDING BLOCKS
 \* ============================================================================
 
 CheckPendingBlocks(validator) ==
-    LET RECURSIVE CheckSlots(_,_)
-        CheckSlots(val, slots) ==
-            IF slots = {} THEN val
-            ELSE
-                LET s == CHOOSE x \in slots : TRUE
-                    blocks == val.pendingBlocks[s]
-                IN IF blocks = {} THEN CheckSlots(val, slots \ {s})
-                   ELSE 
-                       LET block == CHOOSE b \in blocks : TRUE
-                           newVal == TryNotar(val, block)
-                       IN CheckSlots(newVal, slots \ {s})
-    IN CheckSlots(validator, {s \in Slots : validator.pendingBlocks[s] # {}})
+    LET RECURSIVE Step(_)
+        Step(val) ==
+            LET eligibleSlots == { s \in Slots :
+                                    /\ val.pendingBlocks[s] # {}
+                                    /\ \E b \in val.pendingBlocks[s] : TryNotar(val, b) # val }
+            IN IF eligibleSlots = {} THEN val
+            ELSE 
+                \* Choose the earliest eligible slot deterministically
+                LET s == CHOOSE x \in eligibleSlots : \A y \in eligibleSlots : x <= y
+                    eligibleBlocks == { b \in val.pendingBlocks[s] : TryNotar(val, b) # val }
+                    b == CHOOSE x \in eligibleBlocks : TRUE
+                IN Step(TryNotar(val, b))
+    IN Step(validator)
 
 \* ============================================================================
 \* EVENT HANDLERS (Algorithm 1)
