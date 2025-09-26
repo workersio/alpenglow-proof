@@ -303,18 +303,37 @@ RotorSelect(block, needers, nextLeader) ==
 (***************************************************************************
  * Streaming Progress (abstract): a slice is reconstructable after γ distinct
  * successful relay deliveries. We do not model individual shreds; instead we
- * expose a predicate that other modules can use if they wish.
+ * expose a predicate that other modules can use if they wish. Callers are
+ * responsible for ensuring the count reflects distinct, Merkle-validated
+ * shreds for the same root.
  ***************************************************************************)
 SliceReconstructable(receivedShredsCount) ==
     receivedShredsCount >= GammaDataShreds
 
 (***************************************************************************
  * Definition 6 from Whitepaper: Rotor Success Condition
- * Rotor is successful if the leader is correct and at least γ correct relays participate
+ * Rotor is successful if the leader is correct and at least γ correct relays participate.
+ *
+ * Note (conservative set-based approximation): This predicate counts distinct
+ * relays only (collapsing multiplicity across Γ bins). It under-approximates
+ * success relative to the whitepaper, which counts per-bin assignments. Use
+ * RotorSuccessfulBins when the Γ-assignment multiplicity matters.
  ***************************************************************************)
 RotorSuccessful(leader, relays, correctNodes) ==
     /\ leader \in correctNodes
     /\ Cardinality(relays \cap correctNodes) >= GammaDataShreds
+
+(***************************************************************************
+ * Bins-aware success (aligns with Γ-assignment multiplicity)
+ * Rotor is successful iff the leader is correct and at least γ bin assignments
+ * go to correct nodes (counting multiplicity over the Γ bins).
+ ***************************************************************************)
+CorrectAssignmentsCount(bins, correctNodes) ==
+    Cardinality({ j \in DOMAIN bins : bins[j] \in correctNodes })
+
+RotorSuccessfulBins(leader, bins, correctNodes) ==
+    /\ leader \in correctNodes
+    /\ CorrectAssignmentsCount(bins, correctNodes) >= GammaDataShreds
 
 (***************************************************************************
  * Slice Delivery Model: abstract representation of slice transmission

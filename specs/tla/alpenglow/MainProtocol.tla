@@ -433,18 +433,17 @@ RotorDisseminateSuccess(block) ==
            \* it has no direct protocol analogue (parameterization note).
            nextSlot == IF block.slot + 1 <= MaxSlot THEN block.slot + 1 ELSE block.slot
            nextLeader == Leader(nextSlot)
-           relays == RotorSelect(block, needers, nextLeader)
        IN /\ needers # {}
-          /\ relays # {}
-          \* SliceDelivered abstracts block-level dissemination once γ correct relays
-          \* participate; use as the single success gate (drops redundant RotorSuccessful).
-          /\ SliceDelivered([leader |-> block.leader, needers |-> needers], relays, CorrectNodes)
-          /\ blockAvailability' =
-                [w \in Validators |->
-                    IF w \in CorrectNodes
-                    THEN blockAvailability[w] \cup {block}
-                    ELSE blockAvailability[w]]
-          /\ UNCHANGED <<validators, blocks, messages, byzantineNodes, time, finalized>>
+          /\ \E bins \in BinCandidates(needers, nextLeader) :
+                /\ RotorSuccessfulBins(block.leader, bins, CorrectNodes)
+                /\ LET relays == BinsToRelaySet(bins)
+                   IN /\ relays # {}
+                      /\ blockAvailability' =
+                            [w \in Validators |->
+                                IF w \in CorrectNodes
+                                THEN blockAvailability[w] \cup {block}
+                                ELSE blockAvailability[w]]
+                      /\ UNCHANGED <<validators, blocks, messages, byzantineNodes, time, finalized>>
 
 (***************************************************************************
  * ROTOR FAILURE (insufficient correct relays) — partial dissemination
@@ -465,15 +464,16 @@ RotorFailInsufficientRelays(block) ==
            \* it has no direct protocol analogue (parameterization note).
            nextSlot == IF block.slot + 1 <= MaxSlot THEN block.slot + 1 ELSE block.slot
            nextLeader == Leader(nextSlot)
-           relays == RotorSelect(block, needers, nextLeader)
        IN /\ needers # {}
-          /\ relays # {}
-          /\ ~RotorSuccessful(block.leader, relays, CorrectNodes)
-          /\ blockAvailability' = [w \in Validators |->
-                                        IF w \in relays
-                                        THEN blockAvailability[w] \cup {block}
-                                        ELSE blockAvailability[w]]
-          /\ UNCHANGED <<validators, blocks, messages, byzantineNodes, time, finalized>>
+          /\ \E bins \in BinCandidates(needers, nextLeader) :
+                /\ ~RotorSuccessfulBins(block.leader, bins, CorrectNodes)
+                /\ LET relays == BinsToRelaySet(bins)
+                   IN /\ relays # {}
+                      /\ blockAvailability' = [w \in Validators |->
+                                                IF w \in relays
+                                                THEN blockAvailability[w] \cup {block}
+                                                ELSE blockAvailability[w]]
+                      /\ UNCHANGED <<validators, blocks, messages, byzantineNodes, time, finalized>>
 
 (***************************************************************************
  * ROTOR FAILURE (Byzantine leader) — arbitrary dissemination/withholding

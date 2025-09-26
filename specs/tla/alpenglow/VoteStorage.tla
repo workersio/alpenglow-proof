@@ -133,15 +133,18 @@ StoreVote(pool, vote) ==
 
 \* Definition 13 (Whitepaper page 21): only one certificate of a given type is stored for each
 \* slot/block combination. This predicate enforces that uniqueness.
+\* Audit improvement: add a store-time guard to exclude coexistence of SkipCert
+\* with any block-related certificate by delegating to Certificates.SkipVsBlockCertExclusion.
 CanStoreCertificate(pool, cert) ==
     LET 
         slot == cert.slot
         existing == pool.certificates[slot]
-        HasBlockCert == (\E c \in existing : c.type \in NotarTypes)
+        newset == existing \cup {cert}
     IN
-        CASE cert.type = "SkipCert" ->
-                 \* Enforce mutual exclusion with any block-related cert
-                 ( ~\E c \in existing : c.type = "SkipCert" ) /\ ~HasBlockCert
+        /\ SkipVsBlockCertExclusion(newset)
+        /\ CASE cert.type = "SkipCert" ->
+                 \* At most one SkipCert per slot
+                 ~\E c \in existing : c.type = "SkipCert"
 
            [] cert.type = "FinalizationCert" ->
                  \* At most one FinalizationCert per slot
@@ -150,14 +153,15 @@ CanStoreCertificate(pool, cert) ==
            [] cert.type \in NotarTypes ->
                  /\ ~\E c \in existing : c.type = cert.type /\ c.blockHash = cert.blockHash
                  /\ (\A c \in existing : c.type \in NotarTypes => c.blockHash = cert.blockHash)
-                 /\ ~\E c \in existing : c.type = "SkipCert"
 
            [] OTHER -> FALSE
 
 \* Store a certificate in the pool
 \* Improvement: validate certificate contents on store (see audit suggestions).
-\* We keep acceptance independent of local vote availability to avoid dropping
-\* network-learned certificates whose constituent votes may arrive later.
+\* Acceptance is independent of local vote availability so we do not drop
+\* valid network-learned certificates whose constituent votes may arrive later.
+\* Safety is enforced via invariants such as PoolSkipVsBlockExclusion and
+\* CertificateNonEquivocation (see MainProtocol.Invariant).
 StoreCertificate(pool, cert) ==
     \* Enforce structural well-formedness on store (audit suggestion):
     \* certificates must contain only votes relevant to their (type, slot, blockHash).
@@ -169,6 +173,13 @@ StoreCertificate(pool, cert) ==
             pool.certificates[cert.slot] \cup {cert}]
     ELSE
         pool
+
+\* Explicit per-slot lemma (audit suggestion): within a slot, all stored
+\* notar-family certificates (Notarization/NotarFallback/FastFinalization)
+\* refer to the same block hash.
+NotarFamilyUniqueBlockPerSlot(pool, s) ==
+    LET notarBs == {c.blockHash : c \in {d \in pool.certificates[s] : d.type \in NotarTypes}}
+    IN Cardinality(notarBs) <= 1
 
 \* ============================================================================
 \* VOTE AGGREGATION AND QUERIES
