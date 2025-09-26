@@ -74,6 +74,14 @@ ValidatorState == [
     state: [Slots -> SUBSET StateObject],           \* State flags per slot
     parentReady: [Slots -> BlockHashes \cup {NoBlock}], \* Parent hash per slot
     pendingBlocks: [Slots -> SUBSET Block],         \* Blocks to retry
+                                                   \* Modeling note: The whitepaper (Alg.1 L5)
+                                                   \* buffers a single pending block per slot.
+                                                   \* We model this as a set for generality and
+                                                   \* idempotence; `MainProtocol.ReceiveBlock`
+                                                   \* delivers only the first complete block per
+                                                   \* slot to Algorithm 1 in this model. See also
+                                                   \* `PendingBlocksSingleton` for the intended
+                                                   \* singleton discipline and `...SlotAligned`.
     pool: PoolState,                                \* Vote/certificate storage
     clock: TimeTS,                                  \* Local clock
     timeouts: [Slots -> TimeoutTS]                  \* Scheduled timeouts
@@ -236,6 +244,13 @@ CheckPendingBlocks(validator) ==
  * Handle Block event (Whitepaper Algorithm 1, lines 1–5).
  * On delivery we attempt to notarize immediately; otherwise retain as
  * pending until prerequisites (parent readiness) hold.
+ *
+ * Notes
+ * - We generalize the paper's single pending entry to a set; union below
+ *   is idempotent and deduplicates repeated deliveries.
+ * - `TryNotar` clears the slot's pending set on success and immediately
+ *   invokes `TryFinal` (Alg.2 L15). Thus the success branch here only
+ *   needs to re-check other pending slots.
  ***************************************************************************)
 
 HandleBlock(validator, block) ==
@@ -247,7 +262,7 @@ HandleBlock(validator, block) ==
         ELSE IF ~HasState(validator, slot, "Voted") THEN
             \* Store as pending to retry later
             [validator EXCEPT !.pendingBlocks[slot] = 
-                validator.pendingBlocks[slot] \union {block}]
+                validator.pendingBlocks[slot] \union {block}]  \* Set union deduplicates; idempotent buffering
         ELSE validator
 
 (***************************************************************************
