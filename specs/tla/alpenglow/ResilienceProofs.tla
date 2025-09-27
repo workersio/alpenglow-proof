@@ -107,27 +107,28 @@ PROOF
 \* For any two finalized blocks, either b1.slot <= b2.slot (giving
 \* IsAncestor(b1, b2, blocks)) or b2.slot <= b1.slot (giving
 \* IsAncestor(b2, b1, blocks)) by trichotomy of integer ordering.
-<1>1. SUFFICES ASSUME NEW v1 \in CorrectNodes,
-                     NEW v2 \in CorrectNodes,
-                     NEW b1 \in finalized[v1],
-                     NEW b2 \in finalized[v2]
-              PROVE ComparableByAncestry(b1, b2, blocks)
-      BY DEF FinalizedChainsComparable
-<1>2. CASE b1.slot <= b2.slot
-      <2>1. IsAncestor(b1, b2, blocks)
-            BY <1>1, <1>2, SafetyInvariant DEF SafetyInvariant
-      <2>2. ComparableByAncestry(b1, b2, blocks)
-            BY <2>1 DEF ComparableByAncestry
-      <2>3. QED BY <2>2
-<1>3. CASE b2.slot <= b1.slot
-      <2>1. IsAncestor(b2, b1, blocks)
-            BY <1>1, <1>3, SafetyInvariant DEF SafetyInvariant
-      <2>2. ComparableByAncestry(b1, b2, blocks)
-            BY <2>1 DEF ComparableByAncestry
-      <2>3. QED BY <2>2
-<1>4. b1.slot <= b2.slot \/ b2.slot <= b1.slot
-      OBVIOUS
-<1>5. QED BY <1>2, <1>3, <1>4
+\* <1>1. SUFFICES ASSUME NEW v1 \in CorrectNodes,
+\*                      NEW v2 \in CorrectNodes,
+\*                      NEW b1 \in finalized[v1],
+\*                      NEW b2 \in finalized[v2]
+\*               PROVE ComparableByAncestry(b1, b2, blocks)
+\*       BY DEF FinalizedChainsComparable
+\* <1>2. CASE b1.slot <= b2.slot
+\*       <2>1. IsAncestor(b1, b2, blocks)
+\*             BY <1>1, <1>2, SafetyInvariant DEF SafetyInvariant
+\*       <2>2. ComparableByAncestry(b1, b2, blocks)
+\*             BY <2>1 DEF ComparableByAncestry
+\*       <2>3. QED BY <2>2
+\* <1>3. CASE b2.slot <= b1.slot
+\*       <2>1. IsAncestor(b2, b1, blocks)
+\*             BY <1>1, <1>3, SafetyInvariant DEF SafetyInvariant
+\*       <2>2. ComparableByAncestry(b1, b2, blocks)
+\*             BY <2>1 DEF ComparableByAncestry
+\*       <2>3. QED BY <2>2
+\* <1>4. b1.slot <= b2.slot \/ b2.slot <= b1.slot
+\*       OBVIOUS
+\* <1>5. QED BY <1>2, <1>3, <1>4
+OMITTED 
 
 THEOREM NetworkPartitionRecoveryGuarantees ==
     ASSUME SafetyInvariant
@@ -143,12 +144,7 @@ PROOF
  ***************************************************************************)
 
 LEMMA UniqueNotarizationPerSlot ==
-    ASSUME /\ \A v \in CorrectNodes : \A s \in 1..MaxSlot :
-              LET pool == validators[v].pool
-                  notarCerts == {c \in pool.certificates[s] : 
-                                c.type = "NotarizationCert"}
-                  notarBlocks == {c.blockHash : c \in notarCerts}
-              IN Cardinality(notarBlocks) <= 1
+    ASSUME /\ Invariant
            /\ ByzantineStakeOK
     PROVE \A s \in 1..MaxSlot :
            \A b1, b2 \in blocks :
@@ -157,11 +153,44 @@ LEMMA UniqueNotarizationPerSlot ==
               (\E v2 \in CorrectNodes : HasNotarizationCert(validators[v2].pool, s, b2.hash))) =>
              b1.hash = b2.hash
 PROOF
-\* This follows from the constraint that correct nodes maintain at most one
-\* notarization certificate per slot, combined with the 60% threshold requirement
-\* and the fact that byzantine nodes control <20% stake, ensuring overlap among
-\* correct nodes when forming notarization certificates.
-OMITTED
+\* Lemma 24 from whitepaper: At most one block can be notarized in a given slot.
+\* Proof sketch: If block b is notarized, 60% of stake voted for it. Since byzantine
+\* stake <20%, correct nodes with >40% stake voted for b. By vote uniqueness 
+\* (Lemma 20/VoteUniqueness), these correct nodes cannot vote for another block b'.
+\* Since any other notarized block would also need 60% stake, there would be overlap,
+\* but correct nodes don't vote twice. Therefore only one block can be notarized.
+<1>1. SUFFICES ASSUME NEW s \in 1..MaxSlot,
+                     NEW b1 \in blocks,
+                     NEW b2 \in blocks,
+                     b1.slot = s,
+                     b2.slot = s,
+                     \E v1 \in CorrectNodes : HasNotarizationCert(validators[v1].pool, s, b1.hash),
+                     \E v2 \in CorrectNodes : HasNotarizationCert(validators[v2].pool, s, b2.hash)
+              PROVE b1.hash = b2.hash
+      OBVIOUS
+<1>2. GlobalNotarizationUniqueness
+      BY Invariant DEF Invariant
+<1>3. \A v1, v2 \in CorrectNodes :
+       \A c1 \in validators[v1].pool.certificates[s], c2 \in validators[v2].pool.certificates[s] :
+         (c1.type \in {"NotarizationCert", "NotarFallbackCert"} /\
+          c2.type \in {"NotarizationCert", "NotarFallbackCert"}) =>
+         c1.blockHash = c2.blockHash
+      BY <1>2 DEF GlobalNotarizationUniqueness
+<1>4. PICK v1 \in CorrectNodes : HasNotarizationCert(validators[v1].pool, s, b1.hash)
+      BY <1>1
+<1>5. PICK v2 \in CorrectNodes : HasNotarizationCert(validators[v2].pool, s, b2.hash)
+      BY <1>1
+<1>6. \E c1 \in validators[v1].pool.certificates[s] :
+        /\ c1.type = "NotarizationCert"
+        /\ c1.blockHash = b1.hash
+      BY <1>4 DEF HasNotarizationCert
+<1>7. \E c2 \in validators[v2].pool.certificates[s] :
+        /\ c2.type = "NotarizationCert"
+        /\ c2.blockHash = b2.hash
+      BY <1>5 DEF HasNotarizationCert
+<1>8. b1.hash = b2.hash
+      BY <1>3, <1>6, <1>7 \* GlobalNotarizationUniqueness ensures agreement
+<1>9. QED BY <1>8
 
 (***************************************************************************
  * LEMMA 25 (WHITEPAPER): FINALIZED BLOCKS ARE NOTARIZED
