@@ -127,6 +127,12 @@ vars == <<validators, blocks, messages, byzantineNodes, unresponsiveNodes, time,
 \* Get correct, responsive validators (non-Byzantine and not unresponsive)
 CorrectNodes == Validators \ (byzantineNodes \cup unresponsiveNodes)
 
+\* Stake premises (Assumptions 1 and 2)
+ByzantineStakeOK == (CalculateStake(byzantineNodes) * 100) < (TotalStake * 20)
+UnresponsiveStakeOK ==
+    /\ (CalculateStake(unresponsiveNodes) * 100) <= (TotalStake * 20)
+    /\ (byzantineNodes \cap unresponsiveNodes) = {}
+
 \* Repair trigger (Algorithm 4; §2.8). Include fast-finalization to cover fast-only
 \* implementations. See also Blokstor repair mention: `alpenglow-whitepaper.md:470`.
 NeedsBlockRepair(pool, block) ==
@@ -1174,10 +1180,12 @@ TryFinalProgress ==
 Progress ==
     (time >= GST) ~>
         (\A v \in Validators :
-             LET currentMax == IF finalized[v] = {} THEN 0
-                                 ELSE CHOOSE s \in {b.slot : b \in finalized[v]} :
-                                          \A s2 \in {b.slot : b \in finalized[v]} : s >= s2
-             IN <>(\E b \in blocks : b.slot > currentMax /\ b \in finalized[v]))
+            IF v \in CorrectNodes
+            THEN LET currentMax == IF finalized[v] = {} THEN 0
+                                   ELSE CHOOSE s \in {b.slot : b \in finalized[v]} :
+                                            \A s2 \in {b.slot : b \in finalized[v]} : s >= s2
+                 IN <>(\E b \in blocks : b.slot > currentMax /\ b \in finalized[v])
+            ELSE TRUE)
 
 (***************************************************************************
  * SLOW-PATH LIVENESS (≥60% responsive) — progress after GST
@@ -1190,6 +1198,29 @@ Progress ==
 \* Liveness property (enabled in MC.cfg PROPERTIES)
 \* Stake assumptions are enforced in Init/Invariant; see comments above.
 Liveness60Responsive == Progress
+
+(***************************************************************************
+ * CRASH-TOLERANT LIVENESS (≤20% non-responsive stake)
+ *
+ * Whitepaper refs
+ * - Assumption 2 (extra crash tolerance): alpenglow-whitepaper.md:121 (page 5)
+ *   “Byzantine < 20%, up to 20% crashed, remaining > 60% correct.”
+ * - Liveness under partial synchrony (Thm. 2): alpenglow-whitepaper.md:1045.
+ *
+ * Explanation
+ * - After GST, provided ByzantineStakeOK and UnresponsiveStakeOK hold (Assumptions
+ *   1 and 2), every correct/responsive validator eventually finalizes a block
+ *   with a strictly higher slot than its current maximum (i.e., makes progress).
+ ***************************************************************************)
+CrashToleranceLiveness20 ==
+    (time >= GST) ~>
+        (\A v \in Validators :
+            IF v \in CorrectNodes
+            THEN LET currentMax == IF finalized[v] = {} THEN 0
+                                   ELSE CHOOSE s \in {b.slot : b \in finalized[v]} :
+                                            \A s2 \in {b.slot : b \in finalized[v]} : s >= s2
+                 IN <>(\E b \in blocks : b.slot > currentMax /\ b \in finalized[v])
+            ELSE TRUE)
 
 (***************************************************************************
  * THEOREM 2 — window-level liveness (Section 2.10)
