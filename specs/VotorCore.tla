@@ -232,20 +232,19 @@ TrySkipWindow(validator, slot) ==
                         s \in Slots /\ ~HasState(validator, s, "Voted")}
     IN
         IF slotsToSkip # {} THEN
-            LET RECURSIVE SkipSlots(_,_)
-                SkipSlots(val, slots) ==
-                    IF slots = {} THEN val
+            LET SkipSlots[state \in ValidatorState, remainingSlots \in SUBSET slotsToSkip] ==
+                    IF remainingSlots = {} THEN state
                     ELSE 
-                        LET s == CHOOSE x \in slots : TRUE
-                            vote == CreateSkipVoteForSlot(val.id, s)
-                            newVal1 == AddState(val, s, "Voted")
+                        LET s == CHOOSE x \in remainingSlots : TRUE
+                            vote == CreateSkipVoteForSlot(state.id, s)
+                            newVal1 == AddState(state, s, "Voted")
                             newVal2 == AddState(newVal1, s, "BadWindow")
                             poolWithVote == StoreVote(newVal2.pool, vote)
                             updatedVal == [newVal2 EXCEPT 
                                           !.pool = poolWithVote,
                                           !.pendingBlocks[s] = {}]
-                        IN SkipSlots(updatedVal, slots \ {s})
-            IN SkipSlots(validator, slotsToSkip)
+                        IN SkipSlots[updatedVal, remainingSlots \ {s}]
+            IN SkipSlots[validator, slotsToSkip]
         ELSE validator
 
 \* ============================================================================
@@ -253,8 +252,7 @@ TrySkipWindow(validator, slot) ==
 \* ============================================================================
 
 CheckPendingBlocks(validator) ==
-    LET RECURSIVE Step(_)
-        Step(val) ==
+    LET Step[val \in ValidatorState] ==
             LET eligibleSlots == { s \in Slots :
                                     /\ val.pendingBlocks[s] # {}
                                     /\ \E b \in val.pendingBlocks[s] : TryNotar(val, b) # val }
@@ -264,8 +262,8 @@ CheckPendingBlocks(validator) ==
                 LET s == CHOOSE x \in eligibleSlots : \A y \in eligibleSlots : x <= y
                     eligibleBlocks == { b \in val.pendingBlocks[s] : TryNotar(val, b) # val }
                     b == CHOOSE x \in eligibleBlocks : TRUE
-                IN Step(TryNotar(val, b))
-    IN Step(validator)
+                IN Step[TryNotar(val, b)]
+    IN Step[validator]
 
 \* ============================================================================
 \* EVENT HANDLERS (Algorithm 1, pp. 24–25)
@@ -334,15 +332,14 @@ HandleParentReady(validator, slot, parentHash) ==
         \* term (s - first + 1) \in Nat \ {0}. With DeltaTimeout, DeltaBlock > 0
         \* and non-decreasing `clock`, all scheduled timeouts satisfy
         \* timeout > pre-call clock. See MainProtocol.TimeoutsInFuture.
-        RECURSIVE SetTimeouts(_,_)
-        SetTimeouts(val, slots) ==
-            IF slots = {} THEN val
+        SetTimeouts[val \in ValidatorState, remainingSlots \in SUBSET windowSlots] ==
+            IF remainingSlots = {} THEN val
             ELSE
-                LET s == CHOOSE x \in slots : TRUE
+                LET s == CHOOSE x \in remainingSlots : TRUE
                     timeout == val.clock + DeltaTimeout + ((s - first + 1) * DeltaBlock)
-                IN SetTimeouts([val EXCEPT !.timeouts[s] = timeout], slots \ {s})
+                IN SetTimeouts[[val EXCEPT !.timeouts[s] = timeout], remainingSlots \ {s}]
         \* Note: WindowSlots already ranges over production slots; no extra \cap Slots needed
-    IN SetTimeouts(afterCheck, windowSlots)
+    IN SetTimeouts[afterCheck, windowSlots]
 
 (***************************************************************************
  * Handle SafeToNotar event (Alg. 1, L16–20; Def. 16 — fallback events).
@@ -402,14 +399,13 @@ AdvanceClock(validator, newTime) ==
             expiredTimeouts == {s \in Slots :
                                    /\ validator.timeouts[s] > 0
                                    /\ validator.timeouts[s] <= newTime}
-            RECURSIVE ProcessTimeouts(_,_)
-        ProcessTimeouts(val, slots) ==
-            IF slots = {} THEN val
-            ELSE
-                LET s == CHOOSE x \in slots : \A y \in slots : x <= y
-                    newVal == HandleTimeout(val, s)
-                IN ProcessTimeouts(newVal, slots \ {s})
-        IN [ProcessTimeouts(validator, expiredTimeouts) EXCEPT !.clock = newTime]
+            ProcessTimeouts[val \in ValidatorState, remainingSlots \in SUBSET expiredTimeouts] ==
+                IF remainingSlots = {} THEN val
+                ELSE
+                    LET s == CHOOSE x \in remainingSlots : \A y \in remainingSlots : x <= y
+                        newVal == HandleTimeout(val, s)
+                    IN ProcessTimeouts[newVal, remainingSlots \ {s}]
+        IN [ProcessTimeouts[validator, expiredTimeouts] EXCEPT !.clock = newTime]
 
 \* ============================================================================
 \* TYPE INVARIANT (Def. 12–18 typing and domains)
