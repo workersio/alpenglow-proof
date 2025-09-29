@@ -12,7 +12,7 @@
  * ancestry, and leader windows used by the higher-level protocol modules.
  ***************************************************************************)
 
-EXTENDS Naturals, FiniteSets, Messages
+EXTENDS Naturals, FiniteSets, Messages, Sequences
 
 \* ============================================================================
 \* CONSTANTS (whitepaper mapping: §1.1, §2.1, §2.7)

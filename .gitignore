@@ -13,3 +13,5 @@ simple.cfg
 
 # Java
 *.class
+hyper-tla
+.tlacache

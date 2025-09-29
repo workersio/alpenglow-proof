@@ -24,7 +24,7 @@
  * voting validators’ stakes (Table 6: Σ = Σ_i ρ_i).
  ***************************************************************************)
 
-EXTENDS Naturals, FiniteSets, Messages
+EXTENDS Naturals, FiniteSets, Messages, Sequences
 
 \* ============================================================================
 \* CONSTANTS
@@ -60,6 +60,12 @@ DefaultThreshold  == 60
  * This section implements the “count once” policy by deduplicating validators
  * prior to stake summation.
  ***************************************************************************)
+
+EnumerateSet(S) ==
+    CHOOSE seq \in Seq(S) :
+        /\ Len(seq) = Cardinality(S)
+        /\ {seq[i] : i \in 1 .. Len(seq)} = S
+        /\ \A i, j \in 1 .. Len(seq) : i # j => seq[i] # seq[j]
 
 \* Calculate total stake in the system (Σ_all v ρ_v)
 TotalStake == 
