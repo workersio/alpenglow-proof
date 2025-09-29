@@ -78,7 +78,7 @@ FastPathPrecondition(s) ==
 THEOREM ProgressGuaranteePartialSynchrony ==
     ASSUME WindowLivenessGuarantee,
            \* Assumption 1 from whitepaper: Byzantine nodes < 20% stake
-           ByzantineStake * 100 < TotalStake * 20
+           CalculateStake(byzantineNodes) * 100 < TotalStake * 20
     PROVE \A s \in 1..MaxSlot : 
         (HonestStake * 100 > TotalStake * 60 /\ WindowReady(s)) => <>(WindowSlotFinalized(s))
 PROOF
