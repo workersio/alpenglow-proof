@@ -15,3 +15,4 @@ simple.cfg
 *.class
 hyper-tla
 .tlacache
+tlapm
