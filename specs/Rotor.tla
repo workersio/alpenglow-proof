@@ -97,12 +97,11 @@ LargeStakeholdersInNeeders(needers) == LargeStakeholders(needers)
 \* Exact deterministic count (capped by Γ) used to prefix‑assign bins.
 TotalDeterministicBinsExact(needers) ==
     LET large == LargeStakeholdersInNeeders(needers)
-        RECURSIVE SumDet(_)
-        SumDet(S) ==
+        SumDet[S \in SUBSET large] ==
             IF S = {} THEN 0
             ELSE LET v == CHOOSE x \in S : TRUE IN
-                 DeterministicBinCount(v) + SumDet(S \ {v})
-        total == SumDet(large)
+                 DeterministicBinCount(v) + SumDet[S \ {v}]
+        total == SumDet[large]
     IN IF total >= GammaTotalShreds THEN GammaTotalShreds ELSE total
 
 \* Remaining bins after deterministic assignments
@@ -171,11 +170,12 @@ PSPConstraint(bins, needers) ==
 \* but deliberately not required here to keep PSPConstraint minimal per audit.
 
 \* Counting sanity (readability lemmas)
-RECURSIVE SumBinCounts(_, _)
-SumBinCounts(bins, S) ==
-    IF S = {} THEN 0
-    ELSE LET v == CHOOSE x \in S : TRUE IN
-         Cardinality({ j \in DOMAIN bins : bins[j] = v }) + SumBinCounts(bins, S \ {v})
+SumBinCounts(bins, validatorSet) ==
+    LET SumHelper[S \in SUBSET validatorSet] ==
+            IF S = {} THEN 0
+            ELSE LET v == CHOOSE x \in S : TRUE IN
+                 Cardinality({ j \in DOMAIN bins : bins[j] = v }) + SumHelper[S \ {v}]
+    IN SumHelper[validatorSet]
 
 
 \* Combined structural constraints for whitepaper‑compliant bin assignments.

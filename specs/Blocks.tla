@@ -161,9 +161,8 @@ THEOREM CreateNotarFallbackVoteForBlockWellTyped ==
 \* Universe parameter `allBlocks` must contain the ancestry of b2 for completeness.
 IsAncestor(b1, b2, allBlocks) ==
     LET
-        \* Recursively follow parent links
-        RECURSIVE ReachableFrom(_)
-        ReachableFrom(b) ==
+        \* Recursively follow parent links using recursive function expression
+        ReachableFrom[b \in allBlocks] ==
             IF b = b1 THEN TRUE  \* Found the ancestor!
             ELSE IF b.hash = GenesisHash THEN FALSE  \* Hit genesis (explicit sentinel)
             ELSE 
@@ -171,8 +170,8 @@ IsAncestor(b1, b2, allBlocks) ==
                 LET parentBlocks == {p \in allBlocks : p.hash = b.parent}
                 IN IF parentBlocks = {} THEN FALSE
                    ELSE LET parent == CHOOSE p \in parentBlocks : TRUE
-                        IN ReachableFrom(parent)
-    IN b1 = b2 \/ ReachableFrom(b2)  \* A block is its own ancestor
+                        IN ReachableFrom[parent]
+    IN b1 = b2 \/ ReachableFrom[b2]  \* A block is its own ancestor
 
 \* Descendant is the inverse of ancestor (Def. 5 :363).
 IsDescendant(b1, b2, allBlocks) == 

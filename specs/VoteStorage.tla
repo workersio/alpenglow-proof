@@ -382,18 +382,17 @@ ShouldEmitParentReady(pool, slot, parentHash, parentSlot) ==
  * issuing a NotarFallbackVote for b.
  ***************************************************************************)
 \* Readability (audit 0013): centralize Def. 16 parent-gating logic.
-ParentFallbackReady(pool, slot, parentHash) ==
-    /\ IsFirstSlotOfWindow(slot)
-    \/ (\E ps \in Slots : ps < slot /\ HasNotarFallbackCert(pool, ps, parentHash))
-    \* Modeling note: Def. 16 refers to the parent’s notar-fallback cert.
-    \* Here we quantify over prior slots by blockHash because this helper is
-    \* used where parentSlot is not directly available; ShouldEmitParentReady
-    \* uses the precise (parentSlot, parentHash) pairing.
+ParentFallbackReady(pool, slot, parentSlot, parentHash) ==
+    IF IsFirstSlotOfWindow(slot)
+    THEN TRUE
+    ELSE /\ parentSlot \in Slots
+         /\ parentSlot < slot
+         /\ HasNotarFallbackCert(pool, parentSlot, parentHash)
 
-CanEmitSafeToNotar(pool, slot, blockHash, parentHash, alreadyVoted, votedForBlock) ==
+CanEmitSafeToNotar(pool, slot, blockHash, parentSlot, parentHash, alreadyVoted, votedForBlock) ==
     /\ alreadyVoted      \* Must have voted in slot
     /\ ~votedForBlock    \* But not for this block
-    /\ ParentFallbackReady(pool, slot, parentHash)
+    /\ ParentFallbackReady(pool, slot, parentSlot, parentHash)
     /\ LET notar == NotarStake(pool, slot, blockHash)
            skip == SkipStake(pool, slot)
        IN (MeetsThreshold(notar, 40)

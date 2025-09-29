@@ -653,7 +653,7 @@ EmitSafeToNotar ==
          /\ b \in blockAvailability[v]
          /\ LET alreadyVoted == HasState(validators[v], s, "Voted")
                 votedForB == VotedForBlock(validators[v], s, b.hash)
-            IN CanEmitSafeToNotar(validators[v].pool, s, b.hash, b.parent, alreadyVoted, votedForB)
+            IN CanEmitSafeToNotar(validators[v].pool, s, b.hash, b.slot - 1, b.parent, alreadyVoted, votedForB)
          /\ ~HasState(validators[v], s, "BadWindow") \* Prevents re-emitting after a fallback vote was cast
          /\ validators' = [validators EXCEPT ![v] = HandleSafeToNotar(@, b)]
     /\ UNCHANGED <<blocks, messages, byzantineNodes, unresponsiveNodes, time, finalized, blockAvailability, avail80Start, avail60Start>>

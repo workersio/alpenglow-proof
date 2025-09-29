@@ -65,23 +65,21 @@ DefaultThreshold  == 60
 TotalStake == 
     LET vals == DOMAIN StakeMap
     IN IF vals = {} THEN 0
-       ELSE LET RECURSIVE Sum(_)
-            Sum(S) == 
+       ELSE LET Sum[S \in SUBSET vals] == 
                 IF S = {} THEN 0
                 ELSE LET v == CHOOSE x \in S : TRUE
-                     IN StakeMap[v] + Sum(S \ {v})
-            IN Sum(vals)
+                     IN StakeMap[v] + Sum[S \ {v}]
+            IN Sum[vals]
 
 \* Calculate stake for a set of validators (Σ_{v ∈ set} ρ_v)
 CalculateStake(validatorSet) ==
     LET vals == validatorSet \cap DOMAIN StakeMap
     IN IF vals = {} THEN 0
-       ELSE LET RECURSIVE Sum(_)
-            Sum(S) == 
+       ELSE LET Sum[S \in SUBSET vals] == 
                 IF S = {} THEN 0
                 ELSE LET v == CHOOSE x \in S : TRUE
-                     IN StakeMap[v] + Sum(S \ {v})
-            IN Sum(vals)
+                     IN StakeMap[v] + Sum[S \ {v}]
+            IN Sum[vals]
 
 \* Get unique validators from a set of votes (enforce Def. 12 “count once”)
 UniqueValidators(votes) ==
