@@ -332,6 +332,16 @@ HandleParentReady(validator, slot, parentHash) ==
         \* term (s - first + 1) \in Nat \ {0}. With DeltaTimeout, DeltaBlock > 0
         \* and non-decreasing `clock`, all scheduled timeouts satisfy
         \* timeout > pre-call clock. See MainProtocol.TimeoutsInFuture.
+        \*
+        \* AUDIT NOTE (issues_claude.md §5):
+        \* Variable naming: The whitepaper Definition 17 (:609) uses:
+        \*   Timeout(i): clock() + Δ_timeout + (i - s + 1) · Δ_block
+        \* where `i` is the slot being scheduled and `s` is the window start.
+        \* The spec reverses this naming: `s` is the slot being scheduled (loop var)
+        \* and `first` is the window start. The formula is mathematically identical:
+        \*   Paper:  timeout(i) = clock + Δ_timeout + (i - s + 1) · Δ_block
+        \*   Spec:   timeout(s) = clock + DeltaTimeout + (s - first + 1) * DeltaBlock
+        \* Mapping: paper's `i` ↔ spec's `s`; paper's `s` ↔ spec's `first`.
         SetTimeouts[val \in ValidatorState, remainingSlots \in SUBSET windowSlots] ==
             IF remainingSlots = {} THEN val
             ELSE

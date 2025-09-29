@@ -329,8 +329,31 @@ AllCertificatesValid(certificates) ==
 
 
 \* Fast finalization implies a corresponding notarization with vote inclusion
-\* (Table 6 thresholds; §2.5 “fast ⇒ notar ⇒ fallback”). Intended domain:
-\* apply to Pool’s certificates[slot] sets.
+\* (Table 6 thresholds; §2.5 "fast ⇒ notar ⇒ fallback"). Intended domain:
+\* apply to Pool's certificates[slot] sets.
+\*
+\* AUDIT NOTE (issues_openai.md §3):
+\* The whitepaper (:534) states "if a correct node generated the Fast-Finalization
+\* Certificate, it also generated the Notarization Certificate" — this is a
+\* THRESHOLD implication (80% ⊇ 60%) for locally generated certificates.
+\* The subset requirement `notarCert.votes \subseteq fastCert.votes` is a
+\* STRENGTHENING that reflects the local generation case: when both certificates
+\* are constructed from the same local vote pool, the fast cert's votes (≥80%)
+\* necessarily include the votes used for the notar cert (≥60%).
+\*
+\* However, for network-learned certificates (received from other nodes), the
+\* subset relation is stricter than the whitepaper requires: two valid certificates
+\* for the same block might have been constructed from different vote subsets,
+\* and the subset relation could fail even though both meet their thresholds.
+\*
+\* We retain this strengthening because:
+\* 1. It's sound: any state satisfying it also satisfies the weaker threshold implication
+\* 2. It reflects the typical case: honest nodes that form fast certs will have
+\*    already formed notar certs from the same vote pool
+\* 3. It simplifies reasoning about certificate relationships in proofs
+\* If this becomes too restrictive for model checking, relax to threshold-only:
+\*   \E notarCert \in certificates : notarCert.type = "NotarizationCert"
+\*      /\ notarCert.slot = fastCert.slot /\ notarCert.blockHash = fastCert.blockHash
 FastPathImplication(certificates) ==
     \A fastCert \in certificates :
         fastCert.type = "FastFinalizationCert" =>

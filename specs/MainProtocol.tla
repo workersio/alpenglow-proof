@@ -133,6 +133,25 @@ UnresponsiveStakeOK ==
     /\ (CalculateStake(unresponsiveNodes) * 100) <= (TotalStake * 20)
     /\ (byzantineNodes \cap unresponsiveNodes) = {}
 
+(***************************************************************************
+ * ASSUMPTION 2 — extended crash tolerance (§1.2)
+ *
+ * Whitepaper refs
+ * - Assumption 2 statement: `alpenglow-whitepaper.md:122`.
+ *
+ * Explanation
+ * - Byzantine nodes < 20% stake (Assumption 1, also enforced separately)
+ * - Unresponsive/crashed nodes ≤ 20% stake (additional tolerance)
+ * - Byzantine and unresponsive sets are disjoint
+ * - Correct (responsive) nodes > 60% stake (derived from above)
+ * - This predicate explicitly groups all Assumption 2 requirements for
+ *   auditability and use in liveness properties (issues_claude.md §15).
+ ***************************************************************************)
+Assumption2OK ==
+    /\ ByzantineStakeOK
+    /\ UnresponsiveStakeOK
+    /\ (CalculateStake(CorrectNodes) * 100) > (TotalStake * 60)
+
 \* Repair trigger (Algorithm 4; §2.8). Include fast-finalization to cover fast-only
 \* implementations. See also Blokstor repair mention: `alpenglow-whitepaper.md:470`.
 NeedsBlockRepair(pool, block) ==
@@ -641,11 +660,22 @@ EmitBlockNotarized ==
  *   • Formula (page 22): notar(b) ≥ 40% OR (skip(s)+notar(b) ≥ 60% AND notar(b) ≥ 20%).
  *
  * Explanation
- * - When that inequality holds and the node hasn’t already voted to notarize b
+ * - When that inequality holds and the node hasn't already voted to notarize b
  *   in slot s, emit the event and cast notar-fallback accordingly (Alg.1).
  * - We pass the full block `b` into the handler and use the typed wrapper
  *   to ensure slot–hash pairing by construction; creation occurs only under
  *   the CanEmitSafeToNotar guard above (aid to model checking).
+ *
+ * AUDIT NOTE (issues_claude.md §3):
+ * Re-emission suppression: The guard `~HasState(validator, s, "BadWindow")`
+ * prevents emitting SafeToNotar multiple times per slot. Algorithm 1 (:656-:660)
+ * checks `ItsOver ∉ state[s]` and sets `BadWindow` after emission, ensuring
+ * at-most-once semantics through atomicity. The spec's BadWindow check is a
+ * sound strengthening that makes the at-most-once property explicit: once any
+ * fallback vote is cast (setting BadWindow), no further SafeToNotar/SafeToSkip
+ * events are emitted for that slot. This prevents redundant event processing
+ * and aligns with the whitepaper's intent that fallback paths are terminal for
+ * the slot's voting lifecycle.
  ***************************************************************************)
 EmitSafeToNotar ==
     /\ \E v \in CorrectNodes, s \in 1..MaxSlot, b \in blocks :
@@ -654,7 +684,7 @@ EmitSafeToNotar ==
          /\ LET alreadyVoted == HasState(validators[v], s, "Voted")
                 votedForB == VotedForBlock(validators[v], s, b.hash)
             IN CanEmitSafeToNotar(validators[v].pool, s, b.hash, b.slot - 1, b.parent, alreadyVoted, votedForB)
-         /\ ~HasState(validators[v], s, "BadWindow") \* Prevents re-emitting after a fallback vote was cast
+         /\ ~HasState(validators[v], s, "BadWindow") \* Prevents re-emitting after a fallback vote was cast (see audit note above)
          /\ validators' = [validators EXCEPT ![v] = HandleSafeToNotar(@, b)]
     /\ UNCHANGED <<blocks, messages, byzantineNodes, unresponsiveNodes, time, finalized, blockAvailability, avail80Start, avail60Start>>
 
@@ -666,25 +696,29 @@ EmitSafeToNotar ==
  *   • Formula (page 22): skip(s) + Σ notar(b) − max_b notar(b) ≥ 40%.
  *
  * Explanation
- * - When that inequality holds and the node hasn’t already voted to skip s,
+ * - When that inequality holds and the node hasn't already voted to skip s,
  *   emit SafeToSkip(s) and cast a skip-fallback vote (Alg.1).
+ *
+ * AUDIT NOTE (issues_claude.md §3):
+ * Re-emission suppression: The guard `~HasState(validator, s, "BadWindow")`
+ * prevents emitting SafeToSkip multiple times per slot. Algorithm 1 (:662-:666)
+ * checks `ItsOver ∉ state[s]` and sets `BadWindow` after emission. The spec's
+ * BadWindow check makes the at-most-once property explicit and aligns with the
+ * whitepaper's intent that fallback events mark the slot as terminal for normal
+ * voting. See parallel reasoning in EmitSafeToNotar audit note above.
  ***************************************************************************)
 EmitSafeToSkip ==
     /\ \E v \in CorrectNodes, s \in 1..MaxSlot :
          /\ LET alreadyVoted == HasState(validators[v], s, "Voted")
                 \* Note: `SkipVote` refers to the initial skip vote (not skip-fallback).
                 \* Repeated fallback emission is suppressed by the `BadWindow` guard below.
-                \* Suppression rationale: Algorithm 1 (lines ~21–25) emits SafeToSkip
-                \* at most once per window per node; Algorithm 2 (TRYSKIPWINDOW,
-                \* lines ~22–27) sets BadWindow when any fallback or skip vote is
-                \* cast. The guards here mirror that behaviour.
                 votedSkip == 
                     \E vt \in GetVotesForSlot(validators[v].pool, s) :
                         /\ vt.validator = v
                         /\ vt.type = "SkipVote"
             IN CanEmitSafeToSkip(validators[v].pool, s, alreadyVoted, votedSkip)
          /\ ~HasSkipCert(validators[v].pool, s) \* Avoid redundant skip-fallback voting when skip cert already exists
-         /\ ~HasState(validators[v], s, "BadWindow") \* Prevents re-emitting after a fallback vote was cast
+         /\ ~HasState(validators[v], s, "BadWindow") \* Prevents re-emitting after a fallback vote was cast (see audit note above)
          /\ validators' = [validators EXCEPT ![v] = HandleSafeToSkip(@, s)]
     /\ UNCHANGED <<blocks, messages, byzantineNodes, unresponsiveNodes, time, finalized, blockAvailability, avail80Start, avail60Start>>
 
@@ -910,16 +944,102 @@ CertificateNonEquivocation ==
             c1.blockHash = c2.blockHash
 
 (***************************************************************************
+ * LEMMA 21 — fast-finalization property (§2.9)
+ *
+ * Whitepaper refs
+ * - Lemma 21 statement: `alpenglow-whitepaper.md:824`.
+ *
+ * Explanation
+ * - If a block b is fast-finalized (≥80% NotarVote), then in the same slot:
+ *   (i) no other block b' can be notarized
+ *   (ii) no other block b' can be notarized-fallback
+ *   (iii) there cannot exist a skip certificate
+ * - This is subsumed by SafetyInvariant and NoConflictingFinalization but
+ *   stated explicitly per audit recommendation (issues_claude.md §14).
+ ***************************************************************************)
+Lemma21_FastFinalizationProperty ==
+    \A v \in CorrectNodes :
+    \A s \in 1..MaxSlot :
+        LET pool == validators[v].pool
+            fastCerts == {c \in pool.certificates[s] : c.type = "FastFinalizationCert"}
+        IN \A fc \in fastCerts :
+            LET h == fc.blockHash
+                otherNotarCerts == {c \in pool.certificates[s] :
+                    /\ c.type \in {"NotarizationCert", "NotarFallbackCert"}
+                    /\ c.blockHash # h}
+                skipCerts == {c \in pool.certificates[s] : c.type = "SkipCert"}
+            IN /\ otherNotarCerts = {}  \* (i) and (ii)
+               /\ skipCerts = {}        \* (iii)
+
+(***************************************************************************
  * LEMMA 22 — no mixing finalization with fallback in the same slot
  *
  * Explanation
  * - Validator-local mutual exclusion: ItsOver and BadWindow never co-exist
- *   in a slot. Encoded via VotorCore’s per-validator predicates.
+ *   in a slot. Encoded via VotorCore's per-validator predicates.
  *************************************************************************)
 NoMixFinalizationAndFallback ==
     \A v \in CorrectNodes :
         Lemma22_ItsOverImpliesNotBadWindow(validators[v]) /\
         Lemma22_BadWindowImpliesNotItsOver(validators[v])
+
+(***************************************************************************
+ * LEMMA 23 — > 40% correct stake prevents conflicting notarizations
+ *
+ * Whitepaper refs
+ * - Lemma 23 statement: `alpenglow-whitepaper.md:851`.
+ *
+ * Explanation
+ * - If correct nodes with >40% stake cast notarization votes for block b in
+ *   slot s, no other block can be notarized in slot s.
+ * - This is subsumed by UniqueNotarization and vote uniqueness (Lemma 20),
+ *   but stated explicitly per audit recommendation (issues_claude.md §14).
+ ***************************************************************************)
+Lemma23_FortyPercentPreventsConflictingNotar ==
+    \A v \in CorrectNodes :
+    \A s \in 1..MaxSlot :
+        LET pool == validators[v].pool
+            \* For each block hash h with notar votes from correct nodes
+            notarVotesForHash(h) == {vote \in GetVotesForSlot(pool, s) :
+                /\ IsInitialNotarVote(vote)
+                /\ vote.blockHash = h
+                /\ vote.validator \in CorrectNodes}
+            \* Check: if any hash h has >40% correct stake, no other hash has ≥60%
+            hashesWithOver40 == {h \in BlockHashes :
+                MeetsThreshold(StakeFromVotes(notarVotesForHash(h)), 41)}
+        IN \A h1, h2 \in hashesWithOver40 : h1 = h2  \* At most one hash has >40%
+
+(***************************************************************************
+ * LEMMA 26 — slow-finalization property (§2.9)
+ *
+ * Whitepaper refs
+ * - Lemma 26 statement: `alpenglow-whitepaper.md:872`.
+ *
+ * Explanation
+ * - If a block b is slow-finalized (≥60% FinalVote + notarization), then:
+ *   (i) no other block b' can be notarized
+ *   (ii) no other block b' can be notarized-fallback
+ *   (iii) there cannot exist a skip certificate
+ * - This is subsumed by SafetyInvariant and FinalizedImpliesNotarized but
+ *   stated explicitly per audit recommendation (issues_claude.md §14).
+ ***************************************************************************)
+Lemma26_SlowFinalizationProperty ==
+    \A v \in CorrectNodes :
+    \A s \in 1..MaxSlot :
+        LET pool == validators[v].pool
+            finalizationCerts == {c \in pool.certificates[s] : c.type = "FinalizationCert"}
+        IN \A fc \in finalizationCerts :
+            \* Finalization cert implies unique notarized block (Lemma 24+25)
+            LET notarCerts == {c \in pool.certificates[s] : c.type = "NotarizationCert"}
+            IN notarCerts # {} =>
+                LET h == (CHOOSE c \in notarCerts : TRUE).blockHash
+                    otherNotarCerts == {c \in pool.certificates[s] :
+                        /\ c.type \in {"NotarizationCert", "NotarFallbackCert"}
+                        /\ c.blockHash # h}
+                    skipCerts == {c \in pool.certificates[s] : c.type = "SkipCert"}
+                IN /\ Cardinality(notarCerts) = 1  \* Unique notarization (Lemma 24)
+                   /\ otherNotarCerts = {}         \* (i) and (ii)
+                   /\ skipCerts = {}               \* (iii)
 
 (***************************************************************************
  * SKIP VS BLOCK-CERT EXCLUSION — mutual exclusion per slot
@@ -1203,14 +1323,16 @@ Liveness60Responsive == Progress
  * CRASH-TOLERANT LIVENESS (≤20% non-responsive stake)
  *
  * Whitepaper refs
- * - Assumption 2 (extra crash tolerance): alpenglow-whitepaper.md:121 (page 5)
- *   “Byzantine < 20%, up to 20% crashed, remaining > 60% correct.”
+ * - Assumption 2 (extra crash tolerance): alpenglow-whitepaper.md:122 (page 5)
+ *   "Byzantine < 20%, up to 20% crashed, remaining > 60% correct."
  * - Liveness under partial synchrony (Thm. 2): alpenglow-whitepaper.md:1045.
  *
  * Explanation
- * - After GST, provided ByzantineStakeOK and UnresponsiveStakeOK hold (Assumptions
- *   1 and 2), every correct/responsive validator eventually finalizes a block
- *   with a strictly higher slot than its current maximum (i.e., makes progress).
+ * - After GST, provided Assumption2OK holds (Byzantine < 20%, unresponsive ≤ 20%,
+ *   correct > 60% stake), every correct/responsive validator eventually finalizes
+ *   a block with a strictly higher slot than its current maximum (i.e., makes progress).
+ * - Assumption2OK is enforced in Invariant, so this property is checked under
+ *   the extended crash tolerance model.
  ***************************************************************************)
 CrashToleranceLiveness20 ==
     (time >= GST) ~>
@@ -1228,11 +1350,33 @@ CrashToleranceLiveness20 ==
  * Whitepaper refs
  * - Theorem 2 statement: `alpenglow-whitepaper.md:1045`.
  * - No pre-GST timeouts premise: captured via NoTimeoutsBeforeGST; see §2.10.
+ *
+ * AUDIT NOTE (issues_openai.md §2):
+ * Theorem 2's antecedent includes "Rotor succeeds for all slots in the window."
+ * The spec models Rotor success via nondeterministic actions (RotorDisseminateSuccess)
+ * with weak fairness (Fairness clause at line ~765), ensuring eventual success
+ * for correct leaders after GST. The WindowRotorSuccessful predicate below
+ * makes this assumption explicit for clarity and traceability.
  ***************************************************************************)
 NoTimeoutsBeforeGST(startSlot) ==
     \A v \in CorrectNodes :
         \A i \in (WindowSlots(startSlot) \cap 1..MaxSlot) :
             validators[v].timeouts[i] = 0 \/ validators[v].timeouts[i] >= GST
+
+\* Helper predicate: Rotor succeeds for all slots in the window (Theorem 2 antecedent)
+\* NOTE: This is a model-checking helper. In practice, success is ensured by:
+\* 1. Correct leader (Leader(s) \in CorrectNodes)
+\* 2. Sufficient relay stake (Lemma 7, κ > 5/3 and Definition 6 conditions)
+\* 3. Weak fairness on RotorDisseminateSuccess after GST (Fairness clause)
+\* When checking WindowFinalization liveness, TLC's fairness ensures this predicate
+\* eventually holds through the RotorDisseminateSuccess action being taken for
+\* each slot's block in the window.
+WindowRotorSuccessful(startSlot) ==
+    \A i \in (WindowSlots(startSlot) \cap 1..MaxSlot) :
+        \E b \in blocks :
+            /\ b.slot = i
+            /\ b.leader = Leader(startSlot)
+            /\ (\A v \in CorrectNodes : b \in blockAvailability[v])
 
 WindowFinalizedState(s) ==
     \A v \in CorrectNodes :
@@ -1244,8 +1388,11 @@ WindowFinalizedState(s) ==
 
 (*
  * Commentary: Under the stated premises (correct window leader, no pre-GST
- * timeouts, and post-GST delivery/fairness), every slot in the leader’s
- * window is eventually finalized by all correct nodes (Thm. 2).
+ * timeouts, Rotor success for all window slots, and post-GST delivery/fairness),
+ * every slot in the leader's window is eventually finalized by all correct nodes
+ * (Thm. 2). The fairness constraints in Spec ensure WindowRotorSuccessful
+ * eventually holds for correct leaders after GST, so it need not appear explicitly
+ * in the temporal formula below, but is documented here for audit traceability.
  *)
 \* Window-level liveness (quantified form added below)
 WindowFinalization(s) ==
@@ -1451,6 +1598,10 @@ Invariant ==
     /\ GlobalNotarizationUniqueness
     /\ FinalizedImpliesNotarized
     /\ CertificateNonEquivocation
+    /\ Lemma21_FastFinalizationProperty
+    /\ NoMixFinalizationAndFallback
+    /\ Lemma23_FortyPercentPreventsConflictingNotar
+    /\ Lemma26_SlowFinalizationProperty
     /\ PoolSkipVsBlockExclusion
     /\ HonestNonEquivocation
     /\ TransitCertificatesValid
@@ -1459,9 +1610,8 @@ Invariant ==
     /\ PoolFastPathImplication
     /\ PoolFinalizationImpliesNotarizationPresent
     /\ CertificateBlockProvenance
-    /\ (CalculateStake(byzantineNodes) * 100 < TotalStake * 20)
-    /\ (CalculateStake(unresponsiveNodes) * 100 <= TotalStake * 20)
-    /\ (byzantineNodes \cap unresponsiveNodes) = {}
+    /\ ByzantineStakeOK
+    /\ Assumption2OK
     /\ PoolMultiplicityOK
     /\ PoolCertificateUniqueness
     /\ PoolCertificatesValid
@@ -1488,7 +1638,6 @@ Invariant ==
     /\ VotedNotarTagConsistency
     /\ BadWindowWitness
     /\ ItsOverWitness
-    /\ NoMixFinalizationAndFallback
     /\ TotalNotarStakeSanity
     /\ BoundedFinalization80
     /\ BoundedFinalization60

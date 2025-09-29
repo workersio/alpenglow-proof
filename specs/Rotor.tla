@@ -157,17 +157,29 @@ FailureResilient(sample) ==
 \*  - domain(bins) = 1..Γ and values in `needers`
 \*  - multiplicity(bins, v) ≥ ⌊ρ_v·Γ⌋ = DeterministicBinCount(v)
 \*  - Steps 2–3 remain unconstrained beyond membership, matching §3.1.
+\*
+\* AUDIT NOTE (issues_claude.md §1, issues_openai.md §1):
+\* The whitepaper Definition 46 Step 1 prescribes EXACT multiplicities:
+\* "fill ⌊ρᵢΓ⌋ bins with that node" (:1156). The constraint here uses ">="
+\* (lower bound) rather than "=" (exact) for two reasons:
+\*  1. Modeling flexibility: allows reasoning about partial/approximate selections
+\*  2. Conservative abstraction: ">=" is weaker than "=", so any property that
+\*     holds under ">=" also holds under the stronger "=" constraint
+\*  3. Actual construction (TotalDeterministicBinsExact, RemainingBins) enforces
+\*     exact multiplicities per Definition 46, so this is a sound abstraction
+\* The lower bound suffices for safety properties while allowing model-checking
+\* scenarios where exact bin counts cannot be determined statically.
 PSPConstraint(bins, needers) == 
     /\ DOMAIN bins = 1..GammaTotalShreds
     /\ \A j \in DOMAIN bins : bins[j] \in needers
     /\ \A v \in needers :
           Cardinality({ j \in DOMAIN bins : bins[j] = v }) >= DeterministicBinCount(v)
 
-\* Optional stronger check (documented): If desired, one can additionally
-\* require that the deterministic prefix of bins 1..TotalDeterministicBinsExact(needers)
-\* matches exact multiplicities, leaving the remaining bins unconstrained
-\* beyond membership. This is already enforced by PSPBinAssignment's construction
-\* but deliberately not required here to keep PSPConstraint minimal per audit.
+\* Optional stronger check: If desired, one can additionally require that the
+\* deterministic prefix of bins 1..TotalDeterministicBinsExact(needers) matches
+\* exact multiplicities (enforcing Definition 46 Step 1 literally), leaving the
+\* remaining bins unconstrained beyond membership per Steps 2-3. This stronger
+\* version would replace ">=" with "=" for bins in the deterministic prefix.
 
 \* Counting sanity (readability lemmas)
 SumBinCounts(bins, validatorSet) ==
@@ -241,14 +253,31 @@ RotorSelect(block, needers, nextLeader) ==
  * ROTOR SUCCESS — DISTINCT RELAYS VIEW (Def. 6 :414)
  * Leader correct AND at least γ distinct relays are correct.
  * Set‑based approximation; under‑counts compared to by‑bin multiplicity.
+ *
+ * AUDIT NOTE (issues_claude.md §2, issues_openai.md implicit):
+ * Whitepaper Definition 6 (:414) states "at least γ correct relays" without
+ * explicitly specifying whether this means γ DISTINCT validators or γ BIN
+ * ASSIGNMENTS (counting multiplicity). This predicate provides the distinct
+ * interpretation for reference, but it under-counts when PS-P assigns the
+ * same validator to multiple bins. NOT USED in the main protocol spec.
  ***************************************************************************)
 RotorSuccessful(leader, relays, correctNodes) ==
     /\ leader \in correctNodes
     /\ Cardinality(relays \cap correctNodes) >= GammaDataShreds
 
 (***************************************************************************
- * ROTOR SUCCESS — BY-BIN VIEW (Def. 6 :414)
+ * ROTOR SUCCESS — BY-BIN VIEW (Def. 6 :414) — CANONICAL INTERPRETATION
  * Counts multiplicity over the Γ bin assignments, matching §2.2 text.
+ *
+ * AUDIT NOTE (issues_claude.md §2):
+ * This is the canonical interpretation used in MainProtocol (line ~452).
+ * Rationale: Rotor uses erasure coding with Γ total bins and γ-out-of-Γ
+ * reconstruction (:382-:385). Each bin corresponds to one shred. PS-P (Def. 46)
+ * explicitly allows a single validator to be assigned to multiple bins in
+ * Step 1 (deterministic allocation ⌊ρᵢΓ⌋ bins per large stakeholder).
+ * Therefore, "γ correct relays" means "γ bin assignments to correct validators"
+ * to match the erasure coding semantics: we need γ shreds from correct nodes
+ * to reconstruct, and a validator assigned to k bins contributes k shreds.
  ***************************************************************************)
 CorrectAssignmentsCount(bins, correctNodes) ==
     Cardinality({ j \in DOMAIN bins : bins[j] \in correctNodes })
