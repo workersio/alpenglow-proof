@@ -31,7 +31,7 @@ ReceivesBlockInSlot(validator, slot) ==
     \E b \in blocks : 
         /\ b.slot = slot
         /\ validator \in CorrectNodes
-        /\ blockAvailability[validator][b]
+        /\ b \in blockAvailability[validator]
 
 WindowReady(s) ==
     /\ s \in 1..MaxSlot
@@ -183,11 +183,11 @@ PROOF
 <1>6. \E c1 \in validators[v1].pool.certificates[s] :
         /\ c1.type = "NotarizationCert"
         /\ c1.blockHash = b1.hash
-      BY <1>4 DEF HasNotarizationCert
+      BY <1>4 DEF HasNotarizationCert, HasBlockCertOfType
 <1>7. \E c2 \in validators[v2].pool.certificates[s] :
         /\ c2.type = "NotarizationCert"
         /\ c2.blockHash = b2.hash
-      BY <1>5 DEF HasNotarizationCert
+      BY <1>5 DEF HasNotarizationCert, HasBlockCertOfType
 <1>8. b1.hash = b2.hash
       BY <1>3, <1>6, <1>7 \* GlobalNotarizationUniqueness ensures agreement
 <1>9. QED BY <1>8
