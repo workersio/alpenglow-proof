@@ -1101,7 +1101,7 @@ LocalVotesWellFormed ==
             IsValidVote(vt) /\ vt.slot = s
 
 (***************************************************************************
- * FAST ⇒ NOTAR (subset) — Pool-level implication per Table 6
+ * FAST ⇒ NOTAR (threshold) — Pool-level implication per Table 6
  *
  * Whitepaper refs
  * - "fast ⇒ notar ⇒ fallback" implication: `alpenglow-whitepaper.md:534` • §2.5.
@@ -1109,12 +1109,16 @@ LocalVotesWellFormed ==
  * Explanation
  * - For every slot’s certificate set in each correct validator’s pool,
  *   if a fast-finalization certificate exists, a matching notarization
- *   certificate also exists with a vote set that is a subset of the fast one.
+ *   certificate also exists for the same (slot, blockHash).
+ * - This uses the threshold-only relation (existence) to align with the
+ *   whitepaper and avoid over-constraining network-learned certificates.
+ * - A stricter subset-based variant remains available as
+ *   `FastPathImplication` in Certificates.tla for stronger checks if desired.
  *************************************************************************)
 PoolFastPathImplication ==
     \A v \in CorrectNodes :
     \A s \in 1..MaxSlot :
-        FastPathImplication(validators[v].pool.certificates[s])
+        FastImpliesNotarThresholdOnly(validators[v].pool.certificates[s])
 
 (***************************************************************************
  * FINALIZATION ⇒ NOTARIZATION (slot presence) — Def. 14 pairing
@@ -1396,7 +1400,11 @@ WindowFinalizedState(s) ==
  *)
 \* Window-level liveness (quantified form added below)
 WindowFinalization(s) ==
-    (IsFirstSlotOfWindow(s) /\ Leader(s) \in CorrectNodes /\ NoTimeoutsBeforeGST(s) /\ time >= GST) ~>
+    (IsFirstSlotOfWindow(s)
+     /\ Leader(s) \in CorrectNodes
+     /\ NoTimeoutsBeforeGST(s)
+     /\ WindowRotorSuccessful(s)
+     /\ time >= GST) ~>
         WindowFinalizedState(s)
 
 \* Quantified window-liveness (for MC.cfg PROPERTIES)

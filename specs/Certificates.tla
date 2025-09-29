@@ -363,6 +363,19 @@ FastPathImplication(certificates) ==
             /\ notarCert.blockHash = fastCert.blockHash
             /\ notarCert.votes \subseteq fastCert.votes
 
+\* Threshold-only variant aligned with whitepaper (:534): the existence of a
+\* notarization certificate for the same (slot, blockHash) is sufficient,
+\* without requiring set inclusion between vote sets. This matches scenarios
+\* where certificates are learned from the network and may be built from
+\* different valid subsets of NotarVotes.
+FastImpliesNotarThresholdOnly(certificates) ==
+    \A fastCert \in certificates :
+        fastCert.type = "FastFinalizationCert" =>
+        \E notarCert \in certificates :
+            /\ notarCert.type = "NotarizationCert"
+            /\ notarCert.slot = fastCert.slot
+            /\ notarCert.blockHash = fastCert.blockHash
+
 \* Skip vs Block-certificate mutual exclusion (per whitepaper intent):
 \* No slot’s certificate set may contain both a SkipCert and any
 \* block-related certificate (Notarization, NotarFallback, FastFinalization).

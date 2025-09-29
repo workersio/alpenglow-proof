@@ -181,6 +181,14 @@ PSPConstraint(bins, needers) ==
 \* remaining bins unconstrained beyond membership per Steps 2-3. This stronger
 \* version would replace ">=" with "=" for bins in the deterministic prefix.
 
+PSPConstraintExact(bins, needers) ==
+    /\ DOMAIN bins = 1..GammaTotalShreds
+    /\ \A j \in DOMAIN bins : bins[j] \in needers
+    /\ LET d == TotalDeterministicBinsExact(needers)
+       IN /\ (\A v \in needers :
+                 Cardinality({ j \in 1..d : bins[j] = v }) = DeterministicBinCount(v))
+          /\ (\A j \in (d+1)..GammaTotalShreds : bins[j] \in needers)
+
 \* Counting sanity (readability lemmas)
 SumBinCounts(bins, validatorSet) ==
     LET SumHelper[S \in SUBSET validatorSet] ==
