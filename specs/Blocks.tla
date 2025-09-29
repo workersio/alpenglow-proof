@@ -98,9 +98,6 @@ IsValidBlock(b) ==
 \* Two different blocks for the same slot (safety lemmas 23–24):
 \* - Used to express and rule out slot-level conflicts via certificates.
 \* - See §2.4 Lemma 23/24 and Theorem 1 (single chain).
-ConflictingBlocks(b1, b2) ==
-    /\ b1.slot = b2.slot     \* Same slot
-    /\ b1.hash # b2.hash     \* Different blocks!
 
 \* Whitepaper refs: slots and leaders (§1.1 :53), hashing (Def. 4 :357),
 \* uniqueness in notarization/finalization (Lemma 24 :855, Thm. 1 :930).
@@ -112,6 +109,41 @@ ConflictingBlocks(b1, b2) ==
 ValidParentChild(parent, child) ==
     /\ parent.hash = child.parent   \* Child references parent correctly
     /\ parent.slot < child.slot     \* Parent comes before child
+
+\* ============================================================================
+\* VOTE HELPERS (block-typed wrappers)
+\* ============================================================================
+
+(***************************************************************************
+ * Create a notarization vote for a given block. This wrapper preserves the
+ * intended slot–hash pairing by construction and avoids accidental mismatch
+ * at call sites.
+ *
+ * Note: This is a typed convenience; it relies on IsValidBlock(b) for
+ * well-formedness, and on Messages.IsValidVote for vote validity checks.
+ ***************************************************************************)
+CreateNotarVoteForBlock(v, b) ==
+    CreateNotarVote(v, b.slot, b.hash)
+
+\* Well-formedness lemma: a notar-vote constructed for a valid block is a
+\* valid vote (content-only; signatures are abstracted).
+THEOREM CreateNotarVoteForBlockWellTyped ==
+    \A v \in Validators, b \in Block :
+        IsValidBlock(b) => IsValidVote(CreateNotarVoteForBlock(v, b))
+
+(***************************************************************************
+ * Create a notar-fallback vote for a given block. Like the notar wrapper,
+ * this preserves the slot–hash pairing and avoids call‑site mismatches.
+ * Signatures are abstracted; only logical content matters (see §1.6).
+ ***************************************************************************)
+CreateNotarFallbackVoteForBlock(v, b) ==
+    CreateNotarFallbackVote(v, b.slot, b.hash)
+
+\* Well-formedness lemma: a notar-fallback vote constructed for a valid
+\* block is a valid vote (content-only; signatures are abstracted).
+THEOREM CreateNotarFallbackVoteForBlockWellTyped ==
+    \A v \in Validators, b \in Block :
+        IsValidBlock(b) => IsValidVote(CreateNotarFallbackVoteForBlock(v, b))
 
 \* ============================================================================
 \* ANCESTRY RELATIONSHIPS (whitepaper §2.1, Def. 5; safety §2.6/Thm. 1)
@@ -224,18 +256,10 @@ THEOREM FirstSlotOfWindowInSlots ==
 \* Ordering-sensitive operations rely on the slot field or ancestry relations.
 
 \* Query whether a chain has a block at a specific slot
-HasBlockAtSlot(slot, chain) == \E b \in chain : b.slot = slot
 
 \* Select the (unique) block at a specific slot in a chain.
-\* Precondition: HasBlockAtSlot(slot, chain). If multiple blocks exist in the
-\* set at the same slot, this CHOOSE is nondeterministic; use only for chains
-\* that are unique-per-slot or after enforcing such an invariant.
-BlockAtSlot(slot, chain) == CHOOSE b \in chain : b.slot = slot
 
 \* Complete chain (ancestors) from genesis to b (Def. 5 :363).
-GetChain(b, allBlocks) ==
-    GetAncestors(b, allBlocks)
-    \* Precondition: `allBlocks` contains the ancestry of `b` (e.g., finalized).
 
 \* Select the tip (maximum-slot element) of a non-empty chain
 Tip(chain) == CHOOSE x \in chain : \A y \in chain : x.slot >= y.slot

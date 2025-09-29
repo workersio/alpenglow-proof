@@ -169,8 +169,9 @@ CanCreateNotarizationCert(votes, slot, blockHash) ==
  *   NotarFallbackVote from the same validator are present.
  ***************************************************************************)
 CanCreateNotarFallbackCert(votes, slot, blockHash) ==
-    LET relevantVotes == VotesFor(votes, slot, blockHash,
-                                  {"NotarVote", "NotarFallbackVote"})
+    LET relevantVotes == {v \in votes :
+        /\ v.slot = slot
+        /\ IsVoteForBlock(v, blockHash)}
     IN MeetsThreshold(StakeFromVotes(relevantVotes), DefaultThreshold)
 
 (***************************************************************************
@@ -239,9 +240,7 @@ CreateNotarFallbackCert(votes, slot, blockHash) ==
     [type |-> "NotarFallbackCert",
      slot |-> slot,
      blockHash |-> blockHash,
-     votes |-> {v \in votes : 
-        v.type \in {"NotarVote", "NotarFallbackVote"} /\ 
-        v.slot = slot /\ v.blockHash = blockHash}]
+     votes |-> {v \in votes : /\ v.slot = slot /\ IsVoteForBlock(v, blockHash)}]
 
 \* PRECONDITIONS (documentation):
 \* - votes \subseteq Vote; slot \in Slots (Messages.tla typing);
@@ -278,7 +277,7 @@ IsValidCertificate(cert) ==
                [] cert.type = "NotarizationCert" ->
                      VotesFor(cert.votes, cert.slot, cert.blockHash, {"NotarVote"})
                [] cert.type = "NotarFallbackCert" ->
-                     VotesFor(cert.votes, cert.slot, cert.blockHash, {"NotarVote", "NotarFallbackVote"})
+                     {v \in cert.votes : /\ v.slot = cert.slot /\ IsVoteForBlock(v, cert.blockHash)}
                [] cert.type = "SkipCert" ->
                      VotesFor(cert.votes, cert.slot, NoBlock, {"SkipVote", "SkipFallbackVote"})
                [] cert.type = "FinalizationCert" ->
@@ -313,96 +312,13 @@ CertificateWellFormed(cert) ==
                [] cert.type = "NotarizationCert" ->
                      VotesFor(cert.votes, cert.slot, cert.blockHash, {"NotarVote"})
                [] cert.type = "NotarFallbackCert" ->
-                     VotesFor(cert.votes, cert.slot, cert.blockHash, {"NotarVote", "NotarFallbackVote"})
+                     {v \in cert.votes : /\ v.slot = cert.slot /\ IsVoteForBlock(v, cert.blockHash)}
                [] cert.type = "SkipCert" ->
                      VotesFor(cert.votes, cert.slot, NoBlock, {"SkipVote", "SkipFallbackVote"})
                [] cert.type = "FinalizationCert" ->
                      VotesFor(cert.votes, cert.slot, NoBlock, {"FinalVote"})
                [] OTHER -> {}
     IN cert.votes \subseteq RelevantVotes
-
-\* ============================================================================
-\* CERTIFICATE PROPERTIES AND IMPLICATIONS
-\* ============================================================================
-
-(***************************************************************************
- * IMPORTANT IMPLICATION (whitepaper §2.4–§2.5):
- * - Table 6 thresholds imply that if a node can construct the
- *   Fast-Finalization Certificate (80%), it can also construct the
- *   Notarization Certificate (60%). The paper states this explicitly in §2.5
- *   (“fast ⇒ notar ⇒ fallback”).
- * Scope/assumption: The subset relation captures what a single node’s Pool
- * would produce from a consistent local view in slot s. Different nodes may
- * include different concrete vote sets due to timing, but thresholds coexist.
- ***************************************************************************)
-FastFinalizationImpliesNotarization(fastCert, notarCert) ==
-    /\ fastCert.type = "FastFinalizationCert"
-    /\ notarCert.type = "NotarizationCert"
-    /\ fastCert.slot = notarCert.slot
-    /\ fastCert.blockHash = notarCert.blockHash
-    => notarCert.votes \subseteq fastCert.votes
-
-(***************************************************************************
- * IMPLICATION (cascade): Notarization implies Notar-Fallback (Table 6; §2.5)
- * If a NotarizationCert exists for (slot, block), the NotarFallbackCert for
- * the same (slot, block) is also constructible (60% threshold holds either way).
- ***************************************************************************)
-NotarizationImpliesFallback(notarCert, fallbackCert) ==
-    /\ notarCert.type = "NotarizationCert"
-    /\ fallbackCert.type = "NotarFallbackCert"
-    /\ notarCert.slot = fallbackCert.slot
-    /\ notarCert.blockHash = fallbackCert.blockHash
-
-(***************************************************************************
- * SANITY PROPERTY: Fast path excludes fallback votes.
- * Enforced by constructors; IsValidCertificate computes stake from the
- * relevant NotarVote subset, ignoring any extraneous votes.
- ***************************************************************************)
-FastFinalizationVotesAreNotar(cert) ==
-    cert.type = "FastFinalizationCert" =>
-    \A v \in cert.votes : v.type = "NotarVote"
-
-(***************************************************************************
- * LEMMA (documentation): Constructor validity under guard.
- * If the Notar-Fallback guard holds for (votes, s, b), then creating the
- * certificate with those votes yields a valid certificate. This matches
- * Pool behavior (§2.5, Def. 13) when thresholds are met.
- ***************************************************************************)
-FallbackConstructorValidUnderGuard(votes, s, b) ==
-    CanCreateNotarFallbackCert(votes, s, b)
-        => IsValidCertificate(CreateNotarFallbackCert(votes, s, b))
-
-(***************************************************************************
- * LEMMA (readability): Notarization guard implies Notar-Fallback guard.
- * Matches the paper’s implication chain (80% ⇒ 60% notar ⇒ 60% fallback;
- * §2.4–§2.5).
- ***************************************************************************)
-NotarizationGuardImpliesFallbackGuard(votes, s, b) ==
-    CanCreateNotarizationCert(votes, s, b)
-        => CanCreateNotarFallbackCert(votes, s, b)
-
-\* Check if two certificates conflict (shouldn't happen!)
-\* Note: This predicate treats conflicts only within the same certificate type.
-\* Cross-type coherence (e.g., Notarization vs NotarFallback for a slot)
-\* is enforced by Pool storage rules and system invariants elsewhere.
-\* Whitepaper anchors: §2.5 Def. 13 (one certificate per type per block/slot)
-\* and Def. 14 (unique notarized block per slot for slow finalization).
-ConflictingCertificates(cert1, cert2) ==
-    /\ cert1.slot = cert2.slot           \* Same slot
-    /\ cert1.type = cert2.type           \* Same type
-    /\ cert1.blockHash # cert2.blockHash \* Different blocks!
-
-\* Companion predicate (for use outside Pool if needed):
-\* Detect cross-type conflicts among notar-related certificate types for the
-\* same slot. Within Pool, CanStoreCertificate already forbids such states by
-\* requiring a single blockHash across Notarization/NotarFallback/FastFinalization
-\* for a slot (Pool §2.5; Def. 13).
-CrossTypeNotarConflict(c1, c2) ==
-    LET NotarTypes == {"NotarizationCert", "NotarFallbackCert", "FastFinalizationCert"}
-    IN /\ c1.slot = c2.slot
-       /\ c1.type \in NotarTypes
-       /\ c2.type \in NotarTypes
-       /\ c1.blockHash # c2.blockHash
 
 \* ============================================================================
 \* INVARIANTS FOR VERIFICATION
@@ -413,11 +329,6 @@ CrossTypeNotarConflict(c1, c2) ==
 AllCertificatesValid(certificates) ==
     \A cert \in certificates : IsValidCertificate(cert)
 
-\* No conflicting certificates should exist (Pool §2.5; Def. 13–14)
-\* Intended domain: apply to Pool’s certificates[slot] sets.
-NoConflictingCertificates(certificates) ==
-    \A cert1, cert2 \in certificates :
-        ~ConflictingCertificates(cert1, cert2)
 
 \* Fast finalization implies a corresponding notarization with vote inclusion
 \* (Table 6 thresholds; §2.5 “fast ⇒ notar ⇒ fallback”). Intended domain:
@@ -426,14 +337,10 @@ FastPathImplication(certificates) ==
     \A fastCert \in certificates :
         fastCert.type = "FastFinalizationCert" =>
         \E notarCert \in certificates :
-            FastFinalizationImpliesNotarization(fastCert, notarCert)
-
-\* Notarization cascade: every notarization implies a corresponding fallback
-NotarizationCascadeImplication(certificates) ==
-    \A notarCert \in certificates :
-        notarCert.type = "NotarizationCert" =>
-        \E fallbackCert \in certificates :
-            NotarizationImpliesFallback(notarCert, fallbackCert)
+            /\ notarCert.type = "NotarizationCert"
+            /\ notarCert.slot = fastCert.slot
+            /\ notarCert.blockHash = fastCert.blockHash
+            /\ notarCert.votes \subseteq fastCert.votes
 
 \* Skip vs Block-certificate mutual exclusion (per whitepaper intent):
 \* No slot’s certificate set may contain both a SkipCert and any
