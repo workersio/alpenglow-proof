@@ -23,6 +23,9 @@ ASSUME BlocksWellFormed ==
 ASSUME GenesisIsAncestorOfAll ==
     \A b \in blocks : IsAncestor(GenesisBlock, b, blocks)
 
+ASSUME BlocksHaveProperType ==
+    \A b \in blocks : b \in Block
+
 (***************************************************************************
  * HELPER DEFINITIONS
  ***************************************************************************)
@@ -48,7 +51,7 @@ FinalizedSubsetOfBlocks ==
  * KEY LEMMAS FROM WHITEPAPER
  ***************************************************************************)
 
-(* Lemma 25: Finalized blocks are notarized *)
+(* Lemma 31: Same-window descendancy *)
 SameWindowCertificateDescend ==
     \A vFinal \in CorrectNodes :
     \A vObs \in CorrectNodes :
@@ -59,7 +62,7 @@ SameWindowCertificateDescend ==
           /\ HasNotarOrFallbackCert(validators[vObs].pool, bSeen.slot, bSeen.hash))
         => IsAncestor(bFinal, bSeen, blocks)
 
-(* Lemma 31: Same-window descendancy *)
+(* Lemma 32: Cross-window descendancy *)
 CrossWindowCertificateDescend ==
     \A vFinal \in CorrectNodes :
     \A vObs \in CorrectNodes :
@@ -73,13 +76,6 @@ CrossWindowCertificateDescend ==
 (***************************************************************************
  * AUXILIARY LEMMAS
  ***************************************************************************)
-
-LEMMA TwoCaseElim ==
-    ASSUME NEW P \in BOOLEAN, NEW Q \in BOOLEAN,
-           P => Q,
-           ~P => Q
-    PROVE Q
-PROOF OBVIOUS
 
 LEMMA IsAncestorTransitive ==
     ASSUME NEW b1 \in blocks,
@@ -153,6 +149,14 @@ LEMMA SlotTrichotomy ==
           \/ s1 > s2
 PROOF OMITTED  \* Follows from natural number properties
 
+LEMMA SlotLessOrEqual ==
+    ASSUME NEW s1 \in Slots,
+           NEW s2 \in Slots,
+           s1 <= s2,
+           s1 # s2
+    PROVE s1 < s2
+PROOF OMITTED  \* Follows from natural number properties
+
 LEMMA SameSlotsImplySameWindow ==
     ASSUME NEW s1 \in Slots,
            NEW s2 \in Slots,
@@ -200,29 +204,97 @@ PROOF
       BY <1>1, <1>2, FinalizedHasCertificate, CorrectNodesAreValidators
       
 <1>4. HasNotarOrFallbackCert(validators[v2].pool, b2.slot, b2.hash)
-      \* By <1>3, there exists a certificate with type NotarizationCert or FastFinalizationCert
-      \* and blockHash = b2.hash in validators[v2].pool.certificates[b2.slot].
-      \* The pool is well-formed (PoolCertificatesSlotAligned), so this certificate
-      \* witnesses HasNotarOrFallbackCert by CertificateImpliesNotarOrFallback
-      OMITTED
+      <2>1. PICK cert \in validators[v2].pool.certificates[b2.slot] :
+               /\ cert.type \in {"NotarizationCert", "FastFinalizationCert"}
+               /\ cert.blockHash = b2.hash
+            BY <1>3
+      <2>2. PoolCertificatesSlotAligned(validators[v2].pool)
+            BY <1>1, CorrectNodesAreValidators
+      <2>3. CASE cert.type = "NotarizationCert"
+            <3>1. cert.slot = b2.slot
+                  <4>1. cert \in validators[v2].pool.certificates[b2.slot]
+                        BY <2>1
+                  <4>2. b2.slot \in Slots
+                        BY <1>2, BlocksHaveProperType DEF Block
+                  <4>3. \A c \in validators[v2].pool.certificates[b2.slot] : c.slot = b2.slot
+                        BY <4>2, <2>2 DEF PoolCertificatesSlotAligned
+                  <4>4. QED BY <4>1, <4>3
+            <3>2. HasBlockCertOfType(validators[v2].pool, b2.slot, b2.hash, "NotarizationCert")
+                  BY <2>1, <3>1, <2>3 DEF HasBlockCertOfType
+            <3>3. HasNotarizationCert(validators[v2].pool, b2.slot, b2.hash)
+                  BY <3>2 DEF HasNotarizationCert
+            <3>4. QED BY <3>3 DEF HasNotarOrFallbackCert
+      <2>4. CASE cert.type = "FastFinalizationCert"
+            <3>1. cert.slot = b2.slot
+                  <4>1. cert \in validators[v2].pool.certificates[b2.slot]
+                        BY <2>1
+                  <4>2. b2.slot \in Slots
+                        BY <1>2, BlocksHaveProperType DEF Block
+                  <4>3. \A c \in validators[v2].pool.certificates[b2.slot] : c.slot = b2.slot
+                        BY <4>2, <2>2 DEF PoolCertificatesSlotAligned
+                  <4>4. QED BY <4>1, <4>3
+            <3>2. HasBlockCertOfType(validators[v2].pool, b2.slot, b2.hash, "FastFinalizationCert")
+                  BY <2>1, <3>1, <2>4 DEF HasBlockCertOfType
+            <3>3. HasFastFinalizationCert(validators[v2].pool, b2.slot, b2.hash)
+                  BY <3>2 DEF HasFastFinalizationCert
+            <3>4. QED BY <3>3 DEF HasNotarOrFallbackCert
+      <2>5. QED BY <2>1, <2>3, <2>4
 
 <1>5. CASE WindowIndex(b1.slot) = WindowIndex(b2.slot)
-      \* Apply Lemma 31 (SameWindowCertificateDescend). The preconditions hold:
-      \* - v1, v2 \in CorrectNodes, b1 \in finalized[v1], b2 \in blocks (from <1>1, <1>2)
-      \* - WindowIndex(b2.slot) = WindowIndex(b1.slot) (from <1>5)
-      \* - b1.slot <= b2.slot (from <1>1)
-      \* - HasNotarOrFallbackCert(validators[v2].pool, b2.slot, b2.hash) (from <1>4)
-      \* Therefore IsAncestor(b1, b2, blocks) by SameWindowCertificateDescend
-      OMITTED
+      <2>1. IsAncestor(b1, b2, blocks)
+            <3>1. v1 \in CorrectNodes /\ v2 \in CorrectNodes
+                  BY <1>1
+            <3>2. b1 \in finalized[v1]
+                  BY <1>1
+            <3>3. b2 \in blocks
+                  BY <1>2
+            <3>4. WindowIndex(b2.slot) = WindowIndex(b1.slot)
+                  BY <1>5
+            <3>5. b1.slot <= b2.slot
+                  BY <1>1
+            <3>6. HasNotarOrFallbackCert(validators[v2].pool, b2.slot, b2.hash)
+                  BY <1>4
+            <3>7. QED
+                  BY <3>1, <3>2, <3>3, <3>4, <3>5, <3>6, SameWindowCertificateDescend
+                  DEF SameWindowCertificateDescend
+      <2>2. QED BY <2>1
 
 <1>6. CASE WindowIndex(b1.slot) # WindowIndex(b2.slot)
-      \* Apply Lemma 32 (CrossWindowCertificateDescend). The preconditions hold:
-      \* - v1, v2 \in CorrectNodes, b1 \in finalized[v1], b2 \in blocks (from <1>1)
-      \* - WindowIndex(b2.slot) # WindowIndex(b1.slot) (from <1>6)
-      \* - b1.slot < b2.slot (since b1.slot <= b2.slot and slots in different windows must differ)
-      \* - HasNotarOrFallbackCert(validators[v2].pool, b2.slot, b2.hash) (from <1>4)
-      \* Therefore IsAncestor(b1, b2, blocks) by CrossWindowCertificateDescend
-      OMITTED
+      <2>1. b1.slot # b2.slot
+            <3>1. ASSUME b1.slot = b2.slot
+                  PROVE FALSE
+                  <4>1. WindowIndex(b1.slot) = WindowIndex(b2.slot)
+                        BY <3>1, SameSlotsImplySameWindow DEF SameSlotsImplySameWindow
+                  <4>2. QED BY <4>1, <1>6
+            <3>2. QED BY <3>1, SlotTrichotomy
+            
+      <2>2. b1.slot < b2.slot
+            <3>1. b1 \in blocks /\ b2 \in blocks
+                  BY <1>2
+            <3>2. b1 \in Block /\ b2 \in Block
+                  BY <3>1, BlocksHaveProperType
+            <3>3. b1.slot \in Slots /\ b2.slot \in Slots
+                  BY <3>2 DEF Block
+            <3>4. QED BY <1>1, <2>1, <3>3, SlotLessOrEqual
+            
+      <2>3. IsAncestor(b1, b2, blocks)
+            <3>1. v1 \in CorrectNodes /\ v2 \in CorrectNodes
+                  BY <1>1
+            <3>2. b1 \in finalized[v1]
+                  BY <1>1
+            <3>3. b2 \in blocks
+                  BY <1>2
+            <3>4. WindowIndex(b2.slot) # WindowIndex(b1.slot)
+                  BY <1>6
+            <3>5. b1.slot < b2.slot
+                  BY <2>2
+            <3>6. HasNotarOrFallbackCert(validators[v2].pool, b2.slot, b2.hash)
+                  BY <1>4
+            <3>7. QED
+                  BY <3>1, <3>2, <3>3, <3>4, <3>5, <3>6, CrossWindowCertificateDescend
+                  DEF CrossWindowCertificateDescend
+               
+      <2>4. QED BY <2>3
       
 <1>7. WindowIndex(b1.slot) = WindowIndex(b2.slot) 
       \/ WindowIndex(b1.slot) # WindowIndex(b2.slot)
