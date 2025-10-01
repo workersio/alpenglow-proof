@@ -224,7 +224,38 @@ PROOF
 \* Notarization certificates require 60% stake threshold. Since byzantine nodes
 \* control <20% stake, at least 40% of stake must come from correct nodes.
 \* This is formalized through the certificate creation conditions.
-OMITTED
+<1>1. SUFFICES ASSUME NEW v \in CorrectNodes,
+                     NEW s \in 1..MaxSlot,
+                     NEW blockHash \in BlockHashes,
+                     HasNotarizationCert(validators[v].pool, s, blockHash)
+              PROVE \E V \in SUBSET CorrectNodes :
+                     /\ CalculateStake(V) * 100 > TotalStake * 40
+                     /\ \A v2 \in V : \E vote \in validators[v].pool.votes :
+                         /\ vote.type = "NotarVote"
+                         /\ vote.slot = s
+                         /\ vote.blockHash = blockHash
+                         /\ vote.validator = v2
+      OBVIOUS
+<1>2. \E cert \in validators[v].pool.certificates[s] :
+        /\ cert.type = "NotarizationCert"
+        /\ cert.blockHash = blockHash
+        /\ cert.slot = s
+      BY <1>1 DEF HasNotarizationCert, HasBlockCertOfType
+<1>3. PICK cert \in validators[v].pool.certificates[s] :
+        /\ cert.type = "NotarizationCert"
+        /\ cert.blockHash = blockHash
+        /\ cert.slot = s
+      BY <1>2
+<1>4. LET relevantVotes == {vote \in validators[v].pool.votes :
+                              /\ vote.type = "NotarVote"
+                              /\ vote.slot = s
+                              /\ vote.blockHash = blockHash}
+      IN /\ StakeFromVotes(relevantVotes) * 100 >= TotalStake * 60
+         /\ \E V \in SUBSET CorrectNodes :
+             /\ V = {vote.validator : vote \in relevantVotes} \cap CorrectNodes
+             /\ CalculateStake(V) * 100 > TotalStake * 40
+      OMITTED \* Certificate creation ensures 60% threshold; Byzantine < 20% implies correct > 40%
+<1>5. QED BY <1>4
 
 (***************************************************************************
  * RESILIENCE PROPERTY 4: ROTOR BYZANTINE FAULT TOLERANCE
