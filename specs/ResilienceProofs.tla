@@ -277,7 +277,25 @@ PROOF
 \* Based on whitepaper Lemma 7: with over-provisioning ratio κ > 5/3,
 \* and Byzantine stake <20%, expected correct relays ≥ 60% · Γ > γ,
 \* ensuring successful block distribution to all correct nodes.
-OMITTED
+<1>1. SUFFICES ASSUME NEW s \in 1..MaxSlot,
+                     Leader(s) \in CorrectNodes,
+                     CalculateStake(byzantineNodes) * 100 < TotalStake * 20,
+                     NEW v \in CorrectNodes
+              PROVE ReceivesBlockInSlot(v, s)
+      BY DEF RotorResilience
+<1>2. GammaTotalShreds * 3 > GammaDataShreds * 5
+      BY ErasureCodingOverProvisioning DEF ErasureCodingOverProvisioning
+<1>3. \* Over-provisioning κ = Γ/γ > 5/3 means κ·γ = Γ > (5/3)·γ
+      \* With Byzantine stake < 20%, expected correct relays ≥ 80%·Γ
+      \* Since 80% > 60% and (5/3)·60% = 100%, we have 80%·Γ > γ
+      \* Therefore sufficient correct relays exist to reconstruct the block
+      ReceivesBlockInSlot(v, s)
+      OMITTED \* Requires probability/expectation reasoning about relay selection
+            \* and erasure code reconstruction from γ out of Γ shreds.
+            \* The proof relies on Lemma 7's probabilistic argument that
+            \* with κ > 5/3 and Byzantine < 20%, overwhelmingly likely
+            \* that ≥ γ correct relays are selected.
+<1>4. QED BY <1>3
 
 
 =============================================================================
