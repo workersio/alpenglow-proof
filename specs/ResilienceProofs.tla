@@ -14,14 +14,6 @@ EXTENDS MainProtocol, TLAPS
  * AUXILIARY DEFINITIONS FOR RESILIENCE PROPERTIES
  ***************************************************************************)
 
-\* Total stake of a set of validators
-TotalStake(vs) == 
-    LET stakeSum[S \in SUBSET Validators] ==
-        IF S = {} THEN 0
-        ELSE LET v == CHOOSE x \in S : TRUE
-             IN StakeMap[v] + stakeSum[S \ {v}]
-    IN stakeSum[vs]
-
 \* Erasure coding over-provisioning assumption (κ > 5/3)
 ErasureCodingOverProvisioning ==
     GammaTotalShreds * 3 > GammaDataShreds * 5
@@ -99,36 +91,27 @@ LEMMA SafetyImpliesComparable ==
     ASSUME SafetyInvariant
     PROVE FinalizedChainsComparable
 PROOF
-\* This lemma establishes that SafetyInvariant implies finalized chains
-\* are comparable by ancestry. The proof follows from the fact that
-\* SafetyInvariant ensures ancestry ordering for finalized blocks,
-\* and ComparableByAncestry is defined as the disjunction of
-\* IsAncestor(b1, b2, blocks) \/ IsAncestor(b2, b1, blocks).
-\* For any two finalized blocks, either b1.slot <= b2.slot (giving
-\* IsAncestor(b1, b2, blocks)) or b2.slot <= b1.slot (giving
-\* IsAncestor(b2, b1, blocks)) by trichotomy of integer ordering.
-\* <1>1. SUFFICES ASSUME NEW v1 \in CorrectNodes,
-\*                      NEW v2 \in CorrectNodes,
-\*                      NEW b1 \in finalized[v1],
-\*                      NEW b2 \in finalized[v2]
-\*               PROVE ComparableByAncestry(b1, b2, blocks)
-\*       BY DEF FinalizedChainsComparable
-\* <1>2. CASE b1.slot <= b2.slot
-\*       <2>1. IsAncestor(b1, b2, blocks)
-\*             BY <1>1, <1>2, SafetyInvariant DEF SafetyInvariant
-\*       <2>2. ComparableByAncestry(b1, b2, blocks)
-\*             BY <2>1 DEF ComparableByAncestry
-\*       <2>3. QED BY <2>2
-\* <1>3. CASE b2.slot <= b1.slot
-\*       <2>1. IsAncestor(b2, b1, blocks)
-\*             BY <1>1, <1>3, SafetyInvariant DEF SafetyInvariant
-\*       <2>2. ComparableByAncestry(b1, b2, blocks)
-\*             BY <2>1 DEF ComparableByAncestry
-\*       <2>3. QED BY <2>2
-\* <1>4. b1.slot <= b2.slot \/ b2.slot <= b1.slot
-\*       OBVIOUS
-\* <1>5. QED BY <1>2, <1>3, <1>4
-OMITTED 
+<1>1. SUFFICES ASSUME NEW v1 \in CorrectNodes,
+                     NEW v2 \in CorrectNodes,
+                     NEW b1 \in finalized[v1],
+                     NEW b2 \in finalized[v2]
+              PROVE ComparableByAncestry(b1, b2, blocks)
+      BY DEF FinalizedChainsComparable
+<1>2. CASE b1.slot <= b2.slot
+      <2>1. IsAncestor(b1, b2, blocks)
+            BY <1>2, SafetyInvariant, <1>1 DEF SafetyInvariant
+      <2>2. ComparableByAncestry(b1, b2, blocks)
+            BY <2>1 DEF ComparableByAncestry
+      <2>3. QED BY <2>2
+<1>3. CASE b2.slot <= b1.slot
+      <2>1. IsAncestor(b2, b1, blocks)
+            BY <1>3, SafetyInvariant, <1>1 DEF SafetyInvariant
+      <2>2. ComparableByAncestry(b1, b2, blocks)
+            BY <2>1 DEF ComparableByAncestry
+      <2>3. QED BY <2>2
+<1>4. b1.slot <= b2.slot \/ b2.slot <= b1.slot
+      OMITTED \* Slots are naturals (Nat), which are totally ordered
+<1>5. QED BY <1>2, <1>3, <1>4
 
 THEOREM NetworkPartitionRecoveryGuarantees ==
     ASSUME SafetyInvariant
@@ -180,17 +163,21 @@ PROOF
       BY <1>1
 <1>5. PICK v2 \in CorrectNodes : HasNotarizationCert(validators[v2].pool, s, b2.hash)
       BY <1>1
-<1>6. \E c1 \in validators[v1].pool.certificates[s] :
+<1>6. PICK c1 \in validators[v1].pool.certificates[s] :
         /\ c1.type = "NotarizationCert"
         /\ c1.blockHash = b1.hash
+        /\ c1.slot = s
       BY <1>4 DEF HasNotarizationCert, HasBlockCertOfType
-<1>7. \E c2 \in validators[v2].pool.certificates[s] :
+<1>7. PICK c2 \in validators[v2].pool.certificates[s] :
         /\ c2.type = "NotarizationCert"
         /\ c2.blockHash = b2.hash
+        /\ c2.slot = s
       BY <1>5 DEF HasNotarizationCert, HasBlockCertOfType
-<1>8. b1.hash = b2.hash
-      BY <1>3, <1>6, <1>7 \* GlobalNotarizationUniqueness ensures agreement
-<1>9. QED BY <1>8
+<1>8. c1.blockHash = c2.blockHash
+      BY <1>3, <1>4, <1>5, <1>6, <1>7 DEF GlobalNotarizationUniqueness
+<1>9. b1.hash = b2.hash
+      BY <1>6, <1>7, <1>8
+<1>10. QED BY <1>9
 
 (***************************************************************************
  * LEMMA 25 (WHITEPAPER): FINALIZED BLOCKS ARE NOTARIZED
@@ -227,7 +214,7 @@ LEMMA NotarizationRequiresCorrectNodes ==
     PROVE \A v \in CorrectNodes, s \in 1..MaxSlot, blockHash \in BlockHashes :
            HasNotarizationCert(validators[v].pool, s, blockHash) =>
            \E V \in SUBSET CorrectNodes :
-             /\ TotalStake(V) > 0.4 * TotalStake(Validators) 
+             /\ CalculateStake(V) * 100 > TotalStake * 40
              /\ \A v2 \in V : \E vote \in validators[v].pool.votes :
                  /\ vote.type = "NotarVote"
                  /\ vote.slot = s
@@ -247,7 +234,7 @@ OMITTED
 RotorResilience ==
     \A s \in 1..MaxSlot :
         (/\ Leader(s) \in CorrectNodes
-         /\ TotalStake(byzantineNodes) < 0.2 * TotalStake(Validators)) =>
+         /\ CalculateStake(byzantineNodes) * 100 < TotalStake * 20) =>
         \A v \in CorrectNodes :
             ReceivesBlockInSlot(v, s)
 
