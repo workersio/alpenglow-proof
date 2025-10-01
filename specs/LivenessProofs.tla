@@ -48,17 +48,14 @@ ResponsiveStake(s) == CalculateStake({v \in Validators :
     /\ v \notin byzantineNodes
     /\ \E msg \in messages : msg.slot = s /\ msg.sender = v})
 
-PartialSynchronyAfterGST == 
-    /\ time >= GST
-    /\ \A s \in 1..MaxSlot : 
-        s >= time => IsFirstSlotOfWindow(s) => Leader(s) \in CorrectNodes
+\* Removed redundant partial synchrony helper. We rely on `time >= GST`,
+\* `NoTimeoutsBeforeGST`, and fairness as captured by WindowReady/WindowLiveness.
 
 (***************************************************************************
  * PRECONDITIONS FOR LIVENESS PROPERTIES
  ***************************************************************************)
 
 ProgressPrecondition(s) ==
-    /\ PartialSynchronyAfterGST
     /\ HonestStake * 100 > TotalStake * 60
     /\ WindowReady(s)
 

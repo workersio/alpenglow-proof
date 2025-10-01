@@ -175,8 +175,18 @@ AfterGST == time >= GST
 (***************************************************************************
  * AvailabilityStakeFor(s, h): stake of validators that currently have block
  * (slot s, hash h) in their `blockAvailability`. This abstracts the
- * whitepaper’s δ_θ notion (Section 1.5 at :241) by detecting when a block
+ * whitepaper's δ_θ notion (Section 1.5 at :241) by detecting when a block
  * has reached ≥θ% stake of nodes.
+ * 
+ * DESIGN CHOICE: We measure availability only over CorrectNodes (honest + 
+ * responsive), excluding Byzantine and crashed nodes. The whitepaper's δ_θ
+ * definition doesn't explicitly specify the domain, stating only "a set of 
+ * nodes with cumulative stake at least θ". We interpret this as correct 
+ * nodes because:
+ * - Byzantine nodes can arbitrarily delay/refuse participation
+ * - Crashed nodes by definition cannot participate in message exchange
+ * - δ_θ timing guarantees only make sense for cooperating nodes
+ * This interpretation ensures sound bounded-time finalization analysis.
  ***************************************************************************)
 ExistsBlockAt(s, h) == \E b \in blocks : b.slot = s /\ b.hash = h
 
@@ -1349,6 +1359,38 @@ CrashToleranceLiveness20 ==
             ELSE TRUE)
 
 (***************************************************************************
+ * REPAIR LIVENESS — notarized blocks eventually available to all correct nodes
+ *
+ * Whitepaper refs
+ * - Algorithm 4 (Repair): `alpenglow-whitepaper.md:801` • §2.8
+ * - Definition 19 (repair functions): `alpenglow-whitepaper.md:782`
+ * - Blokstor repair obligation: `:470`
+ *
+ * Explanation
+ * - If a correct node needs a block (has a certificate for it but lacks the block),
+ *   then eventually that node will have the block available.
+ * - This property verifies the repair mechanism's liveness guarantee: correct
+ *   nodes eventually obtain all notarized blocks they need for protocol progress.
+ * - Combined with weak fairness on RepairBlock (line 810), this ensures the
+ *   repair mechanism fulfills its role in maintaining block availability.
+ * 
+ * Note: Due to TLC limitations with temporal quantification over variables, we define
+ * a helper state predicate and use it in a simpler temporal formula. This checks that
+ * any blocks needed for repair eventually become available.
+ ***************************************************************************)
+
+\* Helper: Check if any correct node needs repair for a block it doesn't have
+NodeNeedsRepair(v) ==
+    v \in CorrectNodes /\ 
+    \E b \in blocks : NeedsBlockRepair(validators[v].pool, b) /\ b \notin blockAvailability[v]
+
+\* The actual liveness property: if a node needs repair after GST, it eventually gets the blocks
+RepairEventuallySucceeds ==
+    \A v \in Validators :
+        ((time >= GST /\ NodeNeedsRepair(v)) ~> 
+            ~NodeNeedsRepair(v))
+
+(***************************************************************************
  * THEOREM 2 — window-level liveness (Section 2.10)
  *
  * Whitepaper refs
@@ -1394,9 +1436,18 @@ WindowFinalizedState(s) ==
  * Commentary: Under the stated premises (correct window leader, no pre-GST
  * timeouts, Rotor success for all window slots, and post-GST delivery/fairness),
  * every slot in the leader's window is eventually finalized by all correct nodes
- * (Thm. 2). The fairness constraints in Spec ensure WindowRotorSuccessful
- * eventually holds for correct leaders after GST, so it need not appear explicitly
- * in the temporal formula below, but is documented here for audit traceability.
+ * (Whitepaper Theorem 2, alpenglow-whitepaper.md:1045).
+ *
+ * NOTE — Conditional assumptions, not invariants:
+ * - Correct leader: Leader(s) \in CorrectNodes
+ * - No early timeouts: NoTimeoutsBeforeGST(s)
+ * - Rotor success for window: WindowRotorSuccessful(s)
+ * - Post-GST fairness: time >= GST gates fairness in this spec
+ *
+ * These are liveness antecedents (assumptions) and are intentionally not
+ * enforced as invariants. WindowRotorSuccessful appears explicitly below for
+ * audit clarity; fairness in this spec ensures it eventually holds for correct
+ * leaders after GST.
  *)
 \* Window-level liveness (quantified form added below)
 WindowFinalization(s) ==

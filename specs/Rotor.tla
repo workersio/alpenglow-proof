@@ -48,7 +48,6 @@ CONSTANTS
     GammaTotalShreds,         \* Γ > 0 — total shreds/relays per slice (§2.2 :382)
     GammaDataShreds,          \* γ > 0 — min shreds to reconstruct (§1.6 :267; §2.2 :384)
     RotorMaxFailedRelayStake, \* Modeling guard: max failed stake tolerated within relays
-    MaxSlicesPerBlock         \* Upper bound on slices per block (pipeline; §2.2 :378)
 
 ASSUME
     /\ GammaTotalShreds \in Nat \ {0}
@@ -59,7 +58,6 @@ ASSUME
     /\ RotorMinRelayStake <= TotalStake
     /\ RotorMaxFailedRelayStake \in Nat
     /\ RotorMaxFailedRelayStake < RotorMinRelayStake   \* Ensure residual stake after failures
-    /\ MaxSlicesPerBlock \in Nat \ {0}
 
 \* Semantics and references:
 \*  - Γ, γ encode the erasure‑coding parameters (§1.6 :267; §2.2 :382–:385).
@@ -153,41 +151,25 @@ BinsToRelaySet(bins) ==
 FailureResilient(sample) ==
     CalculateStake(sample) >= RotorMinRelayStake + RotorMaxFailedRelayStake
 
-\* PS‑P structural constraint (Step 1 lower bound per validator):
+\* PS‑P structural constraint (exact Step 1 multiplicities):
 \*  - domain(bins) = 1..Γ and values in `needers`
-\*  - multiplicity(bins, v) ≥ ⌊ρ_v·Γ⌋ = DeterministicBinCount(v)
-\*  - Steps 2–3 remain unconstrained beyond membership, matching §3.1.
+\*  - in the deterministic prefix of size d = Σ_v ⌊ρ_v·Γ⌋, each v appears in
+\*    exactly ⌊ρ_v·Γ⌋ bins (Definition 46 Step 1 :1156)
+\*  - the remaining bins enforce only membership (Steps 2–3), matching §3.1.
 \*
-\* AUDIT NOTE (issues_claude.md §1, issues_openai.md §1):
-\* The whitepaper Definition 46 Step 1 prescribes EXACT multiplicities:
-\* "fill ⌊ρᵢΓ⌋ bins with that node" (:1156). The constraint here uses ">="
-\* (lower bound) rather than "=" (exact) for two reasons:
-\*  1. Modeling flexibility: allows reasoning about partial/approximate selections
-\*  2. Conservative abstraction: ">=" is weaker than "=", so any property that
-\*     holds under ">=" also holds under the stronger "=" constraint
-\*  3. Actual construction (TotalDeterministicBinsExact, RemainingBins) enforces
-\*     exact multiplicities per Definition 46, so this is a sound abstraction
-\* The lower bound suffices for safety properties while allowing model-checking
-\* scenarios where exact bin counts cannot be determined statically.
+\* Note: If a weaker abstraction is desired for auxiliary reasoning, one could
+\* replace the exact count in the deterministic prefix with a ≥ lower bound.
+\* The main spec uses exact multiplicities to match the whitepaper literally.
 PSPConstraint(bins, needers) == 
-    /\ DOMAIN bins = 1..GammaTotalShreds
-    /\ \A j \in DOMAIN bins : bins[j] \in needers
-    /\ \A v \in needers :
-          Cardinality({ j \in DOMAIN bins : bins[j] = v }) >= DeterministicBinCount(v)
-
-\* Optional stronger check: If desired, one can additionally require that the
-\* deterministic prefix of bins 1..TotalDeterministicBinsExact(needers) matches
-\* exact multiplicities (enforcing Definition 46 Step 1 literally), leaving the
-\* remaining bins unconstrained beyond membership per Steps 2-3. This stronger
-\* version would replace ">=" with "=" for bins in the deterministic prefix.
-
-PSPConstraintExact(bins, needers) ==
     /\ DOMAIN bins = 1..GammaTotalShreds
     /\ \A j \in DOMAIN bins : bins[j] \in needers
     /\ LET d == TotalDeterministicBinsExact(needers)
        IN /\ (\A v \in needers :
                  Cardinality({ j \in 1..d : bins[j] = v }) = DeterministicBinCount(v))
           /\ (\A j \in (d+1)..GammaTotalShreds : bins[j] \in needers)
+
+\* Exact variant kept for clarity (alias of current `PSPConstraint`).
+PSPConstraintExact(bins, needers) == PSPConstraint(bins, needers)
 
 \* Counting sanity (readability lemmas)
 SumBinCounts(bins, validatorSet) ==
@@ -202,7 +184,7 @@ SumBinCounts(bins, validatorSet) ==
 \* The “send to next leader first” optimization affects latency only; selection
 \* remains unbiased (§2.2 :402–:406).
 StructuralBinOK(bins, needers, nextLeader) ==
-    /\ PSPConstraint(bins, needers)              \* PS-P compliance (§3.1)
+    /\ PSPConstraintExact(bins, needers)         \* PS-P compliance (§3.1)
 
 \* Additional resilience constraint (stake-based failure tolerance)
 \* Note: This is an explicit modeling guard beyond the whitepaper.
