@@ -99,11 +99,7 @@ PROOF
         /\ b0.leader = Leader(s)
         /\ b0 \in finalized[v0]
       BY <1>4
-<1>6. NoConflictingFinalization
-      BY Invariant DEF Invariant
-<1>7. AllBlocksValid(blocks)
-      BY Invariant DEF Invariant
-<1>8. ASSUME NEW v \in CorrectNodes
+<1>6. ASSUME NEW v \in CorrectNodes
       PROVE \E b \in finalized[v] :
               /\ b.slot = s
               /\ b.hash = b0.hash
@@ -118,18 +114,18 @@ PROOF
               /\ bv \in finalized[v]
             BY <2>1
       <2>3. bv.hash = b0.hash
-            BY <1>6, <2>2, <1>5 DEF NoConflictingFinalization
+            BY Invariant, <2>2, <1>5 DEF Invariant, NoConflictingFinalization
       <2>4. \E b \in finalized[v] : b.slot = s /\ b.hash = b0.hash
             BY <2>2, <2>3
       <2>5. QED BY <2>4
-<1>9. \A v \in CorrectNodes :
+<1>7. \A v \in CorrectNodes :
         \E b \in finalized[v] : b.slot = s /\ b.hash = b0.hash
-      BY <1>8
-<1>10. b0.hash \in BlockHashes
-       BY <1>5, <1>7 DEF AllBlocksValid, Block, IsValidBlock
-<1>11. \E h \in BlockHashes : BlockFinalizedEverywhere(s, h)
-       BY <1>9, <1>10 DEF BlockFinalizedEverywhere
-<1>12. QED BY <1>11
+      BY <1>6
+<1>8. b0.hash \in BlockHashes
+       BY Invariant, <1>5 DEF Invariant, AllBlocksValid, Block, IsValidBlock
+<1>9. \E h \in BlockHashes : BlockFinalizedEverywhere(s, h)
+       BY <1>7, <1>8 DEF BlockFinalizedEverywhere
+<1>10. QED BY <1>9
 
 LEMMA FastAvailabilityYieldsFastDeadline ==
     ASSUME NEW s \in 1..MaxSlot,
