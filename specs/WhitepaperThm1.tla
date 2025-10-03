@@ -296,10 +296,6 @@ PROOF
                
       <2>4. QED BY <2>3
       
-<1>7. WindowIndex(b1.slot) = WindowIndex(b2.slot) 
-      \/ WindowIndex(b1.slot) # WindowIndex(b2.slot)
-      OBVIOUS
-      
-<1>8. QED BY <1>5, <1>6, <1>7
+<1>7. QED BY <1>5, <1>6
 
 =============================================================================
