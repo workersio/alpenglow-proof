@@ -52,9 +52,10 @@ CONSTANTS
 ASSUME
     /\ Validators # {}                 \* Non-empty validator set
     /\ Slots \subseteq Nat             \* Slots are naturals
-    /\ \A s \in Slots : 0..s \subseteq Slots  \* Prefix-closed slot domain
+    /\ Slots # {}                      \* Non-empty slot set
+    /\ \A s \in Slots : 1..s \subseteq Slots  \* Prefix-closed from 1 (whitepaper §1.5 p. 213: s ≥ 1)
     /\ BlockHashes # {}                \* Non-empty block-id universe
-    /\ NoBlock \notin BlockHashes      \* Slot-only objects can’t be blocks
+    /\ NoBlock \notin BlockHashes      \* Slot-only objects can't be blocks
 
 \* ============================================================================
 \* VOTE TYPES (Whitepaper §2.4, Definition 11; Table 5 :497)

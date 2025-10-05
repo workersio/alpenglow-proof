@@ -364,6 +364,7 @@ ShouldEmitBlockNotarized(pool, slot, blockHash) ==
 ShouldEmitParentReady(pool, slot, parentHash, parentSlot) ==
     /\ IsFirstSlotOfWindow(slot)
     /\ parentSlot < slot   \* "previous block" guard (Def. 15)
+    /\ parentSlot \in Slots  \* Only protocol slots; genesis has no certificates
     /\ (HasNotarizationCert(pool, parentSlot, parentHash) \/
         HasNotarFallbackCert(pool, parentSlot, parentHash))
     /\ \A s \in (parentSlot+1)..(slot-1) : HasSkipCert(pool, s)

@@ -75,7 +75,7 @@ ASSUME
     /\ MaxSlot \in Nat \ {0}
     /\ MaxBlocks \in Nat \ {0}
     /\ Cardinality(Validators) = NumValidators
-    /\ Slots = 0..MaxSlot   \* Centralize epoch bound: finite slot domain (includes genesis slot 0)
+    /\ Slots = 1..MaxSlot   \* Protocol slots s ≥ 1 (whitepaper §1.5 p. 213); genesis is slot 0
     /\ Delta80 \in Nat \ {0}
     /\ Delta60 \in Nat \ {0}
 
@@ -154,12 +154,14 @@ Assumption2OK ==
 
 \* Repair trigger (Algorithm 4; §2.8). Include fast-finalization to cover fast-only
 \* implementations. See also Blokstor repair mention: `alpenglow-whitepaper.md:470`.
+\* Note: Genesis (slot 0) never needs repair - it's available to all nodes at Init.
 NeedsBlockRepair(pool, block) ==
     LET slot == block.slot
         hash == block.hash
-    IN HasFastFinalizationCert(pool, slot, hash)
-       \/ HasNotarizationCert(pool, slot, hash)
-       \/ HasNotarFallbackCert(pool, slot, hash)
+    IN /\ slot \in Slots  \* Only protocol slots; genesis is outside pool domain
+       /\ (HasFastFinalizationCert(pool, slot, hash)
+           \/ HasNotarizationCert(pool, slot, hash)
+           \/ HasNotarFallbackCert(pool, slot, hash))
 
 \* Check if we're after GST (network is stable; §1.5/§2.10)
 AfterGST == time >= GST
@@ -320,6 +322,7 @@ GenerateCertificateAction(v, slot) ==
 FinalizeBlock(v, block) ==
     /\ v \in CorrectNodes
     /\ block \in blocks
+    /\ block.slot \in Slots  \* Only protocol blocks; genesis is pre-finalized at Init
     /\ LET pool == validators[v].pool
            slot == block.slot
        IN \/ HasFastFinalizationCert(pool, slot, block.hash)
@@ -933,10 +936,11 @@ GlobalNotarizationUniqueness ==
 FinalizedImpliesNotarized ==
     \A v \in CorrectNodes :
     \A b \in finalized[v] :
-        LET pool == validators[v].pool
-        IN \E cert \in pool.certificates[b.slot] :
-            /\ cert.type \in {"NotarizationCert", "FastFinalizationCert"}
-            /\ cert.blockHash = b.hash
+        b.slot \in Slots =>  \* Only protocol blocks have certificates; genesis excluded
+            LET pool == validators[v].pool
+            IN \E cert \in pool.certificates[b.slot] :
+                /\ cert.type \in {"NotarizationCert", "FastFinalizationCert"}
+                /\ cert.blockHash = b.hash
 
 (***************************************************************************
  * CERTIFICATE NON-EQUIVOCATION — no two different certs of same type/slot
