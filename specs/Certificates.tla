@@ -99,6 +99,18 @@ StakeFromVotes(votes) ==
 MeetsThreshold(stake, thresholdPercent) ==
     stake * 100 >= TotalStake * thresholdPercent
 
+(***************************************************************************
+ * Monotonicity notes (documentation)
+ *
+ * - CalculateStake is monotone in its set argument: if A ⊆ B then
+ *   CalculateStake(A) ≤ CalculateStake(B). Intuition: it sums non‑negative
+ *   per‑validator weights ρ_v over the set.
+ * - StakeFromVotes respects UniqueValidators: StakeFromVotes(V) sums ρ_v over
+ *   the set of validators extracted from V (count‑once per slot).
+ * - These facts are standard properties of sums over non‑negative weights and
+ *   are not required explicitly by the mechanized proofs in this codebase.
+ *************************************************************************)
+
 \* ============================================================================
 \* CERTIFICATE CREATION CONDITIONS
 \* These functions check if we have enough votes to create certificates

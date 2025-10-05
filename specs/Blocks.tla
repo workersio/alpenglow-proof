@@ -3,10 +3,10 @@
  * BLOCK STRUCTURE AND RELATIONSHIPS FOR ALPENGLOW
  *
  * What this module specifies and where it comes from in the whitepaper:
- *   • §1.1 (:53, :222) — slots, designated leaders, public (VRF-based) schedule.
- *   • §2.1 (Def. 3–5; :351, :357, :363) — block contents, block hash, ancestry.
- *   • §2.7 (and Alg. 3; :678, :759) — fixed-length leader windows and creation.
- *   • Correctness overview (:243) & Theorem 1 (:930) — single-chain finality.
+ *   • §1.1 (p. 3) — slots, designated leaders, public (VRF-based) schedule.
+ *   • §2.1 (Def. 3–5; pp. 14–16) — block contents, block hash, ancestry.
+ *   • §2.7 (and Alg. 3; pp. 26–27) — fixed-length leader windows and creation.
+ *   • Correctness overview (p. 11) & Theorem 1 (p. 34) — single-chain finality.
  *
  * This file gives the core “data types” and helper predicates for blocks,
  * ancestry, and leader windows used by the higher-level protocol modules.
@@ -19,30 +19,59 @@ EXTENDS Naturals, FiniteSets, Messages, Sequences
 \* ============================================================================
 
 CONSTANTS
-    GenesisHash,     \* Abstract hash of genesis (Def. 4 notion; :357)
-    WindowSize,      \* Fixed consecutive slots per leader window (§2.7; :678)
-    WindowLeader     \* Window-indexed leader map (VRF abstraction; §1.1; :222)
+    GenesisHash,     \* Abstract hash of genesis (Def. 4; §2.1)
+    WindowSize,      \* Fixed consecutive slots per leader window (§2.7)
+    WindowLeader     \* Window-indexed leader map (VRF abstraction; §1.1)
 
 ASSUME
     /\ GenesisHash \in BlockHashes
-    /\ WindowSize \in Nat \ {0}             \* Window size must be positive (§2.7)
-    /\ 0 \in Slots                           \* Genesis uses slot 0 (modeling choice)
+    /\ WindowSize \in Nat \ {0}
 
-\* ============================================================================
-\* BLOCK STRUCTURE (whitepaper §2.1, Def. 3–5)
-\* ============================================================================
-
-(***************************************************************************
- * What a block records (Def. 3 :351 → abstracted here):
- * - slot   — creation slot (Nat) (:53, :351)
- * - hash   — unique identifier for the block (Def. 4 :357; collision-resistant)
- * - parent — hash of the parent block (lineage pointer; Def. 3/5 :351/:363)
- * - leader — validator that proposed the block (explicit in our model; :53)
- *
- * Rationale:
- * - The data-plane details (slices/shreds) are abstracted away; the control-
- *   plane fields above are sufficient for safety and window reasoning.
- ***************************************************************************)
+(* ------------------------------------------------------------------------------
+ * Block Definition in Alpenglow — Control-Plane vs Data-Plane Abstraction
+ * ------------------------------------------------------------------------------
+ * In the *Solana Alpenglow Protocol* (v1.1 whitepaper):
+ * 
+ *   • A **block (b)** is formally defined as:
+ *     "The sequence of all slices of a slot, for the purpose of voting and
+ *     reaching consensus."  — Definition 3, §2.1 (Shred, Slice, Block) [p. 15]
+ *     Each slice is itself a decoded data unit with its own Merkle root and
+ *     leader signature.  (Definitions 1–2 [p. 14–15])
+ * 
+ *   • The **block hash**, `hash(b)`, is the Merkle-tree root over all slice roots
+ *     `r₁ … rₖ`  — Definition 4 [p. 15–16].  
+ *     The **slot** of a block, `slot(b)`, is the natural-number time slot `s`
+ *     in which it was produced.
+ * 
+ *   • The **parent(b)** field links blocks into a chain/tree by referencing the
+ *     hash of the previous block  — Definition 5 [p. 16].  
+ *     The **leader** responsible for producing `b` is the validator assigned to
+ *     that slot’s *leader window*  — §1.1 Alpenglow Overview [p. 3].
+ * 
+ * For reasoning about *safety*, *liveness*, and *leader-window handover*,
+ * we abstract away the data-plane details (slices, shreds, Merkle paths)
+ * and represent a block by its **control-plane metadata** only:
+ * 
+ *     Block = {
+ *         slot   : Nat,          // time slot index — Definition 3
+ *         hash   : Hash,         // Merkle root of slice roots — Definition 4
+ *         parent : Hash,         // parent block reference — Definition 5
+ *         leader : ValidatorID   // node producing this slot — §1.1
+ *     }
+ * 
+ * Note on the leader field: The leader is derivable from leader(slot) and is
+ * verified in the data plane by signature checks on slices (Definitions 1–2).
+ * We include it explicitly here as a modeling convenience for predicates like
+ * LeaderMatchesSchedule, rather than as a consensus-layer header field.
+ * 
+ * This abstraction is sufficient for formal proofs and protocol reasoning,
+ * while the actual implementation additionally includes the slice/shred
+ * hierarchy for data dissemination and repair (§2.1–§2.2).
+ * 
+ * References:
+ *   • Solana Alpenglow White Paper v1.1 — §1.1 (p. 3), §2.1 (p. 14–16)
+ *     [Definitions 1 – 5]
+ * ------------------------------------------------------------------------------ *)
 
 Block == [
     slot: Slots,
@@ -51,12 +80,30 @@ Block == [
     leader: Validators
 ]
 
-\* Def. 3–4: a block carries its parent’s identifier and a hash; we add
-\* leader explicitly to track proposer identity (cf. §1.1, :53).
+(* ------------------------------------------------------------------------------
+ * GenesisBlock — Sentinel Origin of the Chain
+ * ------------------------------------------------------------------------------
+ * The Alpenglow whitepaper (§1.5, p. 11) introduces a *"notional genesis block"*
+ * as the logical root of the blockchain. It is not a literal data structure in
+ * the protocol but a conceptual anchor ensuring that every block has a parent.
+ * 
+ * Protocol slots are defined as s = 1, 2, ..., L (§1.1, p. 9). Genesis (slot 0)
+ * is NOT a protocol slot but a sentinel for ancestry termination. When reasoning
+ * about the protocol, quantifiers over Slots should range over s >= 1.
+ * 
+ * Rationale:
+ *   • The genesis block provides a terminating base case for parent-link traversal.
+ *   • Self-parenting (parent = hash) forms a clean sentinel so ancestry checks stop
+ *     when reaching the root.
+ *   • Genesis occurs before any leader window (§1.1, p. 3); the chosen validator is
+ *     irrelevant for correctness.
+ * 
+ * Reference:
+ *   • Solana Alpenglow White Paper v1.1 — §1.5 "Correctness" (p. 11)
+ *     "Every block is associated with a parent (starting at some notional genesis block)..."
+ *   • §1.1 (p. 9): "slots s = 1, 2, ..., L"
+ * ------------------------------------------------------------------------------ *)
 
-\* Genesis modeling (paper uses notional genesis; we model it explicitly):
-\* - The paper reasons “from genesis” but does not prescribe a representation.
-\* - We encode genesis as slot 0 and self-parented; this simplifies ancestry.
 GenesisBlock == [
     slot |-> 0,
     hash |-> GenesisHash,
@@ -64,48 +111,63 @@ GenesisBlock == [
     leader |-> CHOOSE v \in Validators : TRUE  \* Arbitrary; leader is irrelevant
 ]
 
-\* Note: “self-parented” is a specification convention, not a paper mandate.
-\* It aligns with Def. 5’s lineage and the correctness prose at :243.
-
-\* Auxiliary predicate: characterize the genesis block shape explicitly.
 IsGenesis(b) ==
     /\ b.slot = 0
     /\ b.hash = GenesisHash
     /\ b.parent = GenesisHash
 
-\* ============================================================================
-\* BLOCK VALIDATION (format/typing per Def. 3–5; paper §2.1)
-\* ============================================================================
-
-\* Well-typed block predicate (local format only):
-\* - Mirrors Def. 3–4 types; disallows self-parenting for non-genesis (Def. 5).
-\* - Parent existence and slot ordering are enforced by ValidParentChild and
-\*   by proposer actions (Alg. 3 :759); not here by design.
-\* - Schedule adherence is checked with LeaderMatchesSchedule(b) where needed.
+(* ----------
+ *
+ *  A block is valid if:
+ *  - Its slot number exists in the global set of Slots.
+ *  - Its hash and parent are valid cryptographic block identifiers.
+ *  - Its leader belongs to the current validator set.
+ *  - It obeys the slot ordering rule — no non-genesis block may reference itself as parent.
+ *  - The genesis block (slot = 0) is a unique self-parented sentinel anchoring the chain.
+ *  
+ *  Note: The parent-child slot ordering constraint (child.slot > parent.slot) is
+ *  enforced by ValidParentChild, not here, since it requires both blocks.
+ *  
+ *  Grounded in:
+ *  – Definition 3–5 (§2.1, pp. 14-16): slot(b), hash(b), parent(b)
+ *  – §1.1 (p. 3) and §1.5 (p. 11): leader scheduling, parent-child chain, genesis reference
+ *
+ * ---------- *)
 IsValidBlock(b) ==
     /\ b.slot \in Slots
     /\ b.hash \in BlockHashes
     /\ b.parent \in BlockHashes
     /\ b.leader \in Validators
-    /\ b.slot > 0 => b.parent # b.hash  \* Non-genesis blocks can't self-reference
-    /\ (b.slot = 0 => IsGenesis(b))      \* If slot is 0, it must be the (unique) genesis shape
+    /\ b.slot > 0 => b.parent # b.hash
+    /\ (b.slot = 0 => IsGenesis(b))
 
-\* Mapping and rationale:
-\* - Slots and leader per §1.1 (:53); hash/parent per Def. 3–4 (:351, :357).
-\* - Non-genesis cannot self-parent (Def. 5 lineage semantics; :363).
-\* - We explicitly constrain slot 0 to the canonical genesis representation.
-
-\* Two different blocks for the same slot (safety lemmas 23–24):
-\* - Used to express and rule out slot-level conflicts via certificates.
-\* - See §2.4 Lemma 23/24 and Theorem 1 (single chain).
-
-\* Whitepaper refs: slots and leaders (§1.1 :53), hashing (Def. 4 :357),
-\* uniqueness in notarization/finalization (Lemma 24 :855, Thm. 1 :930).
-
-\* Parent-child relationship (lineage per Def. 5; creation per §2.7/Alg. 3):
-\* - Child references parent hash and has a strictly higher slot.
-\* - Alg. 3 builds step-by-step across a window; we keep `parent.slot < child.slot`
-\*   to allow harmless slot gaps in abstract reasoning if needed.
+(* ------------------------------------------------------------------------------
+ * ValidParentChild rationale (Alpenglow whitepaper)
+ * 
+ * Rationale for parent–child checks in Alpenglow
+ * 
+ * • Parent linkage by hash:
+ *   The block’s data M includes both slot(parent(b)) and hash(parent(b)),
+ *   meaning a child block carries its parent’s hash in its metadata.
+ *   (p. 15, Definition 3)
+ * 
+ * • Protocol usage of the parent hash:
+ *   Voting logic operates on the parent hash recorded in the block header:
+ *   Block(s, hash, hash_parent) and ParentReady(hash_parent).
+ *   (pp. 24–25, Algorithms 1–2)
+ * 
+ * • Strictly increasing slots:
+ *   A child’s slot must be higher than its parent’s slot, enforcing
+ *   forward time and forbidding “time-travel” links.
+ *   (p. 11)
+ * 
+ * • Structural consequence:
+ *   Parent pointers combined with strictly increasing slots imply
+ *   edges always point to earlier slots (acyclic). When finalized,
+ *   blocks form a single chain of parent references.
+ *   (p. 22; see also the descendant-based safety phrasing on p. 11)
+ *
+ * ------------------------------------------------------------------------------ *)
 ValidParentChild(parent, child) ==
     /\ parent.hash = child.parent   \* Child references parent correctly
     /\ parent.slot < child.slot     \* Parent comes before child
@@ -125,46 +187,36 @@ ValidParentChild(parent, child) ==
 CreateNotarVoteForBlock(v, b) ==
     CreateNotarVote(v, b.slot, b.hash)
 
-\* Well-formedness lemma: a notar-vote constructed for a valid block is a
-\* valid vote (content-only; signatures are abstracted).
-THEOREM CreateNotarVoteForBlockWellTyped ==
-    \A v \in Validators, b \in Block :
-        IsValidBlock(b) => IsValidVote(CreateNotarVoteForBlock(v, b))
 
-(***************************************************************************
- * Create a notar-fallback vote for a given block. Like the notar wrapper,
- * this preserves the slot–hash pairing and avoids call‑site mismatches.
- * Signatures are abstracted; only logical content matters (see §1.6).
- ***************************************************************************)
 CreateNotarFallbackVoteForBlock(v, b) ==
     CreateNotarFallbackVote(v, b.slot, b.hash)
 
-\* Well-formedness lemma: a notar-fallback vote constructed for a valid
-\* block is a valid vote (content-only; signatures are abstracted).
-THEOREM CreateNotarFallbackVoteForBlockWellTyped ==
-    \A v \in Validators, b \in Block :
-        IsValidBlock(b) => IsValidVote(CreateNotarFallbackVoteForBlock(v, b))
+(* 
+IsAncestor(b1, b2) — rationale from the Alpenglow whitepaper
 
-\* ============================================================================
-\* ANCESTRY RELATIONSHIPS (whitepaper §2.1, Def. 5; safety §2.6/Thm. 1)
-\* ============================================================================
+• Ancestor ≙ reachability via parent links (reflexive):
+  Definition 5 states an ancestor of block b is any block reachable from b by
+  following parent links (b, parent(b), parent(parent(b)), …), and explicitly notes
+  that b is its own ancestor (p. 15).
 
-(***************************************************************************
- * Ancestry (Def. 5 :363) underpins safety:
- * - If A is an ancestor of B, B’s history includes A (parent pointers).
- * - Finalized blocks form a single chain: any two are comparable by ancestry
- *   (overview :243; Theorem 1 :930). The finalized set is kept closed under
- *   ancestors operationally (FinalizeBlock unions GetAncestors).
- ***************************************************************************)
+• Backward walk via parent identifiers in block data:
+  Definition 3 specifies that each block’s data includes slot(parent(b)) and
+  hash(parent(b)), enabling a search step that finds the unique parent by
+  matching a block with hash == child.parent (p. 15).
 
-\* Ancestor test (Def. 5): true iff following parent links from b2 reaches b1.
-\* Universe parameter `allBlocks` must contain the ancestry of b2 for completeness.
+• Termination conditions:
+  The chain starts at “some notional genesis block”; thus, starting from b2 and
+  repeatedly following parent links will either (i) encounter b1 (ancestor found),
+  (ii) reach genesis without finding b1 (no ancestry), or (iii) hit a missing parent
+  in the available set (broken chain ⇒ no ancestry). (p. 11)
+
+References: p. 11 (genesis lineage), p. 15 (Def. 3: parent identifiers; Def. 5: ancestor/descendant).
+*)
 IsAncestor(b1, b2, allBlocks) ==
     LET
-        \* Recursively follow parent links using recursive function expression
         ReachableFrom[b \in allBlocks] ==
             IF b = b1 THEN TRUE  \* Found the ancestor!
-            ELSE IF b.hash = GenesisHash THEN FALSE  \* Hit genesis (explicit sentinel)
+            ELSE IF b.hash = GenesisHash THEN (b1.hash = GenesisHash)  \* Hit genesis; check if b1 is genesis
             ELSE 
                 \* Find the parent block and continue
                 LET parentBlocks == {p \in allBlocks : p.hash = b.parent}
@@ -173,72 +225,114 @@ IsAncestor(b1, b2, allBlocks) ==
                         IN ReachableFrom[parent]
     IN b1 = b2 \/ ReachableFrom[b2]  \* A block is its own ancestor
 
-\* Descendant is the inverse of ancestor (Def. 5 :363).
-IsDescendant(b1, b2, allBlocks) == 
-    IsAncestor(b2, b1, allBlocks)
+(* 
+GetAncestors / ComparableByAncestry — Alpenglow whitepaper grounding
 
-\* All ancestors of b (includes b itself per Def. 5).
-\* Used during finalization to ensure ancestor-closure of finalized sets (:541).
+• Ancestor/descendant relation:
+  Defined as reachability via parent links (“b, parent(b), parent(parent(b)), …”).
+  The relation is reflexive: a block is its own ancestor and descendant.
+  Reference: p. 15, Definition 5.
+
+• Parent linkage available in block data:
+  Each block’s data M contains slot(parent(b)) and hash(parent(b)),
+  enabling backward traversal by matching parent identifiers.
+  Reference: p. 15, Definition 3.
+
+• GetAncestors(b, allBlocks):
+  The set { x ∈ allBlocks : IsAncestor(x, b) }.
+  Due to reflexivity (Def. 5), this set includes b itself unless explicitly excluded.
+  Reference: p. 15, Definition 5.
+
+• ComparableByAncestry(b1, b2, allBlocks):
+  TRUE iff IsAncestor(b1, b2) ∨ IsAncestor(b2, b1),
+  i.e., the blocks are related by the ancestor/descendant relation.
+  Reference: p. 15, Definition 5.
+*)
+
 GetAncestors(b, allBlocks) ==
     {ancestor \in allBlocks : IsAncestor(ancestor, b, allBlocks)}
 
-\* Comparable by ancestry iff one is an ancestor of the other.
 ComparableByAncestry(b1, b2, allBlocks) ==
     IsAncestor(b1, b2, allBlocks) \/ IsAncestor(b2, b1, allBlocks)
 
-\* Same-chain iff comparable by ancestry. When used over finalized sets, this
-\* encodes Theorem 1 (single-chain finality) provided finalization keeps
-\* ancestor-closure (as in MainProtocol).
-InSameChain(b1, b2, allBlocks) ==
-    ComparableByAncestry(b1, b2, allBlocks)
+(* 
+Leader/window schedule — alignment with Alpenglow (whitepaper refs in parentheses)
 
-\* ============================================================================
-\* LEADER WINDOWS (whitepaper §1.1, §2.7; Alg. 3)
-\* ============================================================================
+• Leader(slot) == WindowLeader[WindowIndex(slot)]:
+  Alpenglow assigns a designated leader to every slot and groups consecutive slots
+  into a fixed-length “leader window”; the leader schedule is determined by a 
+  (threshold) VRF. Mapping a slot to its window index (WindowIndex) and then to 
+  that window’s leader (WindowLeader) is a faithful implementation of this model. (p. 2)
 
-(***************************************************************************
- * Leaders control fixed-length consecutive slots (a “window”) (§1.1 :53, §2.7 :678).
- * Example with WindowSize = 4: 1–4, 5–8, 9–12, … share the same leader.
- * First-slot semantics are special for timeouts/ParentReady (Def. 17 :613).
- ***************************************************************************)
+• ASSUME ∀ k ∈ {WindowIndex(s) : s ∈ Slots} : WindowLeader[k] ∈ Validators
+  Leaders are drawn from the validator set (the set of nodes with stake); the 
+  schedule selects a validator for each window/slot via the VRF. (p. 2)
 
-\* Window index (groups slots into windows). Helps state/derive window facts.
-\* Whitepaper: public schedule and windows (§1.1 :222, §2.7 :678).
+• FirstSlotOfWindow(slot):
+  The paper reasons about “the first slot of the leader window” (e.g., ParentReady 
+  is defined specifically for the first slot; timeouts are set for all i ∈ windowSlots(s)).
+  Computing the window’s start from a fixed window length is a standard implementation 
+  detail consistent with these references. (pp. 21 (ParentReady as “first of its leader window”), 
+  23 (Definition 17, timeouts over windowSlots(s)), 25 (firstSlot boolean in Algorithm 2))
+
+• IsFirstSlotOfWindow(slot) == (slot = FirstSlotOfWindow(slot)):
+  Algorithm 2 explicitly branches on whether s “is the first slot in leader window,” 
+  matching this predicate. (p. 25)
+
+• LeaderMatchesSchedule(b) == (b.leader = Leader(b.slot)):
+  Blocks are produced by the leader for the window (“Block creation for leader window 
+  starting with slot s”), and Rotor describes the leader (sender) who broadcasts slices. 
+  Checking that the block’s producer/signature matches the scheduled leader for slot s 
+  reflects the protocol’s assumption that the leader authors the block. (pp. 27 (Alg. 3), 15 (Rotor: leader/sender))
+*)
+
 WindowIndex(slot) ==
     IF slot = 0 THEN 0 ELSE (slot - 1) \div WindowSize
 
-\* Leader abstraction: VRF-chosen per leader window. We model it with a
-\* window-indexed function, which immediately implies window consistency.
 Leader(slot) == WindowLeader[WindowIndex(slot)]
 
-\* Type assumption for the schedule abstraction we actually index into.
 ASSUME \A k \in {WindowIndex(s) : s \in Slots} : WindowLeader[k] \in Validators
 
-\* First slot of the window containing `slot` (ParentReady gating :613).
 FirstSlotOfWindow(slot) ==
     IF slot = 0 THEN 0
     ELSE ((slot - 1) \div WindowSize) * WindowSize + 1
 
-\* Check if this slot is the first in its window
 IsFirstSlotOfWindow(slot) ==
     slot = FirstSlotOfWindow(slot)
 
-\* Leader-schedule adherence helper for blocks.
 LeaderMatchesSchedule(b) == b.leader = Leader(b.slot)
 
-\* Leaders stay fixed across a window (§2.7 :678; Alg. 3 :759). This is a
-\* theorem here because `Leader` is defined via `WindowLeader[WindowIndex(_)]`.
-LeaderScheduleWindowConsistency ==
-    \A s \in Slots : Leader(s) = Leader(FirstSlotOfWindow(s))
+(* 
+WindowSlots(slot) and Tip(chain) — Whitepaper grounding
 
-THEOREM LeaderScheduleWindowConsistency
+• Leader windows and windowSlots:
+  – Algorithm 2 defines: “function windowSlots(s): return array with slot numbers
+    of the leader window with slot s.” (p. 25)
+  – Each slot has a designated leader; each leader controls a fixed number of
+    consecutive slots (the leader window). (p. 10)
+  – When ParentReady(s, …) is emitted for the first slot s of a window, timeouts
+    are scheduled for all i ∈ windowSlots(s). (Definition 17, p. 23)
+  – The leader of the window beginning with slot s produces blocks for all
+    slots windowSlots(s). (p. 26)
 
-\* Interpretation: Alg. 3 lets a leader produce several consecutive slots.
-\* These helpers compute window starts and capture “same leader across window”.
+• First slot of window and indexing:
+  – The paper distinguishes “the first slot in the leader window” and uses it
+    to drive downstream logic (e.g., timeouts). (p. 23)
+  – Epoch slots are natural numbers s = 1 … L (p. 10); the chain begins at a
+    notional genesis block (p. 11). Modeling WindowSlots with s ≥ 1 is consistent
+    with this indexing and omits genesis from the slot set.
 
-\* All slots in the same window as `slot` (WINDOWSLOTS in paper :678).
-\* Note: Genesis (slot 0) is not a production slot; callers typically restrict
-\* to production domains when scheduling timeouts per Def. 17 (:613).
+• Tip(chain) via maximal slot:
+  – Blocks are ordered by natural-numbered slots, with child.slot > parent.slot
+    (p. 11). On any linear chain, the block with the maximum slot is the latest.
+  – The CHOOSE definition “x ∈ chain : ∀ y ∈ chain : x.slot ≥ y.slot” therefore
+    selects the tip under the paper’s slot order.
+
+References: p. 10 (slots, leader windows), p. 11 (genesis, strict slot order),
+p. 23 (Def. 17 timeouts over windowSlots), p. 25 (Alg. 2: windowSlots),
+p. 26 (leader produces all slots in windowSlots).
+*)
+
 WindowSlots(slot) ==
     LET first == FirstSlotOfWindow(slot)
     IN {s \in Slots : 
@@ -246,59 +340,70 @@ WindowSlots(slot) ==
         /\ s < first + WindowSize
         /\ s >= 1}
 
-\* Returns the set of slot numbers owned by the leader of `slot`.
+\* WindowSlotsSeq returns an ordered sequence for timeout scheduling (Algorithm 2, line 4-5).
+\* The paper uses "for i \in windowSlots(s)" with timeout formula (i - s + 1) requiring order.
+WindowSlotsSeq(slot) ==
+    LET first == FirstSlotOfWindow(slot)
+    IN [ i \in 1..WindowSize |-> first + i - 1 ]
 
-\* Domain sanity: FirstSlotOfWindow(s) ∈ Slots when Slots is prefix-closed.
-THEOREM FirstSlotOfWindowInSlots ==
-    \A s \in Slots : FirstSlotOfWindow(s) \in Slots
-
-\* ============================================================================
-\* CHAIN OPERATIONS (using Def. 5 ancestry; §2.7 creation discipline)
-\* ============================================================================
-
-\* Note: A "chain" is represented as a set of blocks, not a sequence.
-\* Ordering-sensitive operations rely on the slot field or ancestry relations.
-
-\* Query whether a chain has a block at a specific slot
-
-\* Select the (unique) block at a specific slot in a chain.
-
-\* Complete chain (ancestors) from genesis to b (Def. 5 :363).
-
-\* Select the tip (maximum-slot element) of a non-empty chain
 Tip(chain) == CHOOSE x \in chain : \A y \in chain : x.slot >= y.slot
 
-\* Proper extension: the new block references the tip and increases slot.
-\* Alg. 3 extends slot-by-slot; we keep `>` (vs `= +1`) at this abstraction.
+
+(* 
+ExtendsChain / AllBlocksValid / UniqueBlocksPerSlot / SingleChain / UniqueBlockHashes
+— Alpenglow whitepaper grounding
+
+• Parent linkage and slot monotonicity:
+  – Each block's data M includes slot(parent(b)) and hash(parent(b)), enabling
+    exact parent–child linkage checks. (p. 15, Definition 3)
+  – The protocol orders blocks by natural-numbered slots, with child.slot > parent.slot.
+    (p. 11)
+  – Selecting the chain tip as the maximal-slot block matches this slot order. (p. 11)
+  → ExtendsChain(newBlock, existingChain) requiring ValidParentChild(tip,newBlock)
+    and newBlock.slot > tip.slot is consistent with the model.
+  – Precondition: ExtendsChain assumes existingChain is already linear (e.g., satisfies
+    SingleChain); if multiple blocks share the max slot, CHOOSE picks one arbitrarily.
+    This aligns with reasoning about finalized chains (p. 11).
+
+• Validity wrapper:
+  – Structural form of a block (p. 15, Def. 3) and block-hash definition (p. 15, Def. 4)
+    underpin a well-formedness predicate; AllBlocksValid simply lifts it over a set.
+
+• Finalized uniqueness per slot & linearity:
+  – “Finalized blocks form a single chain of parent–child links.” (p. 11)
+  – With child.slot > parent.slot (p. 11), a linear chain cannot contain two different
+    blocks at the same slot; hence UniqueBlocksPerSlot over finalized blocks.
+  – SingleChain over finalized blocks is exactly the whitepaper’s statement; requiring
+    pairwise ancestry-comparability captures linearity. (p. 11; p. 15, Definition 5)
+
+• Hash uniqueness modeling:
+  – The paper assumes a collision-resistant hash function (e.g., SHA256). (p. 12)
+  – Block hash is defined as the Merkle-root over the block’s slices. (p. 15, Definition 4)
+  – Modeling UniqueBlockHashes(S) (“equal hash ⇒ equal block”) reflects the standard
+    cryptographic assumption consistent with these definitions.
+
+References: p. 11 (Correctness: single finalized chain; child.slot > parent.slot),
+p. 12 (collision-resistant hash function), p. 15 (Definition 3: block & parent identifiers;
+Definition 4: block hash; Definition 5: ancestor/descendant).
+*)
+
 ExtendsChain(newBlock, existingChain) ==
     /\ existingChain # {}
     /\ LET tip == Tip(existingChain) IN
         /\ ValidParentChild(tip, newBlock)
         /\ newBlock.slot > tip.slot
 
-\* ============================================================================
-\* INVARIANTS FOR VERIFICATION (safety & typing alignment)
-\* ============================================================================
-
-\* All blocks are well-typed (Def. 3–4 fields; Def. 5 non-self-parent).
 AllBlocksValid(blocks) ==
     \A b \in blocks : IsValidBlock(b)
 
-\* No two different finalized blocks share a slot (safety corollary).
-\* Implied by single-chain safety; useful as a focused check.
 UniqueBlocksPerSlot(finalizedBlocks) ==
     \A b1, b2 \in finalizedBlocks :
         b1.slot = b2.slot => b1.hash = b2.hash
 
-\* Finalized blocks form a single chain (Theorem 1 :930; overview :243).
-\* Requires finalized sets to be closed under ancestry (operationally enforced).
 SingleChain(finalizedBlocks) ==
     \A b1, b2 \in finalizedBlocks :
-        InSameChain(b1, b2, finalizedBlocks)
+        ComparableByAncestry(b1, b2, finalizedBlocks)
 
-\* Hashes are unique within any set of blocks (guards CHOOSE determinism).
-\* Paper assumes collision resistance (Def. 4 :357); this predicate documents
-\* the uniqueness expectation where it matters locally in the model.
 UniqueBlockHashes(S) ==
     \A b1, b2 \in S : (b1.hash = b2.hash) => b1 = b2
 

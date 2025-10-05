@@ -47,7 +47,7 @@ CONSTANTS
     RotorMinRelayStake,       \* Modeling guard: min stake covered by selected relays
     GammaTotalShreds,         \* Γ > 0 — total shreds/relays per slice (§2.2 :382)
     GammaDataShreds,          \* γ > 0 — min shreds to reconstruct (§1.6 :267; §2.2 :384)
-    RotorMaxFailedRelayStake, \* Modeling guard: max failed stake tolerated within relays
+    RotorMaxFailedRelayStake  \* Modeling guard: max failed stake tolerated within relays
 
 ASSUME
     /\ GammaTotalShreds \in Nat \ {0}
