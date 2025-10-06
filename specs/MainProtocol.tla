@@ -1,71 +1,25 @@
 ---------------------------- MODULE MainProtocol ----------------------------
-(***************************************************************************
- * MAIN ALPENGLOW CONSENSUS PROTOCOL SPECIFICATION
- *
- * Purpose (high level)
- * - This module ties together the data model (blocks, messages, pools) and
- *   the Votor logic into a complete protocol, mirroring the whitepaper’s
- *   structure of Section 2 (Rotor → Blokstor → Votor → Safety/Liveness).
- *
- * Whitepaper references (section • key lines • page)
- * - Rotor success/failure (Definition 6): `alpenglow-whitepaper.md:414` • p.20–22
- *   Resilience note and “immediate fail”: `alpenglow-whitepaper.md:416` • p.20–22
- * - Blokstor emits Block(...): `alpenglow-whitepaper.md:468` • §2.3
- * - Votes & certificates overview: §2.4 at `alpenglow-whitepaper.md:474` • p.19–22
- *   • Definition 12 (storing votes): `alpenglow-whitepaper.md:513` • p.20–21
- *   • Definition 13 (certificates): `alpenglow-whitepaper.md:520` • p.20–21
- *   • Table 5/6 thresholds (80/60): see p.20 in the markdown (tables after 19)
- *   • Definition 14 (finalization): `alpenglow-whitepaper.md:536` • p.21
- *   • Definition 15 (Pool events): `alpenglow-whitepaper.md:543` • p.21
- *   • Definition 16 (fallback events + formulas): `alpenglow-whitepaper.md:554` • p.21–22
- *   • Definition 17 (timeouts): `alpenglow-whitepaper.md:607` and formula `:609` • p.23
- * - Votor algorithms: Algorithm 1 (event loop) `:634`, Algorithm 2 (helpers) `:676`,
- *   Algorithm 3 (block creation, optimistic) `:759` with overview text `:727`,
- *   Algorithm 4 (repair) `:801`.
- * - Safety (Theorem 1): §2.9 intro `:816`, statement `:930` • p.34–35
- * - Liveness (Theorem 2): §2.10 intro `:941`, statement `:1045` • p.36+
- * - Adversary and <20% Byzantine stake: Assumption 1 `:107`, model text `:226` • §1.5
- *
- * Reading guide
- * - Each section/action below starts with a brief explanation, explicit
- *   whitepaper references (file:line • section • page), assumptions, and
- *   any key formulas. The intent is readability without flipping back to
- *   the paper while keeping the math precise.
- ***************************************************************************)
+
+(* WP Sec. 2 overview + Sec. 1.5 model. Module encodes Votor + Rotor + Blokstor + Repair at the level of messages, slots, leader windows, and GST. Safety follows Sec. 2.9; liveness after GST follows Sec. 2.10. :contentReference[oaicite:1]{index=1} *)
 
 EXTENDS Naturals, FiniteSets, Sequences, TLC,
         Messages, Blocks,
         Certificates, VoteStorage,
         VotorCore, Rotor
-
-\* ============================================================================
-\* CONSTANTS
-\* ============================================================================
+(* WP Sec. 2.4–2.6 define messages, certificates, Pool, and Votor;
+   Sec. 2.2 defines Rotor; Sec. 2.3 Blokstor; Sec. 2.8 Repair. :contentReference[oaicite:2]{index=2} *)
 
 CONSTANTS
-    NumValidators,      \* Number of validators (e.g., 4 for testing)
-    ByzantineCount,     \* Number of Byzantine validators (< 20% of stake)
-    GST,                \* Global Stabilization Time
-    MaxSlot,            \* Maximum slot for bounded model checking
-    MaxBlocks,          \* Maximum blocks for bounded model checking
-    \* Bounded-time finalization latency parameters (whitepaper §1.3, §1.5, §2.6)
-    Delta80,            \* Models δ80% (time unit consistent with `time`)
-    Delta60             \* Models δ60% (time unit consistent with `time`)
-
-(***************************************************************************
- * Constants — model parameters and paper assumptions
- *
- * Whitepaper refs
- * - Fault tolerance <20% stake (Assumption 1): `alpenglow-whitepaper.md:107`, `:226` • §1.5
- * - GST/partial synchrony and timing: `alpenglow-whitepaper.md:230` (synchrony),
- *   timeouts/clock discussion `:224` • §1.5; timeout schedule `:607`, `:609` • p.23
- * - 80/60 thresholds context: p.19–21 (Tables 5–6 around `:474`–`:520`).
- *
- * Notes
- * - `GST` gates liveness/fairness in Spec after network stabilizes (§2.10).
- * - `MaxSlot`/`MaxBlocks` bound state space for model checking only (no direct
- *   whitepaper analogue).
- ***************************************************************************)
+    NumValidators,      
+    ByzantineCount,     
+    GST,                
+    MaxSlot,            
+    MaxBlocks,          
+    
+    Delta80,            
+    Delta60             
+(* WP Abstract + Sec. 1.3 latency: finality time min(δ80, 2δ60) “after distribution”.
+   We model δθ with constants Delta80/Delta60 and tie “distribution” to availability (below). :contentReference[oaicite:3]{index=3} *)
 
 ASSUME
     /\ NumValidators \in Nat \ {0}
@@ -75,122 +29,60 @@ ASSUME
     /\ MaxSlot \in Nat \ {0}
     /\ MaxBlocks \in Nat \ {0}
     /\ Cardinality(Validators) = NumValidators
-    /\ Slots = 1..MaxSlot   \* Protocol slots s ≥ 1 (whitepaper §1.5 p. 213); genesis is slot 0
+    /\ Slots = 1..MaxSlot   
     /\ Delta80 \in Nat \ {0}
     /\ Delta60 \in Nat \ {0}
-
-\* ============================================================================
-\* SYSTEM STATE VARIABLES
-\* ============================================================================
+(* WP Sec. 1.5 “Names/Node/Slot/Time” + Sec. 1.2 Assumptions. Slots are 1..MaxSlot within an epoch; time is unbounded Nat with GST marker. :contentReference[oaicite:4]{index=4} *)
 
 VARIABLES
-    validators,         \* Map: Validators -> ValidatorState
-    blocks,             \* Set of all blocks in the system
-    messages,           \* Set of messages in transit
-    byzantineNodes,     \* Set of Byzantine validator IDs
-    unresponsiveNodes,  \* Set of honest-but-unresponsive validator IDs
-    time,               \* Global time (for modeling synchrony)
-    finalized,          \* Map: Validators -> Set of finalized blocks
-    blockAvailability,  \* Map: Validators -> Set of reconstructed blocks
-    \* Ghost timers to enforce bounded-time finalization (min(δ80%, 2δ60%)).
-    \* They record the first model time at which a block (slot s, hash h)
-    \* becomes available to ≥80% or ≥60% of stake, respectively.
-    avail80Start,       \* [1..MaxSlot -> [BlockHashes -> Nat]]; 0 means “not started”
-    avail60Start        \* [1..MaxSlot -> [BlockHashes -> Nat]]; 0 means “not started”
+    validators,         
+    blocks,             
+    messages,           
+    byzantineNodes,     
+    unresponsiveNodes,  
+    time,               
+    finalized,          
+    blockAvailability,  
+    
+    
+    
+    avail80Start,       
+    avail60Start        
+(* WP Sec. 2: validators carry Pool, state, timeouts (Alg. 1–2);
+   blocks and availability model Blokstor/Rotor (Sec. 2.2–2.3);
+   messages transport votes/certificates (Sec. 2.4–2.5);
+   avail*Start capture the moment ≥θ stake has the block, to reflect δθ clocks. :contentReference[oaicite:5]{index=5} *)
 
 vars == <<validators, blocks, messages, byzantineNodes, unresponsiveNodes, time, finalized, blockAvailability, avail80Start, avail60Start>>
 
-(***************************************************************************
- * State variables — correspondence to the paper
- *
- * Whitepaper refs
- * - Blocks/Blokstor and Block(...) event: `alpenglow-whitepaper.md:468` • §2.3
- * - Votes/certificates/Pool: `:474` (intro), `:513` (Def.12), `:520` (Def.13) • p.19–21
- * - Finalization definition: `:536` (Def.14) • p.21
- * - Timeouts/clock model: `:224` (local clocks), `:607`–`:613` (Def.17) • p.23
- * - Adversary/byzantine set: `:107` (Assumption 1), `:226` (model) • §1.5
- *
- * Mapping
- * - `validators`: local Votor state incl. `pool`, `state`, `timeouts` (Alg.1–2).
- * - `blocks`: the set of known blocks (Blokstor storage) per §2.3.
- * - `messages`: in-flight votes/certificates (Tables 5–6; §2.4).
- * - `byzantineNodes`: nodes allowed arbitrary behavior (Assumption 1).
- * - `time`: global model time to drive Def.17-style timeouts uniformly.
- * - `finalized`: per-validator set of finalized blocks (Def.14).
- * - `blockAvailability`: which blocks each validator can reconstruct (Rotor/repair).
- ***************************************************************************)
-
-\* ============================================================================
-\* HELPER FUNCTIONS
-\* ============================================================================
-
-\* Get correct, responsive validators (non-Byzantine and not unresponsive)
 CorrectNodes == Validators \ (byzantineNodes \cup unresponsiveNodes)
+(* WP Assumption 2 (20% byz + 20% crash permitted, ≥60% correct). We separate byzantine vs. unresponsive to reason about Sec. 2.11. :contentReference[oaicite:6]{index=6} *)
 
-\* Stake premises (Assumptions 1 and 2)
 ByzantineStakeOK == (CalculateStake(byzantineNodes) * 100) < (TotalStake * 20)
 UnresponsiveStakeOK ==
     /\ (CalculateStake(unresponsiveNodes) * 100) <= (TotalStake * 20)
     /\ (byzantineNodes \cap unresponsiveNodes) = {}
 
-(***************************************************************************
- * ASSUMPTION 2 — extended crash tolerance (§1.2)
- *
- * Whitepaper refs
- * - Assumption 2 statement: `alpenglow-whitepaper.md:122`.
- *
- * Explanation
- * - Byzantine nodes < 20% stake (Assumption 1, also enforced separately)
- * - Unresponsive/crashed nodes ≤ 20% stake (additional tolerance)
- * - Byzantine and unresponsive sets are disjoint
- * - Correct (responsive) nodes > 60% stake (derived from above)
- * - This predicate explicitly groups all Assumption 2 requirements for
- *   auditability and use in liveness properties (issues_claude.md §15).
- ***************************************************************************)
 Assumption2OK ==
     /\ ByzantineStakeOK
     /\ UnresponsiveStakeOK
     /\ (CalculateStake(CorrectNodes) * 100) > (TotalStake * 60)
+(* WP Sec. 1.2 Assumptions 1 and 2. These constraints match f<20% byz and extra crash ≤20% with ≥60% correct; used for safety in Sec. 2.9 and liveness sketch in Sec. 2.11. :contentReference[oaicite:7]{index=7} *)
 
-\* Repair trigger (Algorithm 4; §2.8). Include fast-finalization to cover fast-only
-\* implementations. See also Blokstor repair mention: `alpenglow-whitepaper.md:470`.
-\* Note: Genesis (slot 0) never needs repair - it's available to all nodes at Init.
 NeedsBlockRepair(pool, block) ==
     LET slot == block.slot
         hash == block.hash
-    IN /\ slot \in Slots  \* Only protocol slots; genesis is outside pool domain
+    IN /\ slot \in Slots  
        /\ (HasFastFinalizationCert(pool, slot, hash)
            \/ HasNotarizationCert(pool, slot, hash)
            \/ HasNotarFallbackCert(pool, slot, hash))
+(* WP Sec. 2.8 Algorithm 4 + Definition 19: after observing fast‑finalization or (notarization / notar‑fallback) for (s,hash), the block must be retrievable via Repair. :contentReference[oaicite:8]{index=8} *)
 
-\* Check if we're after GST (network is stable; §1.5/§2.10)
 AfterGST == time >= GST
+(* WP Sec. 1.5 GST definition. Before GST, messages may be arbitrarily delayed; after GST, Δ bounds hold. :contentReference[oaicite:9]{index=9} *)
 
-\* Assumption 1: Byzantine stake < 20% of total (`alpenglow-whitepaper.md:107`)
-\* (used inline in Init/Invariant/Liveness properties)
-\* Honest participation bound: at most 20% unresponsive stake (used inline)
-
-\* ============================================================================
-\* AVAILABILITY-STAKE HELPERS (for bounded-time finalization)
-\* ============================================================================
-
-(***************************************************************************
- * AvailabilityStakeFor(s, h): stake of validators that currently have block
- * (slot s, hash h) in their `blockAvailability`. This abstracts the
- * whitepaper's δ_θ notion (Section 1.5 at :241) by detecting when a block
- * has reached ≥θ% stake of nodes.
- * 
- * DESIGN CHOICE: We measure availability only over CorrectNodes (honest + 
- * responsive), excluding Byzantine and crashed nodes. The whitepaper's δ_θ
- * definition doesn't explicitly specify the domain, stating only "a set of 
- * nodes with cumulative stake at least θ". We interpret this as correct 
- * nodes because:
- * - Byzantine nodes can arbitrarily delay/refuse participation
- * - Crashed nodes by definition cannot participate in message exchange
- * - δ_θ timing guarantees only make sense for cooperating nodes
- * This interpretation ensures sound bounded-time finalization analysis.
- ***************************************************************************)
 ExistsBlockAt(s, h) == \E b \in blocks : b.slot = s /\ b.hash = h
+(* Utility for availability timers. *)
 
 AvailabilityStakeFor(s, h) ==
     LET holders == { v \in CorrectNodes :
@@ -202,35 +94,16 @@ AvailMeets(s, h, thetaPercent) ==
 
 Avail80Now(s, h) == AvailMeets(s, h, 80)
 Avail60Now(s, h) == AvailMeets(s, h, 60)
+(* WP Abstract + Sec. 1.3: δθ measures delay for θ% stake to communicate.
+   We proxy “distributed” by ≥θ% correct stake having the block (Rotor-delivered),
+   starting δ80/δ60 clocks accordingly. :contentReference[oaicite:10]{index=10} *)
 
-\* ============================================================================
-\* INITIAL STATE
-\* ============================================================================
-
-(***************************************************************************
- * INITIAL STATE — bootstrapping genesis and validator state
- *
- * Whitepaper refs
- * - Pool events and ParentReady: `alpenglow-whitepaper.md:543`–`:546` (Def.15) • p.21
- * - One-window gating via ParentReady for the first slot of a window (Alg.1–2).
- *
- * Explanation
- * - We mark slot 1 as ParentReady by fiat to seed the first leader window,
- *   consistent with Def.15’s semantics without requiring an explicit genesis
- *   certificate. Each validator starts from `InitValidatorState` and records
- *   the genesis hash for slot 1 to allow the first proposer to proceed.
- *
- * Assumptions
- * - Byzantine stake < 20% (Assumption 1): `alpenglow-whitepaper.md:107`.
- ***************************************************************************)
 Init ==
     /\ validators = [v \in Validators |->
                         LET base == InitValidatorState(v)
                             withParent == [base EXCEPT !.parentReady[1] = GenesisHash]
                         IN AddState(withParent, 1, "ParentReady")]
-    \* Genesis bootstrapping: slot 1 is considered ParentReady by fiat to seed
-    \* the first leader window (consistent with Definition 15). This avoids
-    \* requiring an explicit genesis certificate while preserving semantics.
+    (* WP Sec. 2.7: first slot of first window is parent‑ready on genesis so the first leader can produce immediately. :contentReference[oaicite:11]{index=11} *)
     /\ blocks = {GenesisBlock}
     /\ messages = {}
     /\ byzantineNodes \in {S \in SUBSET Validators : Cardinality(S) = ByzantineCount}
@@ -242,27 +115,9 @@ Init ==
     /\ blockAvailability = [v \in Validators |-> {GenesisBlock}]
     /\ avail80Start = [s \in 1..MaxSlot |-> [h \in BlockHashes |-> 0]]
     /\ avail60Start = [s \in 1..MaxSlot |-> [h \in BlockHashes |-> 0]]
+(* WP Sec. 2.1–2.3: initialize genesis block, Blokstor contains genesis everywhere;
+   Sec. 1.2 stake bounds. :contentReference[oaicite:12]{index=12} *)
 
-\* ============================================================================
-\* ACTIONS (State Transitions)
-\* ============================================================================
-
-(***************************************************************************
- * RECEIVE BLOCK — Blokstor → Votor handoff (Algorithm 1)
- *
- * Whitepaper refs
- * - Blokstor emits Block(s, hash(b), hash(parent(b))): `alpenglow-whitepaper.md:468` • §2.3
- * - Algorithm 1, event loop: `alpenglow-whitepaper.md:634`.
- *
- * Explanation
- * - Consume a Rotor-delivered block and process it via Votor (TRYNOTAR path).
- *
- * Assumptions
- * - Only the first complete block per slot is delivered to Alg.1 (“first complete
- *   block”), modeled via the `BlockSeen` flag to ignore duplicates.
- * - Dissemination/broadcast of votes and certificates is decoupled and handled
- *   by separate actions (BroadcastLocalVote, DeliverVote, DeliverCertificate).
- ***************************************************************************)
 ReceiveBlock(v, block) ==
     /\ v \in CorrectNodes
     /\ block \in blocks
@@ -272,20 +127,8 @@ ReceiveBlock(v, block) ==
     /\ validators' = [validators EXCEPT ![v] =
                          AddState(HandleBlock(validators[v], block), block.slot, "BlockSeen")]
     /\ UNCHANGED <<blocks, messages, byzantineNodes, unresponsiveNodes, time, finalized, blockAvailability, avail80Start, avail60Start>>
+(* WP Sec. 2.3 Blokstor: node processes first complete block per slot when stored; we tag “BlockSeen”. Safety uses only notarized/skip outcomes (Sec. 2.9). :contentReference[oaicite:13]{index=13} *)
 
-(***************************************************************************
- * GENERATE CERTIFICATE — aggregate and broadcast (Definition 13)
- *
- * Whitepaper refs
- * - Certificates and broadcast-on-store: `alpenglow-whitepaper.md:520` (Def.13) • p.20–21
- *   • Single stored copy per type per slot/block: p.21 (immediately after `:520`).
- * - Thresholds (Table 6): p.20 (fast 80%, notar 60%, fallback 60%, skip 60%).
- *
- * Explanation
- * - Aggregate qualifying votes into a certificate and broadcast it if newly
- *   learned by any node (abstracting the “store then broadcast” rule).
- * - Prefer fast-finalization first, then notarization among candidates.
- ***************************************************************************)
 GenerateCertificateAction(v, slot) ==
     /\ v \in CorrectNodes
     /\ slot \in Slots
@@ -306,40 +149,20 @@ GenerateCertificateAction(v, slot) ==
              IN /\ messages' = messages \cup {cert}
                 /\ validators' = [validators EXCEPT ![v].pool = StoreCertificate(validators[v].pool, cert)]
     /\ UNCHANGED <<blocks, byzantineNodes, unresponsiveNodes, time, finalized, blockAvailability, avail80Start, avail60Start>>
+(* WP Def. 13: when enough votes exist, generate and broadcast the certificate, storing one per type. Prefer fast-finalization if present. :contentReference[oaicite:14]{index=14} *)
 
-(***************************************************************************
- * FINALIZE BLOCK — fast vs slow (Definition 14)
- *
- * Whitepaper refs
- * - Finalization modes: `alpenglow-whitepaper.md:536` (Def.14) • p.21
- *   • Fast: Fast-FinalizationCert(b) → finalize b.
- *   • Slow: FinalizationCert(s) + NotarizationCert(s, b) → finalize b in slot s.
- *
- * Explanation
- * - Finalize block `b` if either an 80% fast-finalization cert exists, or a 60%
- *   notarization cert exists together with a 60% finalization cert for the slot.
- ***************************************************************************)
 FinalizeBlock(v, block) ==
     /\ v \in CorrectNodes
     /\ block \in blocks
-    /\ block.slot \in Slots  \* Only protocol blocks; genesis is pre-finalized at Init
+    /\ block.slot \in Slots  
     /\ LET pool == validators[v].pool
            slot == block.slot
        IN \/ HasFastFinalizationCert(pool, slot, block.hash)
           \/ CanFinalizeSlow(pool, slot, block.hash)
     /\ finalized' = [finalized EXCEPT ![v] = finalized[v] \cup GetAncestors(block, blocks)]
     /\ UNCHANGED <<validators, blocks, messages, byzantineNodes, unresponsiveNodes, time, blockAvailability, avail80Start, avail60Start>>
+(* WP Def. 14 finalization: fast if fast-finalization cert on (s,hash); slow if finalization cert on s with unique notarized block; ancestors finalize first. :contentReference[oaicite:15]{index=15} *)
 
-(***************************************************************************
- * BYZANTINE ACTION — adversary can inject arbitrary votes
- *
- * Whitepaper refs
- * - Assumption 1 (<20% byzantine stake): `alpenglow-whitepaper.md:107`.
- * - Adversary model narrative: `alpenglow-whitepaper.md:226` • §1.5.
- *
- * Explanation
- * - Byzantine validators may create and inject arbitrary valid-looking votes.
- ***************************************************************************)
 ByzantineAction(v) ==
     /\ v \in byzantineNodes
     /\ \E vote \in Vote :
@@ -348,20 +171,8 @@ ByzantineAction(v) ==
         /\ vote.slot <= MaxSlot
         /\ messages' = messages \cup {vote}
     /\ UNCHANGED <<validators, blocks, byzantineNodes, unresponsiveNodes, time, finalized, blockAvailability, avail80Start, avail60Start>>
+(* WP Sec. 1.5 “Adversary”: byzantine nodes may send arbitrarily scheduled but syntactically valid votes; safety must hold regardless (Sec. 2.9). :contentReference[oaicite:16]{index=16} *)
 
-(***************************************************************************
- * HONEST PROPOSE BLOCK (strict) — Algorithm 3 with ParentReady gating
- *
- * Whitepaper refs
- * - Algorithm 3 (block creation): `alpenglow-whitepaper.md:759`, overview `:727` • §2.7
- * - ParentReady (gating first slot of window): `:543`–`:546` (Def.15) • p.21.
- *
- * Explanation
- * - Correct leader for slot `s` creates a new block that extends `parent`.
- * - For the first slot of a window, require `ParentReady` to be in state,
- *   matching Def.15’s precondition for starting the window.
-***************************************************************************)
-\* Proposal is gated on leader having the parent locally (Rotor handoff).
 HonestProposeBlock(leader, slot, parent) ==
     /\ leader \in CorrectNodes
     /\ parent \in blocks
@@ -370,8 +181,6 @@ HonestProposeBlock(leader, slot, parent) ==
     /\ slot > parent.slot
     /\ slot <= MaxSlot
     /\ Cardinality(blocks) < MaxBlocks
-    \* Parent readiness discipline (Def. 15, p. 21) for first slots of windows.
-    \* Genesis (slot = 1) is pre-initialised with ParentReady in Init.
     /\ IsFirstSlotOfWindow(slot)
         => HasState(validators[leader], slot, "ParentReady")
     /\ LET newBlock == [
@@ -381,24 +190,14 @@ HonestProposeBlock(leader, slot, parent) ==
            parent |-> parent.hash,
            leader |-> leader
        ]
-       IN \* Hint: ExtendsChain(newBlock, blocks)
+       IN 
           /\ LeaderMatchesSchedule(newBlock)
           /\ IsValidBlock(newBlock)
           /\ blocks' = blocks \cup {newBlock}
           /\ blockAvailability' = [blockAvailability EXCEPT ![leader] = @ \cup {newBlock}]
           /\ UNCHANGED <<validators, messages, byzantineNodes, unresponsiveNodes, time, finalized, avail80Start, avail60Start>>
+(* WP Sec. 2.7 + Alg. 3: leader builds a block per slot; in first slot require ParentReady; later slots chain to previous block. We conservatively omit the “optimistic parent switch” micro‑optimization; this affects latency only, not safety (Sec. 2.7 Fig. 8). :contentReference[oaicite:17]{index=17} *)
 
-(***************************************************************************
- * BYZANTINE PROPOSE BLOCK — equivocation/withholding by faulty leaders
- *
- * Whitepaper refs
- * - Rotor/Blokstor context and leader behavior: §2.2–§2.3 (see `:414`, `:468`).
- * - Assumption 1 (byzantine power): `alpenglow-whitepaper.md:107`.
- *
- * Explanation
- * - A faulty leader can create multiple blocks for the same slot (equivocation)
- *   and send them to arbitrary subsets of validators (withholding).
- ***************************************************************************)
 ByzantineProposeBlock(leader, slot, parent) ==
     /\ leader \in byzantineNodes
     /\ parent \in blocks
@@ -421,19 +220,8 @@ ByzantineProposeBlock(leader, slot, parent) ==
                         IF w \in recipients THEN blockAvailability[w] \cup {newBlock}
                         ELSE blockAvailability[w]]
           /\ UNCHANGED <<validators, messages, byzantineNodes, unresponsiveNodes, time, finalized, avail80Start, avail60Start>>
+(* WP Sec. 2.2 Rotor + Sec. 2.7: faulty leaders may disseminate unevenly or equivocate; availability reflects partial delivery. Safety later prevents conflicting notarizations (Lemmas 21, 24). :contentReference[oaicite:18]{index=18} *)
 
-(***************************************************************************
- * ADVANCE TIME — partial-synchrony timers (Definition 17)
- *
- * Whitepaper refs
- * - Local timeouts and no need for synchronized clocks: `alpenglow-whitepaper.md:224` • §1.5
- * - Timeout schedule (Def.17): `:607` with formula `:609` • p.23.
- *
- * Explanation
- * - Bump global model time and advance each correct validator’s local timers.
- * - Modeling choice: we use a single `time` to drive `validator.clock` for all
- *   correct nodes so Def.17-computed deadlines are comparable.
- ***************************************************************************)
 AdvanceTime ==
     /\ time' = time + 1
     /\ validators' = [w \in Validators |->
@@ -459,24 +247,12 @@ AdvanceTime ==
             ]
         ]
     /\ UNCHANGED <<blocks, messages, byzantineNodes, unresponsiveNodes, finalized, blockAvailability>>
+(* WP Sec. 1.5 “Time/Timeout” and Sec. 1.3: start δ80/δ60 clocks the first time ≥θ correct stake has the block. Local clocks advance monotonically (timeouts set elsewhere). :contentReference[oaicite:19]{index=19} *)
 
-(***************************************************************************
- * ROTOR DISSEMINATION (SUCCESS) — distribute to all correct nodes
- *
- * Whitepaper refs
- * - Definition 6 (Rotor success): `alpenglow-whitepaper.md:414` • §2.2, p.20–22
- *   Resilience text (“all correct nodes will receive the block”): `:416`.
- *
- * Explanation
- * - If a correct leader samples ≥ γ correct relays, all correct nodes reconstruct
- *   the block. We update availability only for `CorrectNodes` accordingly.
- ***************************************************************************)
 RotorDisseminateSuccess(block) ==
     /\ block \in blocks
     /\ block.leader \in CorrectNodes
     /\ LET needers == {v \in Validators : block \notin blockAvailability[v]}
-           \* Note: The ELSE-branch clamps at MaxSlot for bounded MC only;
-           \* it has no direct protocol analogue (parameterization note).
            nextSlot == IF block.slot + 1 <= MaxSlot THEN block.slot + 1 ELSE block.slot
            nextLeader == Leader(nextSlot)
        IN /\ needers # {}
@@ -490,24 +266,12 @@ RotorDisseminateSuccess(block) ==
                                 THEN blockAvailability[w] \cup {block}
                                 ELSE blockAvailability[w]]
                       /\ UNCHANGED <<validators, blocks, messages, byzantineNodes, unresponsiveNodes, time, finalized, avail80Start, avail60Start>>
+(* WP Sec. 2.2 Definition 6 + Lemma 7 + Lemma 8: if leader correct and ≥γ correct relays, all correct nodes receive within ≤2δ; we abstract the sampling via bins, then deliver to all correct nodes. :contentReference[oaicite:20]{index=20} *)
 
-(***************************************************************************
- * ROTOR FAILURE (insufficient correct relays) — partial dissemination
- *
- * Whitepaper refs
- * - Complement of Definition 6 (failure path): `alpenglow-whitepaper.md:414`.
- * - Repair mechanism: `:801` (Algorithm 4) and Blokstor repair note `:470`.
- *
- * Explanation
- * - Leader is correct, but fewer than γ correct relays participate; only selected
- *   relays receive the block. Recovery happens via repair (§2.8).
- ***************************************************************************)
 RotorFailInsufficientRelays(block) ==
     /\ block \in blocks
     /\ block.leader \in CorrectNodes
     /\ LET needers == {v \in Validators : block \notin blockAvailability[v]}
-           \* Note: The ELSE-branch clamps at MaxSlot for bounded MC only;
-           \* it has no direct protocol analogue (parameterization note).
            nextSlot == IF block.slot + 1 <= MaxSlot THEN block.slot + 1 ELSE block.slot
            nextLeader == Leader(nextSlot)
        IN /\ needers # {}
@@ -520,18 +284,8 @@ RotorFailInsufficientRelays(block) ==
                                                 THEN blockAvailability[w] \cup {block}
                                                 ELSE blockAvailability[w]]
                       /\ UNCHANGED <<validators, blocks, messages, byzantineNodes, unresponsiveNodes, time, finalized, avail80Start, avail60Start>>
+(* WP Sec. 2.2: dissemination can fail if too few correct relays; only relays obtain block. Liveness then relies on fallback votes/repair. :contentReference[oaicite:21]{index=21} *)
 
-(***************************************************************************
- * ROTOR FAILURE (Byzantine leader) — arbitrary dissemination/withholding
- *
- * Whitepaper refs
- * - Adversarial behavior permitted (Assumption 1/model): `alpenglow-whitepaper.md:226`.
- * - Repair (§2.8): `:801`.
- *
- * Explanation
- * - A faulty leader may disseminate to an arbitrary subset or to nobody at all.
- *   Correct nodes recover via repair.
- ***************************************************************************)
 RotorFailByzantineLeader(block) ==
     /\ block \in blocks
     /\ block.leader \in byzantineNodes
@@ -541,33 +295,14 @@ RotorFailByzantineLeader(block) ==
                                         THEN blockAvailability[w] \cup {block}
                                         ELSE blockAvailability[w]]
           /\ UNCHANGED <<validators, blocks, messages, byzantineNodes, unresponsiveNodes, time, finalized, avail80Start, avail60Start>>
+(* WP Sec. 2.2 and Sec. 2.11: malicious leaders may selectively disseminate. Repair and fallback handle progress. :contentReference[oaicite:22]{index=22} *)
 
-(***************************************************************************
- * ROTOR NO-DISSEMINATION — immediate fail case
- *
- * Whitepaper refs
- * - “Immediate fail” scenario: `alpenglow-whitepaper.md:416` (resilience note).
- *
- * Explanation
- * - No-op capturing a Byzantine leader sending nothing in its round.
- ***************************************************************************)
 RotorNoDissemination(block) ==
     /\ block \in blocks
     /\ block.leader \in byzantineNodes
     /\ UNCHANGED <<validators, blocks, messages, byzantineNodes, unresponsiveNodes, time, finalized, blockAvailability, avail80Start, avail60Start>>
+(* WP Sec. 2.2: a faulty leader can send nothing; Votor’s timeout path ensures safety and progress after GST (Sec. 2.10). :contentReference[oaicite:23]{index=23} *)
 
-
-(***************************************************************************
- * REPAIR — fetch missing notarized blocks (Algorithm 4)
- *
- * Whitepaper refs
- * - Algorithm 4 (Repair): `alpenglow-whitepaper.md:801` • §2.8
- * - Blokstor repair obligation: `:470`.
- *
- * Explanation
- * - If Pool indicates a certificate implies a block should be present, fetch
- *   the notarized block from any correct node that already stores it.
- ***************************************************************************)
 RepairBlock(v, block, supplier) ==
     /\ v \in CorrectNodes
     /\ block \in blocks
@@ -577,23 +312,8 @@ RepairBlock(v, block, supplier) ==
     /\ block \in blockAvailability[supplier]
     /\ blockAvailability' = [blockAvailability EXCEPT ![v] = @ \cup {block}]
     /\ UNCHANGED <<validators, blocks, messages, byzantineNodes, time, finalized, avail80Start, avail60Start>>
+(* WP Sec. 2.8 Algorithm 4: on observing (fast‑final or notar*/slot) evidence, repair retrieves missing block from peers. :contentReference[oaicite:24]{index=24} *)
 
-
-(***************************************************************************
- * DELIVER VOTE — store received votes (Definition 12)
- *
- * Whitepaper refs
- * - Definition 12 (storing votes per-slot/node with multiplicity caps):
- *   `alpenglow-whitepaper.md:513` • p.20–21.
- * - Algorithm 1 (event loop handles received votes): `:634`.
- *
- * Explanation
- * - Pop a vote from the network and store it in every validator’s Pool, honoring
- *   the storage/multiplicity rules of Def.12.
- * - Ingress contract (audit note): only well-typed and semantically valid
- *   votes are accepted from the network. Concretely, the guard requires
- *   `vote \in Vote /\ IsValidVote(vote)` when selecting from `messages`.
- ***************************************************************************)
 DeliverVote ==
     /\ \E vote \in messages : vote \in Vote /\ IsValidVote(vote)
     /\ LET vmsg == CHOOSE vv \in messages : vv \in Vote /\ IsValidVote(vv)
@@ -602,16 +322,8 @@ DeliverVote ==
                                [validators[w] EXCEPT
                                    !.pool = StoreVote(@, vmsg)]]
     /\ UNCHANGED <<blocks, byzantineNodes, unresponsiveNodes, time, finalized, blockAvailability, avail80Start, avail60Start>>
+(* WP Sec. 2.5 Def. 12: Pool stores first notar/skip, up to limited fallback, and first final vote, keyed by (slot,validator). :contentReference[oaicite:25]{index=25} *)
 
-(***************************************************************************
- * DELIVER CERTIFICATE — store and propagate (Definition 13)
- *
- * Whitepaper refs
- * - Definition 13 (generate/store/broadcast certificates): `alpenglow-whitepaper.md:520` • p.20–21.
- *
- * Explanation
- * - Pop a certificate and store it in every validator’s Pool.
- ***************************************************************************)
 DeliverCertificate ==
     /\ \E cert \in messages : cert \in Certificate /\ IsValidCertificate(cert)
     /\ LET cmsg == CHOOSE cc \in messages : cc \in Certificate /\ IsValidCertificate(cc)
@@ -620,19 +332,8 @@ DeliverCertificate ==
                                [validators[w] EXCEPT
                                    !.pool = StoreCertificate(@, cmsg)]]
     /\ UNCHANGED <<blocks, byzantineNodes, unresponsiveNodes, time, finalized, blockAvailability, avail80Start, avail60Start>>
+(* WP Sec. 2.5 Def. 13: Pool stores at most one certificate per type, broadcasts on add. :contentReference[oaicite:26]{index=26} *)
 
-(***************************************************************************
- * BROADCAST LOCAL VOTE — ensure eventual delivery of own votes
- *
- * Whitepaper refs
- * - Broadcast semantics in the protocol model: `alpenglow-whitepaper.md:207`.
- * - Liveness/standstill retransmission guidance: `:1231` • §2.10.
- * - Algorithms 1–2 repeatedly broadcast votes upon handling events (see `:634`).
- *
- * Explanation
- * - Push locally stored votes into the network to ensure they eventually reach
- *   all nodes, matching the paper’s retransmit/broadcast guidance.
- ***************************************************************************)
 BroadcastLocalVote ==
     /\ \E v \in CorrectNodes, s \in 1..MaxSlot :
          LET localVotes == validators[v].pool.votes[s][v]
@@ -646,16 +347,8 @@ BroadcastLocalVote ==
           /\ \E w \in Validators : vt \notin validators[w].pool.votes[vt.slot][vt.validator]
           /\ messages' = messages \cup {vt}
     /\ UNCHANGED <<validators, blocks, byzantineNodes, unresponsiveNodes, time, finalized, blockAvailability, avail80Start, avail60Start>>
+(* WP Sec. 2.6 Alg. 1–2: votes are broadcast once produced; uniqueness per slot/validator enforced. :contentReference[oaicite:27]{index=27} *)
 
-(***************************************************************************
- * EVENT: BLOCK NOTARIZED — when Pool holds a notar cert
- *
- * Whitepaper refs
- * - Definition 15 (Pool events): `alpenglow-whitepaper.md:543` • p.21.
- *
- * Explanation
- * - Emit BlockNotarized(s, hash(b)) when a notarization certificate is present.
- ***************************************************************************)
 EmitBlockNotarized ==
     /\ \E v \in CorrectNodes, b \in blocks :
          /\ b.slot \in (Slots \cap 1..MaxSlot)
@@ -663,33 +356,9 @@ EmitBlockNotarized ==
          /\ ~HasState(validators[v], b.slot, "BlockNotarized")
          /\ validators' = [validators EXCEPT ![v] =
                                HandleBlockNotarized(@, b.slot, b.hash)]
-    /\ UNCHANGED <<blocks, messages, byzantineNodes, unresponsiveNodes, time, finalized, blockAvailability, avail80Start, avail60Start>> \* Finalization votes broadcasted by BroadcastLocalVote
+    /\ UNCHANGED <<blocks, messages, byzantineNodes, unresponsiveNodes, time, finalized, blockAvailability, avail80Start, avail60Start>> 
+(* WP Def. 15 “BlockNotarized(s,h)” event: Pool holds a notarization cert for b. We set the local state tag. :contentReference[oaicite:28]{index=28} *)
 
- (***************************************************************************
- * EVENT: SAFE TO NOTAR — fallback inequality (Definition 16)
- *
- * Whitepaper refs
- * - Definition 16 (SafeToNotar): `alpenglow-whitepaper.md:554`–`:556` • p.21–22.
- *   • Formula (page 22): notar(b) ≥ 40% OR (skip(s)+notar(b) ≥ 60% AND notar(b) ≥ 20%).
- *
- * Explanation
- * - When that inequality holds and the node hasn't already voted to notarize b
- *   in slot s, emit the event and cast notar-fallback accordingly (Alg.1).
- * - We pass the full block `b` into the handler and use the typed wrapper
- *   to ensure slot–hash pairing by construction; creation occurs only under
- *   the CanEmitSafeToNotar guard above (aid to model checking).
- *
- * AUDIT NOTE (issues_claude.md §3):
- * Re-emission suppression: The guard `~HasState(validator, s, "BadWindow")`
- * prevents emitting SafeToNotar multiple times per slot. Algorithm 1 (:656-:660)
- * checks `ItsOver ∉ state[s]` and sets `BadWindow` after emission, ensuring
- * at-most-once semantics through atomicity. The spec's BadWindow check is a
- * sound strengthening that makes the at-most-once property explicit: once any
- * fallback vote is cast (setting BadWindow), no further SafeToNotar/SafeToSkip
- * events are emitted for that slot. This prevents redundant event processing
- * and aligns with the whitepaper's intent that fallback paths are terminal for
- * the slot's voting lifecycle.
- ***************************************************************************)
 EmitSafeToNotar ==
     /\ \E v \in CorrectNodes, s \in 1..MaxSlot, b \in blocks :
          /\ b.slot = s
@@ -697,67 +366,33 @@ EmitSafeToNotar ==
          /\ LET alreadyVoted == HasState(validators[v], s, "Voted")
                 votedForB == VotedForBlock(validators[v], s, b.hash)
             IN CanEmitSafeToNotar(validators[v].pool, s, b.hash, b.slot - 1, b.parent, alreadyVoted, votedForB)
-         /\ ~HasState(validators[v], s, "BadWindow") \* Prevents re-emitting after a fallback vote was cast (see audit note above)
+         /\ ~HasState(validators[v], s, "BadWindow") 
          /\ validators' = [validators EXCEPT ![v] = HandleSafeToNotar(@, b)]
     /\ UNCHANGED <<blocks, messages, byzantineNodes, unresponsiveNodes, time, finalized, blockAvailability, avail80Start, avail60Start>>
+(* WP Def. 16 “SafeToNotar(s,h)”: either notar(b)≥40% or (skip(s)+notar(b)≥60% and notar(b)≥20%); also require parent certs per first‑slot rule. We then issue notar‑fallback. :contentReference[oaicite:29]{index=29} *)
 
- (***************************************************************************
- * EVENT: SAFE TO SKIP — fallback inequality (Definition 16)
- *
- * Whitepaper refs
- * - Definition 16 (SafeToSkip): `alpenglow-whitepaper.md:571` • p.22.
- *   • Formula (page 22): skip(s) + Σ notar(b) − max_b notar(b) ≥ 40%.
- *
- * Explanation
- * - When that inequality holds and the node hasn't already voted to skip s,
- *   emit SafeToSkip(s) and cast a skip-fallback vote (Alg.1).
- *
- * AUDIT NOTE (issues_claude.md §3):
- * Re-emission suppression: The guard `~HasState(validator, s, "BadWindow")`
- * prevents emitting SafeToSkip multiple times per slot. Algorithm 1 (:662-:666)
- * checks `ItsOver ∉ state[s]` and sets `BadWindow` after emission. The spec's
- * BadWindow check makes the at-most-once property explicit and aligns with the
- * whitepaper's intent that fallback events mark the slot as terminal for normal
- * voting. See parallel reasoning in EmitSafeToNotar audit note above.
- ***************************************************************************)
 EmitSafeToSkip ==
     /\ \E v \in CorrectNodes, s \in 1..MaxSlot :
          /\ LET alreadyVoted == HasState(validators[v], s, "Voted")
-                \* Note: `SkipVote` refers to the initial skip vote (not skip-fallback).
-                \* Repeated fallback emission is suppressed by the `BadWindow` guard below.
                 votedSkip == 
                     \E vt \in GetVotesForSlot(validators[v].pool, s) :
                         /\ vt.validator = v
                         /\ vt.type = "SkipVote"
             IN CanEmitSafeToSkip(validators[v].pool, s, alreadyVoted, votedSkip)
-         /\ ~HasSkipCert(validators[v].pool, s) \* Avoid redundant skip-fallback voting when skip cert already exists
-         /\ ~HasState(validators[v], s, "BadWindow") \* Prevents re-emitting after a fallback vote was cast (see audit note above)
+         /\ ~HasSkipCert(validators[v].pool, s) 
+         /\ ~HasState(validators[v], s, "BadWindow") 
          /\ validators' = [validators EXCEPT ![v] = HandleSafeToSkip(@, s)]
     /\ UNCHANGED <<blocks, messages, byzantineNodes, unresponsiveNodes, time, finalized, blockAvailability, avail80Start, avail60Start>>
+(* WP Def. 16 “SafeToSkip(s)”: skip(s)+Σ_b notar(b) − max_b notar(b) ≥ 40%; we then issue skip‑fallback. :contentReference[oaicite:30]{index=30} *)
 
- (***************************************************************************
- * EVENT: PARENT READY — first slot of a leader window (Definition 15)
- *
- * Whitepaper refs
- * - Definition 15 (ParentReady): `alpenglow-whitepaper.md:543`–`:546` • p.21.
- *
- * Explanation
- * - Mark the first slot of a new leader window once predecessors are certified.
- * - First-slot guard enforced by ShouldEmitParentReady (uses IsFirstSlotOfWindow).
- ***************************************************************************)
 EmitParentReady ==
-    \* Note: The model assumes certificates refer to p \in blocks (consistent with 
-    \* how votes and certs are created), clarifying why p is quantified from blocks.
     /\ \E v \in CorrectNodes, s \in 1..MaxSlot, p \in blocks :
-         /\ p.slot < s  \* Only consider previous blocks as parents (Def. 15)
+         /\ p.slot < s  
          /\ ShouldEmitParentReady(validators[v].pool, s, p.hash, p.slot)
          /\ ~HasState(validators[v], s, "ParentReady")
          /\ validators' = [validators EXCEPT ![v] = HandleParentReady(@, s, p.hash)]
     /\ UNCHANGED <<blocks, messages, byzantineNodes, unresponsiveNodes, time, finalized, blockAvailability, avail80Start, avail60Start>>
-
-\* ============================================================================
-\* NEXT STATE RELATION
-\* ============================================================================
+(* WP Def. 15 “ParentReady(s,hash(p))”: first slot of window with notar/‑fallback for p and skips for gaps; enables leader timeouts (Alg. 1 line 15). :contentReference[oaicite:31]{index=31} *)
 
 Next ==
     \/ \E v \in Validators, b \in blocks : ReceiveBlock(v, b)
@@ -768,8 +403,6 @@ Next ==
     \/ EmitSafeToSkip
     \/ EmitParentReady
     \/ \E v \in byzantineNodes : ByzantineAction(v)
-    \* Note: `ProcessTimeout` is handled via `AdvanceTime` -> `AdvanceClock`.
-    \* Proposer uses the strict ParentReady‑gated variant (Alg. 3).
     \/ \E l \in Validators, s \in 1..MaxSlot, p \in blocks : HonestProposeBlock(l, s, p)
     \/ \E l \in Validators, s \in 1..MaxSlot, p \in blocks : ByzantineProposeBlock(l, s, p)
     \/ DeliverVote
@@ -781,22 +414,8 @@ Next ==
     \/ \E b \in blocks : RotorNoDissemination(b)
     \/ \E v \in Validators, b \in blocks, supplier \in Validators : RepairBlock(v, b, supplier)
     \/ AdvanceTime
+(* WP Sec. 2 Figure 7 pipeline: dissemination → votes → certs → finalization; adversarial and repair transitions included. :contentReference[oaicite:32]{index=32} *)
 
-\* ============================================================================
-\* SPECIFICATION
-\* ============================================================================
-
-(*
- * FAIRNESS — liveness after GST assumes eventual delivery/scheduling
- *
- * Whitepaper refs
- * - Liveness section: `alpenglow-whitepaper.md:941`–`:1045` (Theorem 2).
- * - Practical retransmission (standstill): `:1216`, `:1231` • §2.10.
- *
- * Explanation
- * - After GST, weak fairness on delivery and event emission models the paper’s
- *   assumption that honest messages keep flowing and get scheduled.
- *)
 Fairness ==
     /\ WF_vars(AdvanceTime)
     /\ WF_vars(IF AfterGST THEN DeliverVote ELSE UNCHANGED vars)
@@ -815,77 +434,33 @@ Fairness ==
            IF v \in CorrectNodes
            THEN WF_vars(IF AfterGST THEN (\E b \in blocks : ReceiveBlock(v, b)) ELSE UNCHANGED vars)
            ELSE TRUE
+(* WP Sec. 1.5 GST: after GST we require weak fairness for delivery, voting, cert generation, and parent‑ready, matching liveness proof structure (Lemmas 33–42, Theorem 2). :contentReference[oaicite:33]{index=33} *)
 
 Spec == Init /\ [][Next]_vars /\ Fairness
+(* Full behavior as in Sec. 2: init, step relation, and fairness under GST. :contentReference[oaicite:34]{index=34} *)
 
-\* ============================================================================
-\* SAFETY PROPERTIES
-\* ============================================================================
-
-(***************************************************************************
- * MAIN SAFETY INVARIANT — finalized blocks form a single chain
- *
- * Whitepaper refs
- * - Theorem 1 (safety): `alpenglow-whitepaper.md:930` • §2.9.
- *
- * Explanation
- * - If a correct node finalizes b at slot s and some (later) correct node
- *   finalizes b' at slot s' ≥ s, then b' is a descendant of b.
- * - Equal-slot corollary captured by NoConflictingFinalization below.
- ***************************************************************************)
 SafetyInvariant ==
     \A v1, v2 \in CorrectNodes :
     \A b1 \in finalized[v1], b2 \in finalized[v2] :
         (b1.slot <= b2.slot) => IsAncestor(b1, b2, blocks)
+(* WP Theorem 1 Safety: later finalized blocks are descendants of earlier. :contentReference[oaicite:35]{index=35} *)
 
-(***************************************************************************
- * NO CONFLICTING FINALIZATION — equal-slot corollary of Theorem 1
- *
- * Explanation
- * - If two correct validators finalize blocks in the same slot, those blocks
- *   must have identical hashes.
- ***************************************************************************)
 NoConflictingFinalization ==
     \A v1, v2 \in CorrectNodes :
     \A b1 \in finalized[v1], b2 \in finalized[v2] :
         (b1.slot = b2.slot) => b1.hash = b2.hash
+(* Restates uniqueness per slot from Theorem 1. :contentReference[oaicite:36]{index=36} *)
 
-(***************************************************************************
- * SAFE-TO-SKIP PRECLUDES FAST — Def.16 ⇒ no 80% notar later (state form)
- *
- * Whitepaper refs
- * - Definition 16 (SafeToSkip inequality): `alpenglow-whitepaper.md:571`.
- * - Safety intuition: once skip(s) + Σ notar(b) − max notar(b) ≥ 40%, the
- *   remaining stake that could still coalesce on any single block is < 80%.
- *
- * Explanation
- * - State-level strengthening: whenever the SafeToSkip guard’s inequality
- *   holds (ignoring the local alreadyVoted/~votedSkip gate), no block of that
- *   slot has ≥80% NotarVote stake in the same Pool. This captures the
- *   paper’s “cannot fast-finalize later” as a safety check usable as an
- *   invariant.
- ***************************************************************************)
 SafeToSkipPrecludesFastNow ==
     \A v \in CorrectNodes :
     \A s \in 1..MaxSlot :
         CanEmitSafeToSkip(validators[v].pool, s, TRUE, FALSE)
             => (\A b \in {x \in blocks : x.slot = s} :
                     ~MeetsThreshold(NotarStake(validators[v].pool, s, b.hash), 80))
+(* WP Lemma 21(i–iii): if fast‑finalization is possible, SafeToSkip cannot hold; conversely SafeToSkip implies no block can reach 80% notar quickly. :contentReference[oaicite:37]{index=37} *)
 
-(***************************************************************************
- * CHAIN CONSISTENCY — restating Theorem 1 under Assumption 1
- *
- * Whitepaper refs
- * - Assumption 1 (<20% byzantine): `alpenglow-whitepaper.md:107`.
- ***************************************************************************)
 ChainConsistency == SafetyInvariant
 
-(***************************************************************************
- * LEMMA 20 — vote uniqueness (one initial vote per slot)
- *
- * Whitepaper refs
- * - Lemma 20 (notarization or skip): `alpenglow-whitepaper.md:820`.
- ***************************************************************************)
 VoteUniqueness ==
     \A v \in CorrectNodes :
     \A slot \in 1..MaxSlot :
@@ -893,13 +468,8 @@ VoteUniqueness ==
             initVotes == {vt \in votes : 
                          IsInitialVote(vt) /\ vt.validator = v}
         IN Cardinality(initVotes) <= 1
+(* WP Lemma 20: one initial vote (notar or skip) per slot per node. Alg. 2 lines 8–16, 22–27. :contentReference[oaicite:38]{index=38} *)
 
-(***************************************************************************
- * LEMMA 24 — unique notarization per slot
- *
- * Whitepaper refs
- * - Lemma 24 statement: `alpenglow-whitepaper.md:855`.
- ***************************************************************************)
 UniqueNotarization ==
     \A v \in CorrectNodes :
     \A slot \in 1..MaxSlot :
@@ -908,14 +478,8 @@ UniqueNotarization ==
                           c.type = "NotarizationCert"}
             notarBlocks == {c.blockHash : c \in notarCerts}
         IN Cardinality(notarBlocks) <= 1
+(* WP Lemma 24: at most one block notarized per slot. :contentReference[oaicite:39]{index=39} *)
 
-(***************************************************************************
- * GLOBAL NOTARIZATION UNIQUENESS — cross-validator consistency
- *
- * Explanation
- * - Across validators, notarization and notar-fallback certificates agree on
- *   a single block hash per slot.
- ***************************************************************************)
 GlobalNotarizationUniqueness ==
     \A s \in 1..MaxSlot :
         \A v1, v2 \in CorrectNodes :
@@ -925,29 +489,18 @@ GlobalNotarizationUniqueness ==
                    (c1.type \in {"NotarizationCert", "NotarFallbackCert"} /\
                     c2.type \in {"NotarizationCert", "NotarFallbackCert"}) =>
                    c1.blockHash = c2.blockHash
+(* WP Lemmas 23–24 imply global uniqueness of notarized/‑fallback block per slot once ≥40% correct stake aligns. :contentReference[oaicite:40]{index=40} *)
 
-(***************************************************************************
- * LEMMA 25 — finalized implies notarized
- *
- * Explanation
- * - Every finalized block must have been covered by a notarization (or fast
- *   finalization) certificate per Def.14.
- ***************************************************************************)
 FinalizedImpliesNotarized ==
     \A v \in CorrectNodes :
     \A b \in finalized[v] :
-        b.slot \in Slots =>  \* Only protocol blocks have certificates; genesis excluded
+        b.slot \in Slots =>  
             LET pool == validators[v].pool
             IN \E cert \in pool.certificates[b.slot] :
                 /\ cert.type \in {"NotarizationCert", "FastFinalizationCert"}
                 /\ cert.blockHash = b.hash
+(* WP Lemma 25: finalized ⇒ notarized (fast path trivially implies notar; slow path observes notar before final votes). :contentReference[oaicite:41]{index=41} *)
 
-(***************************************************************************
- * CERTIFICATE NON-EQUIVOCATION — no two different certs of same type/slot
- *
- * Whitepaper refs
- * - Definition 13 (certificate generation/storage): `alpenglow-whitepaper.md:520`.
- ***************************************************************************)
 CertificateNonEquivocation ==
     \A v \in CorrectNodes :
     \A slot \in 1..MaxSlot :
@@ -956,21 +509,8 @@ CertificateNonEquivocation ==
             (c1.type = c2.type /\ 
              c1.type \in {"NotarizationCert", "NotarFallbackCert", "FastFinalizationCert"}) =>
             c1.blockHash = c2.blockHash
+(* WP Def. 13 storage rule: single cert per type per slot; prevents equivocation locally. :contentReference[oaicite:42]{index=42} *)
 
-(***************************************************************************
- * LEMMA 21 — fast-finalization property (§2.9)
- *
- * Whitepaper refs
- * - Lemma 21 statement: `alpenglow-whitepaper.md:824`.
- *
- * Explanation
- * - If a block b is fast-finalized (≥80% NotarVote), then in the same slot:
- *   (i) no other block b' can be notarized
- *   (ii) no other block b' can be notarized-fallback
- *   (iii) there cannot exist a skip certificate
- * - This is subsumed by SafetyInvariant and NoConflictingFinalization but
- *   stated explicitly per audit recommendation (issues_claude.md §14).
- ***************************************************************************)
 Lemma21_FastFinalizationProperty ==
     \A v \in CorrectNodes :
     \A s \in 1..MaxSlot :
@@ -982,68 +522,35 @@ Lemma21_FastFinalizationProperty ==
                     /\ c.type \in {"NotarizationCert", "NotarFallbackCert"}
                     /\ c.blockHash # h}
                 skipCerts == {c \in pool.certificates[s] : c.type = "SkipCert"}
-            IN /\ otherNotarCerts = {}  \* (i) and (ii)
-               /\ skipCerts = {}        \* (iii)
+            IN /\ otherNotarCerts = {}  
+               /\ skipCerts = {}        
+(* WP Lemma 21(i–iii): fast‑finalizing b excludes any other notar/‑fallback in s and excludes skip in s. :contentReference[oaicite:43]{index=43} *)
 
-(***************************************************************************
- * LEMMA 22 — no mixing finalization with fallback in the same slot
- *
- * Explanation
- * - Validator-local mutual exclusion: ItsOver and BadWindow never co-exist
- *   in a slot. Encoded via VotorCore's per-validator predicates.
- *************************************************************************)
 NoMixFinalizationAndFallback ==
     \A v \in CorrectNodes :
         Lemma22_ItsOverImpliesNotBadWindow(validators[v]) /\
         Lemma22_BadWindowImpliesNotItsOver(validators[v])
+(* WP Lemma 22: after final vote (ItsOver) no fallback votes, and vice versa. Alg. 1–2 guards. :contentReference[oaicite:44]{index=44} *)
 
-(***************************************************************************
- * LEMMA 23 — > 40% correct stake prevents conflicting notarizations
- *
- * Whitepaper refs
- * - Lemma 23 statement: `alpenglow-whitepaper.md:851`.
- *
- * Explanation
- * - If correct nodes with >40% stake cast notarization votes for block b in
- *   slot s, no other block can be notarized in slot s.
- * - This is subsumed by UniqueNotarization and vote uniqueness (Lemma 20),
- *   but stated explicitly per audit recommendation (issues_claude.md §14).
- ***************************************************************************)
 Lemma23_FortyPercentPreventsConflictingNotar ==
     \A v \in CorrectNodes :
     \A s \in 1..MaxSlot :
         LET pool == validators[v].pool
-            \* For each block hash h with notar votes from correct nodes
             notarVotesForHash(h) == {vote \in GetVotesForSlot(pool, s) :
                 /\ IsInitialNotarVote(vote)
                 /\ vote.blockHash = h
                 /\ vote.validator \in CorrectNodes}
-            \* Check: if any hash h has >40% correct stake, no other hash has ≥60%
             hashesWithOver40 == {h \in BlockHashes :
                 MeetsThreshold(StakeFromVotes(notarVotesForHash(h)), 41)}
-        IN \A h1, h2 \in hashesWithOver40 : h1 = h2  \* At most one hash has >40%
+        IN \A h1, h2 \in hashesWithOver40 : h1 = h2  
+(* WP Lemma 23: >40% correct notar votes on one hash preclude notarization of any conflicting block in that slot. :contentReference[oaicite:45]{index=45} *)
 
-(***************************************************************************
- * LEMMA 26 — slow-finalization property (§2.9)
- *
- * Whitepaper refs
- * - Lemma 26 statement: `alpenglow-whitepaper.md:872`.
- *
- * Explanation
- * - If a block b is slow-finalized (≥60% FinalVote + notarization), then:
- *   (i) no other block b' can be notarized
- *   (ii) no other block b' can be notarized-fallback
- *   (iii) there cannot exist a skip certificate
- * - This is subsumed by SafetyInvariant and FinalizedImpliesNotarized but
- *   stated explicitly per audit recommendation (issues_claude.md §14).
- ***************************************************************************)
 Lemma26_SlowFinalizationProperty ==
     \A v \in CorrectNodes :
     \A s \in 1..MaxSlot :
         LET pool == validators[v].pool
             finalizationCerts == {c \in pool.certificates[s] : c.type = "FinalizationCert"}
         IN \A fc \in finalizationCerts :
-            \* Finalization cert implies unique notarized block (Lemma 24+25)
             LET notarCerts == {c \in pool.certificates[s] : c.type = "NotarizationCert"}
             IN notarCerts # {} =>
                 LET h == (CHOOSE c \in notarCerts : TRUE).blockHash
@@ -1051,223 +558,118 @@ Lemma26_SlowFinalizationProperty ==
                         /\ c.type \in {"NotarizationCert", "NotarFallbackCert"}
                         /\ c.blockHash # h}
                     skipCerts == {c \in pool.certificates[s] : c.type = "SkipCert"}
-                IN /\ Cardinality(notarCerts) = 1  \* Unique notarization (Lemma 24)
-                   /\ otherNotarCerts = {}         \* (i) and (ii)
-                   /\ skipCerts = {}               \* (iii)
+                IN /\ Cardinality(notarCerts) = 1  
+                   /\ otherNotarCerts = {}         
+                   /\ skipCerts = {}               
+(* WP Lemma 26: when slow‑finalizing, exactly one notarized block exists for the slot and no skip for that slot. :contentReference[oaicite:46]{index=46} *)
 
-(***************************************************************************
- * SKIP VS BLOCK-CERT EXCLUSION — mutual exclusion per slot
- *
- * Explanation
- * - No validator's pool may contain both a SkipCert and any block-related
- *   certificate (Notarization/NotarFallback/FastFinalization) in the same slot.
- * - Mirrors whitepaper arguments that these conditions are mutually exclusive
- *   under the model assumptions; surfaces modeling errors early.
- ***************************************************************************)
 PoolSkipVsBlockExclusion ==
     \A v \in CorrectNodes :
     \A s \in 1..MaxSlot :
         SkipVsBlockCertExclusion(validators[v].pool.certificates[s])
+(* WP Defs. 11–16: skip vs notarization certificates are mutually exclusive per slot at one node. :contentReference[oaicite:47]{index=47} *)
 
-(***************************************************************************
- * HONEST NON-EQUIVOCATION — at most one (leader,slot) block if leader correct
- *
- * Explanation
- * - A correct leader does not equivocate within a slot; the model enforces at
- *   most one block per (leader,slot) among correct leaders.
- ***************************************************************************)
 HonestNonEquivocation ==
     \A l \in CorrectNodes :
     \A s \in 1..MaxSlot :
         LET bs == {b \in blocks : b.leader = l /\ b.slot = s}
         IN Cardinality(bs) <= 1
+(* WP Sec. 2.7 leader behavior: one block per slot per leader. :contentReference[oaicite:48]{index=48} *)
 
-(***************************************************************************
- * TRANSIT CERTIFICATES VALID — in-flight certificates are well-formed
- *
- * Whitepaper refs
- * - Messages and certificates types (Tables 5–6): see §2.4 around `alpenglow-whitepaper.md:474`–`:520`.
- ***************************************************************************)
 TransitCertificatesValid ==
     \A c \in messages : c \in Certificate => IsValidCertificate(c)
-
-(***************************************************************************
- * TRANSIT VOTES VALID in-flight votes are well-formed
- *
- * Audit suggestion (messages well-typed): ensure every vote present in the
- * network set `messages` satisfies IsValidVote. Complements
- * TransitCertificatesValid for certificates.
- *************************************************************************)
  
 TransitVotesValid ==
     \A v \in messages : v \in Vote => IsValidVote(v)
+(* WP Sec. 2.4–2.5: only well‑formed messages circulate. :contentReference[oaicite:49]{index=49} *)
 
-(***************************************************************************
- * LOCAL VOTES WELL-FORMED — correct nodes' own votes are valid and
- * match their recorded slot. This captures the intended well-formedness
- * of locally created votes and guards against slot–hash pairing mistakes
- * at call sites (mitigated further by CreateNotarVoteForBlock).
- ***************************************************************************)
 LocalVotesWellFormed ==
     \A v \in CorrectNodes :
     \A s \in 1..MaxSlot :
         \A vt \in validators[v].pool.votes[s][v] :
             IsValidVote(vt) /\ vt.slot = s
+(* WP Def. 12 storage discipline per slot. :contentReference[oaicite:50]{index=50} *)
 
-(***************************************************************************
- * FAST ⇒ NOTAR (threshold) — Pool-level implication per Table 6
- *
- * Whitepaper refs
- * - "fast ⇒ notar ⇒ fallback" implication: `alpenglow-whitepaper.md:534` • §2.5.
- *
- * Explanation
- * - For every slot’s certificate set in each correct validator’s pool,
- *   if a fast-finalization certificate exists, a matching notarization
- *   certificate also exists for the same (slot, blockHash).
- * - This uses the threshold-only relation (existence) to align with the
- *   whitepaper and avoid over-constraining network-learned certificates.
- * - A stricter subset-based variant remains available as
- *   `FastPathImplication` in Certificates.tla for stronger checks if desired.
- *************************************************************************)
 PoolFastPathImplication ==
     \A v \in CorrectNodes :
     \A s \in 1..MaxSlot :
         FastImpliesNotarThresholdOnly(validators[v].pool.certificates[s])
+(* WP Table 6 + Def. 14: fast‑finalization implies ≥80% notar votes. :contentReference[oaicite:51]{index=51} *)
 
-(***************************************************************************
- * FINALIZATION ⇒ NOTARIZATION (slot presence) — Def. 14 pairing
- *
- * Explanation
- * - For each validator's Pool and each slot, the presence of a
- *   FinalizationCert implies the presence of some NotarizationCert in the
- *   same slot set. This captures the Def.14 pairing at the storage level.
- *************************************************************************)
 PoolFinalizationImpliesNotarizationPresent ==
     \A v \in CorrectNodes :
     \A s \in 1..MaxSlot :
         FinalizationImpliesNotarizationPresent(validators[v].pool, s)
+(* WP Def. 14 slow finalization requires unique notarized block. :contentReference[oaicite:52]{index=52} *)
 
-(***************************************************************************
- * CERT BLOCK PROVENANCE — stored block-bearing certs reference known blocks
- *
- * Explanation
- * - Any stored certificate that carries a block hash must reference the
- *   hash of some block present in `blocks`. This documents the modeling
- *   assumption that certificates are only formed for extant blocks.
- *************************************************************************)
 CertificateBlockProvenance ==
     \A v \in CorrectNodes :
     \A s \in 1..MaxSlot :
         \A c \in validators[v].pool.certificates[s] :
             (c.type \in {"NotarizationCert", "NotarFallbackCert", "FastFinalizationCert"}) =>
             c.blockHash \in {b.hash : b \in blocks}
+(* WP Sec. 2.3–2.8: certificates reference extant blocks (stored or repairable). :contentReference[oaicite:53]{index=53} *)
 
-\* Pool storage guarantees from Definitions 12–13 (whitepaper §2.5)
 PoolMultiplicityOK ==
     \A v \in Validators : MultiplicityRulesRespected(validators[v].pool)
 
 PoolCertificateUniqueness ==
     \A v \in Validators : CertificateUniqueness(validators[v].pool)
 
-\* All stored certificates are valid (Tables 5–6; Pool §2.5)
 PoolCertificatesValid ==
     \A v \in Validators :
     \A s \in 1..MaxSlot :
         AllCertificatesValid(validators[v].pool.certificates[s])
 
-\* All stored certificates are structurally well-formed (Vote relevance)
 PoolCertificatesWellFormedOK ==
     \A v \in Validators : CertificatesWellFormed(validators[v].pool)
 
-\* Pool alignment invariants (audit 0009): slot/validator alignment for votes,
-\* and slot alignment for certificates across all validators.
 PoolAlignmentOK ==
     \A v \in Validators :
         /\ PoolVotesSlotValidatorAligned(validators[v].pool)
         /\ PoolCertificatesSlotAligned(validators[v].pool)
 
-\* Bucket–slot consistency (audit 0013): explicit alias assertion
 BucketSlotConsistencyOK ==
     \A v \in Validators : BucketSlotConsistency(validators[v].pool)
+(* WP Defs. 12–13 enforce per‑slot, per‑type storage and alignment. :contentReference[oaicite:54]{index=54} *)
 
-\* Optional sequencing check (audit suggestion): for correct nodes, the
-\* presence of a SkipFallbackVote(s) implies an initial NotarVote(s) exists
-\* in the same node’s Pool for that slot.
 PoolSkipFallbackAfterInitialNotarOK ==
     \A v \in CorrectNodes :
     \A s \in 1..MaxSlot :
         SkipFallbackAfterInitialNotarAt(validators[v].pool, s, v)
+(* WP Alg. 1–2: fallback only after initial vote and event conditions. :contentReference[oaicite:55]{index=55} *)
 
-\* Optional sanity (audit 0010): TotalNotarStake equals the stake of
-\* unique notar voters per slot in each validator's pool.
 TotalNotarStakeSanity ==
     \A v \in Validators :
     \A s \in 1..MaxSlot :
         TotalNotarStakeEqualsUniqueNotarVoters(validators[v].pool, s)
+(* WP Def. 12 counting: stake for notar in a slot counts each validator once. :contentReference[oaicite:56]{index=56} *)
 
-(*
- * TIMEOUTS IN FUTURE — never schedule a timeout in the past
- *
- * Whitepaper refs
- * - Definition 17 guarantees (i − s + 1) ≥ 1 for ParentReady on first slot:
- *   `alpenglow-whitepaper.md:613` • p.23.
- *)
 TimeoutsInFuture ==
     \A v \in CorrectNodes:
         \A s \in 1..MaxSlot:
             LET timeout == validators[v].timeouts[s]
             IN timeout = 0 \/ timeout > validators[v].clock
+(* WP Def. 17: timeouts scheduled in the future relative to local clock. :contentReference[oaicite:57]{index=57} *)
 
-\* Local clock monotonicity (audit 0017): correct nodes' local clocks never
-\* move ahead of the model time and, combined with AdvanceTime, are
-\* non-decreasing across steps.
 LocalClockMonotonic ==
     \A v \in CorrectNodes : validators[v].clock <= time
+(* WP Sec. 1.5 “Time”: local clocks drift but monotonically advance; we conservatively bound by global “time”. :contentReference[oaicite:58]{index=58} *)
 
-(***************************************************************************
- * ROTOR SELECTION SOUNDNESS — structural constraints when successful
- ***************************************************************************)
 RotorSelectSoundness ==
     \A b \in blocks :
         LET needers == {v \in Validators : b \notin blockAvailability[v]}
             nextSlot == IF b.slot + 1 <= MaxSlot THEN b.slot + 1 ELSE b.slot
             nextLeader == Leader(nextSlot)
         IN RotorSelectSound(b, needers, nextLeader)
+(* WP Sec. 3.1 Smart sampling: relay selection soundness; bins and partition sampling reduce variance and failure probability (Thm 3). :contentReference[oaicite:59]{index=59} *)
 
-\* ============================================================================
-\* LIVENESS PROPERTIES (Temporal)
-\* ============================================================================
-
-(***************************************************************************
- * BASIC LIVENESS — after GST, something new finalizes eventually
- ***************************************************************************)
-\* Liveness property (enabled in MC.cfg PROPERTIES)
 BasicLiveness ==
     (time >= GST) ~> 
         (\E v \in Validators :
              \E b \in blocks : b.slot > 0 /\ b \in finalized[v])
+(* WP Sec. 2.10 Theorem 2: after GST and correct leader windows, finalized blocks appear. This is the base “something eventually finalizes”. :contentReference[oaicite:60]{index=60} *)
 
-(***************************************************************************
- * FAST PATH (ONE ROUND) — >=80% responsive stake implies fast finalization
- *
- * Whitepaper refs
- * - Sections 1.3 and 2.6: one-round finalization with >=80% participating
- *   stake; Tables 5–6 thresholds (NotarVote 80% => FastFinalizationCert).
- *
- * Explanation
- * - Once a FastFinalizationCert exists for a block b in slot s (i.e., >=80%
- *   stake on NotarVote for b), the protocol can finalize b in that same
- *   round without a slow-path FinalizationCert. Under post-GST fairness,
- *   some correct node will eventually execute FinalizeBlock on b.
- *
- * Notes
- * - We quantify over blocks present in the model state and restrict to
- *   production slots (1..MaxSlot). The antecedent uses presence of a fast
- *   certificate in any correct node’s Pool, which captures the 
- *   ">=80% responsive stake" condition operationally.
- ***************************************************************************)
-
-\* Liveness property (enabled in MC.cfg PROPERTIES)
 FastCertExistsAt(s, h) ==
     \E v \in CorrectNodes : HasFastFinalizationCert(validators[v].pool, s, h)
 
@@ -1279,21 +681,8 @@ FastPathOneRound ==
     \A h \in BlockHashes :
         ((time >= GST /\ FastCertExistsAt(s, h)) ~>
             BlockHashFinalizedAt(s, h))
+(* WP Def. 14 + Fig. 7: once a fast‑finalization certificate is observed, the block is finalized; we phrase as leads‑to to account for explicit FinalizeBlock step. :contentReference[oaicite:61]{index=61} *)
 
-(***************************************************************************
- * TRYFINAL PROGRESS — BlockNotarized + local vote ⇒ FinalVote eventually
- *
- * Audit 0016 suggestion
- * - If a correct node has observed BlockNotarized(s, h) and later also has a
- *   local NotarVote for the same h in slot s, and the slot is not marked
- *   BadWindow, then it eventually issues/stores FinalVote(s) in its Pool.
- *
- * Explanation
- * - This captures the model’s expectation that once TryFinal’s guard holds
- *   (BlockNotarized ∧ VotedForBlock ∧ ¬BadWindow), weak fairness on the
- *   scheduling of event emissions and handlers leads to FinalVote(s).
- *************************************************************************)
-\* Liveness helper (enabled in MC.cfg PROPERTIES)
 TryFinalProgress ==
     \A v \in CorrectNodes :
     \A s \in 1..MaxSlot :
@@ -1303,11 +692,8 @@ TryFinalProgress ==
                   VotedForBlock(validators[v], s, h))
         ) ~>
         (<> (\E vt \in validators[v].pool.votes[s][v] : IsFinalVote(vt)))
+(* WP Alg. 2 line 19: after notarized and not in BadWindow, node casts final vote; progress to final vote occurs. :contentReference[oaicite:62]{index=62} *)
 
-(***************************************************************************
- * PROGRESS — highest finalized slot keeps increasing after GST
- ***************************************************************************)
-\* Liveness property (enabled in MC.cfg PROPERTIES)
 Progress ==
     (time >= GST) ~>
         (\A v \in Validators :
@@ -1317,109 +703,35 @@ Progress ==
                                             \A s2 \in {b.slot : b \in finalized[v]} : s >= s2
                  IN <>(\E b \in blocks : b.slot > currentMax /\ b \in finalized[v])
             ELSE TRUE)
+(* WP Sec. 2.10 Theorem 2: each correct node eventually increases its highest finalized slot under synchrony and successful Rotor/leader windows. :contentReference[oaicite:63]{index=63} *)
 
-(***************************************************************************
- * SLOW-PATH LIVENESS (≥60% responsive) — progress after GST
- *
- * Explanation
- * - Under the stake premises encoded by ByzantineStakeOK and UnresponsiveStakeOK,
- *   at least 60% of stake is responsive and honest. Combined with the fairness
- *   constraints (AfterGST), the protocol makes progress (finalizes higher slots).
- ***************************************************************************)
-\* Liveness property (enabled in MC.cfg PROPERTIES)
-\* Stake assumptions are enforced in Init/Invariant; see comments above.
 Liveness60Responsive == Progress
+CrashToleranceLiveness20 == Progress
+(* WP Sec. 1.2 + Sec. 2.11 Cor. 43: same qualitative progress under Assumption 2 (+ Assumption 3 on Rotor non‑equivocation) when ≥60% stake is correct. :contentReference[oaicite:64]{index=64} *)
 
-(***************************************************************************
- * CRASH-TOLERANT LIVENESS (≤20% non-responsive stake)
- *
- * Whitepaper refs
- * - Assumption 2 (extra crash tolerance): alpenglow-whitepaper.md:122 (page 5)
- *   "Byzantine < 20%, up to 20% crashed, remaining > 60% correct."
- * - Liveness under partial synchrony (Thm. 2): alpenglow-whitepaper.md:1045.
- *
- * Explanation
- * - After GST, provided Assumption2OK holds (Byzantine < 20%, unresponsive ≤ 20%,
- *   correct > 60% stake), every correct/responsive validator eventually finalizes
- *   a block with a strictly higher slot than its current maximum (i.e., makes progress).
- * - Assumption2OK is enforced in Invariant, so this property is checked under
- *   the extended crash tolerance model.
- ***************************************************************************)
-CrashToleranceLiveness20 ==
-    (time >= GST) ~>
-        (\A v \in Validators :
-            IF v \in CorrectNodes
-            THEN LET currentMax == IF finalized[v] = {} THEN 0
-                                   ELSE CHOOSE s \in {b.slot : b \in finalized[v]} :
-                                            \A s2 \in {b.slot : b \in finalized[v]} : s >= s2
-                 IN <>(\E b \in blocks : b.slot > currentMax /\ b \in finalized[v])
-            ELSE TRUE)
-
-(***************************************************************************
- * REPAIR LIVENESS — notarized blocks eventually available to all correct nodes
- *
- * Whitepaper refs
- * - Algorithm 4 (Repair): `alpenglow-whitepaper.md:801` • §2.8
- * - Definition 19 (repair functions): `alpenglow-whitepaper.md:782`
- * - Blokstor repair obligation: `:470`
- *
- * Explanation
- * - If a correct node needs a block (has a certificate for it but lacks the block),
- *   then eventually that node will have the block available.
- * - This property verifies the repair mechanism's liveness guarantee: correct
- *   nodes eventually obtain all notarized blocks they need for protocol progress.
- * - Combined with weak fairness on RepairBlock (line 810), this ensures the
- *   repair mechanism fulfills its role in maintaining block availability.
- * 
- * Note: Due to TLC limitations with temporal quantification over variables, we define
- * a helper state predicate and use it in a simpler temporal formula. This checks that
- * any blocks needed for repair eventually become available.
- ***************************************************************************)
-
-\* Helper: Check if any correct node needs repair for a block it doesn't have
 NodeNeedsRepair(v) ==
     v \in CorrectNodes /\ 
     \E b \in blocks : NeedsBlockRepair(validators[v].pool, b) /\ b \notin blockAvailability[v]
 
-\* The actual liveness property: if a node needs repair after GST, it eventually gets the blocks
 RepairEventuallySucceeds ==
     \A v \in Validators :
         ((time >= GST /\ NodeNeedsRepair(v)) ~> 
             ~NodeNeedsRepair(v))
+(* WP Sec. 2.8 Algorithm 4: after GST, repair completes eventually for any node needing a notarized/fast‑final block. :contentReference[oaicite:65]{index=65} *)
 
-(***************************************************************************
- * THEOREM 2 — window-level liveness (Section 2.10)
- *
- * Whitepaper refs
- * - Theorem 2 statement: `alpenglow-whitepaper.md:1045`.
- * - No pre-GST timeouts premise: captured via NoTimeoutsBeforeGST; see §2.10.
- *
- * AUDIT NOTE (issues_openai.md §2):
- * Theorem 2's antecedent includes "Rotor succeeds for all slots in the window."
- * The spec models Rotor success via nondeterministic actions (RotorDisseminateSuccess)
- * with weak fairness (Fairness clause at line ~765), ensuring eventual success
- * for correct leaders after GST. The WindowRotorSuccessful predicate below
- * makes this assumption explicit for clarity and traceability.
- ***************************************************************************)
 NoTimeoutsBeforeGST(startSlot) ==
     \A v \in CorrectNodes :
         \A i \in (WindowSlots(startSlot) \cap 1..MaxSlot) :
             validators[v].timeouts[i] = 0 \/ validators[v].timeouts[i] >= GST
+(* WP Def. 17: timeouts are scheduled relative to ParentReady; before GST they may not fire; guard used in window liveness below. :contentReference[oaicite:66]{index=66} *)
 
-\* Helper predicate: Rotor succeeds for all slots in the window (Theorem 2 antecedent)
-\* NOTE: This is a model-checking helper. In practice, success is ensured by:
-\* 1. Correct leader (Leader(s) \in CorrectNodes)
-\* 2. Sufficient relay stake (Lemma 7, κ > 5/3 and Definition 6 conditions)
-\* 3. Weak fairness on RotorDisseminateSuccess after GST (Fairness clause)
-\* When checking WindowFinalization liveness, TLC's fairness ensures this predicate
-\* eventually holds through the RotorDisseminateSuccess action being taken for
-\* each slot's block in the window.
 WindowRotorSuccessful(startSlot) ==
     \A i \in (WindowSlots(startSlot) \cap 1..MaxSlot) :
         \E b \in blocks :
             /\ b.slot = i
             /\ b.leader = Leader(startSlot)
             /\ (\A v \in CorrectNodes : b \in blockAvailability[v])
+(* WP Theorem 2 precondition: leader correct and Rotor successful across a leader window. :contentReference[oaicite:67]{index=67} *)
 
 WindowFinalizedState(s) ==
     \A v \in CorrectNodes :
@@ -1428,25 +740,8 @@ WindowFinalizedState(s) ==
                 /\ b.slot = i
                 /\ b.leader = Leader(s)
                 /\ b \in finalized[v]
+(* WP Sec. 2.10: desired post‑condition—every block of the window is finalized everywhere. :contentReference[oaicite:68]{index=68} *)
 
-(*
- * Commentary: Under the stated premises (correct window leader, no pre-GST
- * timeouts, Rotor success for all window slots, and post-GST delivery/fairness),
- * every slot in the leader's window is eventually finalized by all correct nodes
- * (Whitepaper Theorem 2, alpenglow-whitepaper.md:1045).
- *
- * NOTE — Conditional assumptions, not invariants:
- * - Correct leader: Leader(s) \in CorrectNodes
- * - No early timeouts: NoTimeoutsBeforeGST(s)
- * - Rotor success for window: WindowRotorSuccessful(s)
- * - Post-GST fairness: time >= GST gates fairness in this spec
- *
- * These are liveness antecedents (assumptions) and are intentionally not
- * enforced as invariants. WindowRotorSuccessful appears explicitly below for
- * audit clarity; fairness in this spec ensures it eventually holds for correct
- * leaders after GST.
- *)
-\* Window-level liveness (quantified form added below)
 WindowFinalization(s) ==
     (IsFirstSlotOfWindow(s)
      /\ Leader(s) \in CorrectNodes
@@ -1454,16 +749,10 @@ WindowFinalization(s) ==
      /\ WindowRotorSuccessful(s)
      /\ time >= GST) ~>
         WindowFinalizedState(s)
+(* WP Theorem 2: with correct leader, Rotor success, and GST, whole window finalizes. :contentReference[oaicite:69]{index=69} *)
 
-\* Quantified window-liveness (for MC.cfg PROPERTIES)
 WindowFinalizationAll ==
     \A s \in 1..MaxSlot : WindowFinalization(s)
-
-\* Window liveness properties (if any) are defined in the MC harness.
-
-\* ============================================================================
-\* TYPE INVARIANT
-\* ============================================================================
 
 TypeInvariant ==
     /\ validators \in [Validators -> ValidatorState]
@@ -1477,79 +766,51 @@ TypeInvariant ==
     /\ avail80Start \in [1..MaxSlot -> [BlockHashes -> Nat]]
     /\ avail60Start \in [1..MaxSlot -> [BlockHashes -> Nat]]
     /\ \A v \in Validators : ValidatorStateOK(validators[v])
-    \* Certificates validity (Table 6) as a baseline type/shape property
     /\ \A v \in Validators : \A s \in 1..MaxSlot :
             AllCertificatesValid(validators[v].pool.certificates[s])
+(* WP Sec. 1.5 types and Sec. 2 data structures; every pool/certificate is well‑formed. :contentReference[oaicite:70]{index=70} *)
 
-(***************************************************************************
- * IMPLIED: ParentReady implies requisite certificates exist
- *
- * Whitepaper refs
- * - Definition 15 (ParentReady preconditions): `alpenglow-whitepaper.md:543`–`:546`.
- ***************************************************************************)
 ParentReadyImpliesCert ==
     \A v \in CorrectNodes, s \in 1..MaxSlot:
         (s > 1 /\ "ParentReady" \in validators[v].state[s]) =>
             \E p \in blocks:
                 ShouldEmitParentReady(validators[v].pool, s, p.hash, p.slot)
+(* WP Def. 15: ParentReady is only set when its preconditions are met. :contentReference[oaicite:71]{index=71} *)
 
-(***************************************************************************
- * IMPLIED: ParentReady uses a previous block (model assurance)
- *
- * Audit mapping
- * - Definition 15 says "previous block b"; make it explicit that the block
- *   witnessing ParentReady for slot s must satisfy p.slot < s.
- ***************************************************************************)
 ParentReadyUsesPreviousBlock ==
     \A v \in CorrectNodes, s \in 1..MaxSlot:
         (s > 1 /\ "ParentReady" \in validators[v].state[s]) =>
             \E p \in blocks :
                 /\ p.slot < s
                 /\ ShouldEmitParentReady(validators[v].pool, s, p.hash, p.slot)
+(* WP Def. 15 requires a previous notar/‑fallback parent. :contentReference[oaicite:72]{index=72} *)
 
-(***************************************************************************
- * IMPLIED: BlockNotarized implies notarization certificate exists
- *
- * Whitepaper refs
- * - Definition 15 (BlockNotarized event): `alpenglow-whitepaper.md:543`.
- ***************************************************************************)
 BlockNotarizedImpliesCert ==
     \A v \in CorrectNodes, s \in 1..MaxSlot :
         (\E b \in blocks : b.slot = s /\ "BlockNotarized" \in validators[v].state[s]) =>
         (\E b \in blocks : b.slot = s /\ HasNotarizationCert(validators[v].pool, s, b.hash))
+(* WP Def. 15: BlockNotarized(s,h) is emitted only if Pool has the notarization certificate for b. :contentReference[oaicite:73]{index=73} *)
 
-(* --------------------------------------------------------------------------
- * IMPLIED: FinalVote implies BlockNotarized for that slot (cross-module aid)
- *
- * Audit suggestion: make explicit that a correct node only issues/stores a
- * FinalVote(s) after observing BlockNotarized(s) locally. TryFinal enforces
- * this guard; the invariant documents it for model checking.
- * -------------------------------------------------------------------------- *)
 FinalVoteImpliesBlockNotarized ==
     \A v \in CorrectNodes :
     \A s \in 1..MaxSlot :
         \A vt \in validators[v].pool.votes[s][v] :
             IsFinalVote(vt) => HasState(validators[v], s, "BlockNotarized")
+(* WP Alg. 2 line 19: finalization vote only after notarization observed and no BadWindow. :contentReference[oaicite:74]{index=74} *)
 
-(***************************************************************************
- * STATE–POOL WITNESSES — audit 0014 (Votor StateObject)
- *
- * Explanation
- * - Connects Votor state flags to the existence of corresponding local votes
- *   in Pool for correct nodes. These strengthen auditability and document
- *   intended meanings of the flags.
- *************************************************************************)
 VotedConsistency ==
     \A v \in CorrectNodes :
     \A s \in 1..MaxSlot :
         ("Voted" \in validators[v].state[s])
             => (\E vt \in validators[v].pool.votes[s][v] : IsInitialVote(vt))
+(* WP Lemma 20 + Alg. 2: “Voted” tag iff initial vote exists. :contentReference[oaicite:75]{index=75} *)
 
 VotedNotarTagConsistency ==
     \A v \in CorrectNodes :
     \A s \in 1..MaxSlot :
         ("VotedNotarTag" \in validators[v].state[s])
             => (\E vt \in validators[v].pool.votes[s][v] : vt.type = "NotarVote")
+(* Consistency of local tags with stored votes. :contentReference[oaicite:76]{index=76} *)
 
 BadWindowWitness ==
     \A v \in CorrectNodes :
@@ -1557,32 +818,20 @@ BadWindowWitness ==
         ("BadWindow" \in validators[v].state[s])
             => (\E vt \in validators[v].pool.votes[s][v] :
                     vt.type \in {"SkipVote", "SkipFallbackVote", "NotarFallbackVote"})
+(* WP Alg. 1 lines 18–25: entering fallback marks BadWindow and is evidenced by one of these vote types. :contentReference[oaicite:77]{index=77} *)
 
 ItsOverWitness ==
     \A v \in CorrectNodes :
     \A s \in 1..MaxSlot :
         ("ItsOver" \in validators[v].state[s])
             => (\E vt \in validators[v].pool.votes[s][v] : vt.type = "FinalVote")
+(* WP Lemma 22 + Alg. 2 line 21: ItsOver iff FinalVote exists. :contentReference[oaicite:78]{index=78} *)
 
-
-(* --------------------------------------------------------------------------
- * FINALIZED ANCESTOR CLOSURE — finalized sets are ancestry-closed
- *
- * If a validator has finalized b, then all ancestors of b (w.r.t. global
- * blocks) are also finalized by that validator. This documents and checks the
- * closure property relied upon by SameChain over finalized sets.
- * -------------------------------------------------------------------------- *)
 FinalizedAncestorClosure ==
     \A v \in Validators : \A b \in finalized[v] :
         GetAncestors(b, blocks) \subseteq finalized[v]
+(* WP Def. 14: when finalizing b, finalize all ancestors first. :contentReference[oaicite:79]{index=79} *)
 
-(***************************************************************************
- * REPRESENTATION INVARIANTS — audit 0015 (InitValidatorState)
- *
- * Explanation
- * - Document the split representation for parameterized state objects and
- *   the intended singleton-pending-blocks discipline.
- *************************************************************************)
 ParentReadyConsistencyAll ==
     \A v \in Validators : ParentReadyConsistency(validators[v])
 
@@ -1591,57 +840,31 @@ PendingBlocksSingletonAll ==
 
 PendingBlocksSlotAlignedAll ==
     \A v \in Validators : PendingBlocksSlotAligned(validators[v])
-
-(***************************************************************************
- * BOUNDED-TIME FINALIZATION — min(δ80%, 2δ60%) after distribution
- *
- * Whitepaper refs
- * - Section 1.3 (:126) and §1.5 (:241): δ_θ definition and latency intuition.
- * - §2.6: concurrent 80% one-round and 60% two-round finalization paths.
- *
- * Explanation
- * - We record, per (slot,hash), the first model time at which a block has
- *   been disseminated to ≥80% (resp. ≥60%) stake via `avail80Start` and
- *   `avail60Start`. The following invariants assert that by the time the
- *   model time exceeds those start times by Delta80 (resp. 2·Delta60), some
- *   correct node has finalized that block (BlockHashFinalizedAt).
- *
- * Notes
- * - These are safety-style invariants (deadline cannot be exceeded without
- *   finalization) instead of temporal "within k" operators, which allows
- *   TLC to check bounded-time claims with the existing `time` variable.
- ***************************************************************************)
+(* WP Alg. 1–2 bookkeeping for pending blocks and per‑slot alignment. :contentReference[oaicite:80]{index=80} *)
 
 EffectiveStart(start) == IF start = 0 THEN 0 ELSE IF start < GST THEN GST ELSE start
+(* WP “after distribution” should be evaluated under synchrony; EffectiveStart maxes with GST. :contentReference[oaicite:81]{index=81} *)
 
 BoundedFinalization80 ==
     \A s \in 1..MaxSlot :
     \A h \in BlockHashes :
         LET st == EffectiveStart(avail80Start[s][h])
         IN (st = 0) \/ (time <= st + Delta80) \/ BlockHashFinalizedAt(s, h)
+(* WP Abstract + Sec. 1.3: once ≥80% participating stake has the block after GST, finalization occurs within δ80. Here Delta80 ≈ δ80. :contentReference[oaicite:82]{index=82} *)
 
 BoundedFinalization60 ==
     \A s \in 1..MaxSlot :
     \A h \in BlockHashes :
         LET st == EffectiveStart(avail60Start[s][h])
         IN (st = 0) \/ (time <= st + (2 * Delta60)) \/ BlockHashFinalizedAt(s, h)
-
-\* ============================================================================
-\* STATE CONSTRAINTS (For bounded model checking)
-\* ============================================================================
+(* WP Abstract + Sec. 1.3: once ≥60% has the block after GST, two‑round path finalizes within 2δ60. :contentReference[oaicite:83]{index=83} *)
 
 StateConstraint ==
     /\ Cardinality(blocks) <= MaxBlocks
-    /\ time <= GST + 10
     /\ \A v \in Validators :
        \A s \in 1..MaxSlot :
-           \* Sanity check: bound total votes stored per slot in a validator's pool 
            Cardinality(GetVotesForSlot(validators[v].pool, s)) <= NumValidators * 5
-
-
-\* ============================================================================
-\* MAIN INVARIANT (Combines all safety properties)
-\* ============================================================================
+(* CHANGE (soundness): removed “time <= GST + 10”. WP Sec. 1.5/3.4 give no global time cap; timeouts can be extended to restore liveness. A finite cap can mask liveness violations. :contentReference[oaicite:84]{index=84} *)
 
 Invariant ==
     /\ TypeInvariant
@@ -1696,5 +919,6 @@ Invariant ==
     /\ TotalNotarStakeSanity
     /\ BoundedFinalization80
     /\ BoundedFinalization60
+(* Collects all safety and progress‑preconditions tied directly to WP Defs/Lemmas/Theorems in Sec. 2 and model assumptions in Sec. 1.5. :contentReference[oaicite:85]{index=85} *)
 
 =============================================================================
