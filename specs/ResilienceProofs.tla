@@ -8,7 +8,7 @@
  * 3. Network partition recovery guarantees
  ***************************************************************************)
 
-EXTENDS MainProtocol, TLAPS
+EXTENDS MainProtocol, TLAPS, WhitepaperThm1, LivenessProofs
 
 (***************************************************************************
  * AUXILIARY DEFINITIONS FOR RESILIENCE PROPERTIES
@@ -17,6 +17,23 @@ EXTENDS MainProtocol, TLAPS
 \* Erasure coding over-provisioning assumption (κ > 5/3)
 ErasureCodingOverProvisioning ==
     GammaTotalShreds * 3 > GammaDataShreds * 5
+
+SafetyWhitepaperPremises ==
+    /\ FinalizedSubsetOfBlocks
+    /\ FinalizedImpliesNotarized
+    /\ SameWindowCertificateDescend
+    /\ CrossWindowCertificateDescend
+    /\ (\A v \in Validators : PoolCertificatesSlotAligned(validators[v].pool))
+
+LivenessCompositePremises ==
+    /\ []Invariant
+    /\ WindowFinalizationAll
+    /\ FastAvailabilityImpliesFastCert
+    /\ BoundedFinalization80
+    /\ BoundedFinalization60
+    /\ CorrectNodes # {}
+    /\ FinalizedSubsetOfBlocks
+    /\ CorrectNodesAreValidators
 
 (***************************************************************************
  * ARITHMETIC LEMMAS FOR STAKE THRESHOLDS
@@ -82,6 +99,70 @@ WindowLivenessGuarantee ==
     \A s \in 1..MaxSlot :
         WindowReady(s) => <>(WindowSlotFinalized(s))
 
+LEMMA BlockFinalizedEverywhereImpliesWindowSlot ==
+    ASSUME FinalizedSubsetOfBlocks,
+           CorrectNodesAreValidators,
+           NEW s \in 1..MaxSlot,
+           NEW h \in BlockHashes,
+           BlockFinalizedEverywhere(s, h)
+    PROVE WindowSlotFinalized(s)
+PROOF
+<1>1. SUFFICES ASSUME NEW v \in CorrectNodes
+                     PROVE \E b \in blocks :
+                              /\ b.slot = s
+                              /\ b \in finalized[v]
+      BY DEF WindowSlotFinalized
+<1>2. v \in Validators
+      BY <1>1, CorrectNodesAreValidators DEF CorrectNodesAreValidators
+<1>3. \E b \in finalized[v] :
+        /\ b.slot = s
+        /\ b.hash = h
+      BY <1>1, BlockFinalizedEverywhere DEF BlockFinalizedEverywhere
+<1>4. PICK b \in finalized[v] :
+        /\ b.slot = s
+        /\ b.hash = h
+      BY <1>3
+<1>5. b \in blocks
+      BY FinalizedSubsetOfBlocks, <1>2, <1>4 DEF FinalizedSubsetOfBlocks
+<1>6. b.slot = s /\ b \in finalized[v]
+      BY <1>4
+<1>7. QED BY <1>5, <1>6
+
+LEMMA WindowProgressImpliesWindowLiveness ==
+    ASSUME WindowProgressConclusion,
+           FinalizedSubsetOfBlocks,
+           CorrectNodesAreValidators
+    PROVE WindowLivenessGuarantee
+PROOF
+<1>1. SUFFICES ASSUME NEW s \in 1..MaxSlot,
+                     WindowReady(s)
+              PROVE <>(WindowSlotFinalized(s))
+      BY DEF WindowLivenessGuarantee
+<1>2. IsFirstSlotOfWindow(s) /\ Leader(s) \in CorrectNodes /\ NoTimeoutsBeforeGST(s) /\ time >= GST
+      BY <1>1 DEF WindowReady
+<1>3. (IsFirstSlotOfWindow(s) /\ Leader(s) \in CorrectNodes /\ NoTimeoutsBeforeGST(s) /\ time >= GST)
+        ~> (\E h \in BlockHashes : BlockFinalizedEverywhere(s, h))
+      BY WindowProgressConclusion DEF WindowProgressConclusion
+<1>4. <>(\E h \in BlockHashes : BlockFinalizedEverywhere(s, h))
+      BY <1>2, <1>3, PTL
+<1>5. (\E h \in BlockHashes : BlockFinalizedEverywhere(s, h)) => WindowSlotFinalized(s)
+      <2>1. ASSUME \E h \in BlockHashes : BlockFinalizedEverywhere(s, h)
+               PROVE WindowSlotFinalized(s)
+            <3>1. PICK h \in BlockHashes : BlockFinalizedEverywhere(s, h)
+                  BY <2>1
+            <3>2. WindowSlotFinalized(s)
+                  BY BlockFinalizedEverywhereImpliesWindowSlot,
+                     FinalizedSubsetOfBlocks,
+                     CorrectNodesAreValidators,
+                     <3>1
+            <3>3. QED BY <3>2
+      <2>2. QED BY <2>1
+<1>5a. []((\E h \in BlockHashes : BlockFinalizedEverywhere(s, h)) => WindowSlotFinalized(s))
+      BY PTL, <1>5
+<1>6. <>(WindowSlotFinalized(s))
+      BY <1>4, <1>5a, PTL
+<1>7. QED BY <1>6
+
 FinalizedChainsComparable ==
     \A v1, v2 \in CorrectNodes :
         \A b1 \in finalized[v1], b2 \in finalized[v2] :
@@ -89,37 +170,49 @@ FinalizedChainsComparable ==
 
 (***************************************************************************
  * RESILIENCE PROPERTY 1: SAFETY WITH LIMITED BYZANTINE STAKE
- * We rely on the protocol’s global invariant, which already bundles the
- * <20% Byzantine-stake assumption together with the chain-safety proof.
+ * Discharge the safety goal via the whitepaper Theorem 1 premises instead of
+ * appealing directly to the composite invariant.
  ***************************************************************************)
 
 THEOREM SafetyWithByzantineResilience ==
-    ASSUME Invariant
+    ASSUME SafetyWhitepaperPremises
     PROVE SafetyInvariant
 PROOF
 <1>1. SafetyInvariant
-      BY Invariant DEF Invariant
+      BY WhitepaperTheorem1, SafetyWhitepaperPremises DEF SafetyWhitepaperPremises
 <1>2. QED BY <1>1
 
 (***************************************************************************
  * RESILIENCE PROPERTY 2: LIVENESS WITH BOUNDED NON-RESPONSIVE STAKE
- * Assuming every leader window that starts after GST satisfies the liveness
- * preconditions recorded in `WindowLivenessGuarantee`, each such window’s
- * first slot eventually finalizes at every correct validator.
+ * Combine the liveness composition theorem with structural premises to obtain
+ * window progress together with the fast/slow deadline bounds.
  ***************************************************************************)
 
 THEOREM LivenessWithNonResponsiveResilience ==
-    ASSUME WindowLivenessGuarantee
-    PROVE \A s \in 1..MaxSlot :
-            WindowReady(s) => <>(WindowSlotFinalized(s))
+    ASSUME LivenessCompositePremises
+    PROVE /\ WindowLivenessGuarantee
+          /\ FastPathConclusion
+          /\ SlowPathBoundConclusion
 PROOF
-<1>1. SUFFICES ASSUME NEW s \in 1..MaxSlot,
-                     WindowReady(s)
-              PROVE <>(WindowSlotFinalized(s))
-      OBVIOUS
-<1>2. <>(WindowSlotFinalized(s))
-      BY <1>1, WindowLivenessGuarantee DEF WindowLivenessGuarantee
-<1>3. QED BY <1>2
+<1>1. /\ WindowProgressConclusion
+        /\ FastPathConclusion
+        /\ SlowPathBoundConclusion
+      BY AlpenglowMainLiveness, LivenessCompositePremises DEF LivenessCompositePremises
+<1>2. WindowProgressConclusion
+      BY <1>1
+<1>3. WindowLivenessGuarantee
+      BY WindowProgressImpliesWindowLiveness,
+         <1>2,
+         LivenessCompositePremises DEF LivenessCompositePremises
+<1>4. FastPathConclusion
+      BY <1>1
+<1>5. SlowPathBoundConclusion
+      BY <1>1
+<1>6. /\ WindowLivenessGuarantee
+        /\ FastPathConclusion
+        /\ SlowPathBoundConclusion
+      BY <1>3, <1>4, <1>5
+<1>7. QED BY <1>6
 
 (***************************************************************************
  * RESILIENCE PROPERTY 3: NETWORK PARTITION RECOVERY (CHAIN CONSISTENCY)
@@ -235,7 +328,7 @@ PROOF
 \* This follows directly from the FinalizedImpliesNotarized invariant
 \* which is part of the main protocol invariant in MainProtocol.
 <1>1. FinalizedImpliesNotarized
-      BY Invariant DEF Invariant
+      BY Invariant DEF Invariant, FinalizedImpliesNotarized
 <1>2. \A v \in CorrectNodes :
        \A b \in finalized[v] :
          \E cert \in validators[v].pool.certificates[b.slot] :
