@@ -1577,7 +1577,7 @@ ItsOverWitness ==
  *
  * If a validator has finalized b, then all ancestors of b (w.r.t. global
  * blocks) are also finalized by that validator. This documents and checks the
- * closure property relied upon by SingleChain over finalized sets.
+ * closure property relied upon by SameChain over finalized sets.
  * -------------------------------------------------------------------------- *)
 FinalizedAncestorClosure ==
     \A v \in Validators : \A b \in finalized[v] :

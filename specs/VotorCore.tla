@@ -236,7 +236,7 @@ TrySkipWindow(validator, slot) ==
                     IF remainingSlots = {} THEN state
                     ELSE 
                         LET s == CHOOSE x \in remainingSlots : TRUE
-                            vote == CreateSkipVoteForSlot(state.id, s)
+                            vote == CreateSkipVote(state.id, s)
                             newVal1 == AddState(state, s, "Voted")
                             newVal2 == AddState(newVal1, s, "BadWindow")
                             poolWithVote == StoreVote(newVal2.pool, vote)
@@ -453,7 +453,7 @@ THEOREM TryNotarProducesValidNotarVote ==
 THEOREM TrySkipWindowProducesValidSkipVotes ==
     \A validator, s \in Slots :
         ValidatorStateOK(validator) /\ ~HasState(validator, s, "Voted")
-            => IsValidVote(CreateSkipVoteForSlot(validator.id, s))
+            => IsValidVote(CreateSkipVote(validator.id, s))
 
 \* ============================================================================
 \* LOCAL SAFETY (Lemma 22): No mixing finalization and fallback per-slot

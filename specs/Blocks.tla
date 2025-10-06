@@ -5,14 +5,13 @@
  * Whitepaper grounding (Alpenglow v1.1):
  *   • Slots, leaders, fixed-length leader windows, public VRF schedule:
  *       §1.1 overview—leader(s), leader window, threshold VRF (pp. 9–10)
- *       :contentReference[oaicite:0]{index=0}
+ *
  *   • Data model: shreds → slices → block; block hash; ancestry:
  *       §2.1, Definitions 1–5 (pp. 14–16): Def. 3 (block & parent identifiers),
  *       Def. 4 (block hash as Merkle root), Def. 5 (ancestor/descendant, reflexive)
- *       :contentReference[oaicite:1]{index=1} :contentReference[oaicite:2]{index=2}
+ *
  *   • Correctness + linearity of finalized chain and slot order:
  *       §1.5 “Correctness” (p. 11) and Theorem 1 (Safety) (§2.9, pp. 32–33)
- *       :contentReference[oaicite:3]{index=3} :contentReference[oaicite:4]{index=4}
  *
  * This module defines the control-plane datatypes and predicates for blocks,
  * ancestry, and leader windows used by higher-level protocol specs.
@@ -25,9 +24,9 @@ EXTENDS Naturals, FiniteSets, Messages, Sequences
 \* ============================================================================
 
 CONSTANTS
-    GenesisHash,     \* Abstract hash of genesis (Def. 4; §2.1)  :contentReference[oaicite:5]{index=5}
-    WindowSize,      \* Fixed consecutive slots per leader window (§1.1)  :contentReference[oaicite:6]{index=6}
-    WindowLeader     \* Window-indexed leader map (VRF abstraction; §1.1)  :contentReference[oaicite:7]{index=7}
+    GenesisHash,     \* Abstract hash of genesis (Def. 4; §2.1)
+    WindowSize,      \* Fixed consecutive slots per leader window (§1.1)
+    WindowLeader     \* Window-indexed leader map (VRF abstraction; §1.1)
 
 ASSUME
     /\ GenesisHash \in BlockHashes
@@ -40,13 +39,13 @@ ASSUME
  * as “the sequence of all slices of a slot … for voting and reaching consensus”.
  * Block data M carries slot(parent(b)) and hash(parent(b)) to link ancestry.  (Def. 3)
  * The block hash hash(b) is a Merkle-root over slice roots r₁..rₖ.            (Def. 4)
- * References: §2.1 Def. 3–4 (pp. 15–16)  :contentReference[oaicite:8]{index=8} :contentReference[oaicite:9]{index=9}
+ * References: §2.1 Def. 3–4 (pp. 15–16)
  *
  * For protocol reasoning we keep only control-plane metadata:
  *   slot(b), hash(b), parent(b), leader(b).
  * The leader is derivable from the public schedule leader(s) (VRF-set before epoch),
  * but we keep it explicitly for convenience in predicates like LeaderMatchesSchedule.
- * References: §1.1 leader(s)/VRF (pp. 9–10)  :contentReference[oaicite:10]{index=10}
+ * References: §1.1 leader(s)/VRF (pp. 9–10)
  * ------------------------------------------------------------------------------ *)
 
 Block == [
@@ -64,13 +63,12 @@ Block == [
  * We model a notional genesis at slot 0 with parent = hash = GenesisHash as a clean
  * termination point for ancestry walks. The epoch iterates through slots s = 1..L.
  * References: §1.5 Correctness (p. 11); §1.1 slot indexing (pp. 9–10)
- * :contentReference[oaicite:11]{index=11} :contentReference[oaicite:12]{index=12}
  * ------------------------------------------------------------------------------ *)
 
 GenesisBlock == [
     slot |-> 0,
     hash |-> GenesisHash,
-    parent |-> GenesisHash,  \* Self-parented sentinel (modeling choice consistent with “notional genesis”)  :contentReference[oaicite:13]{index=13}
+    parent |-> GenesisHash,  \* Self-parented sentinel (modeling choice consistent with “notional genesis”)
     leader |-> CHOOSE v \in Validators : TRUE  \* Arbitrary; leader irrelevant for genesis
 ]
 
@@ -87,7 +85,6 @@ IsGenesis(b) ==
  * identifiers come from §2.1 Defs. 3–5; the strict temporal relation (child.slot > parent.slot)
  * is specified by the protocol’s slot order and is checked elsewhere. 
  * References: §2.1 Defs. 3–5 (pp. 15–16); §1.5 slot order (p. 11)
- * :contentReference[oaicite:14]{index=14} :contentReference[oaicite:15]{index=15} :contentReference[oaicite:16]{index=16}
  * ------------------------------------------------------------------------------ *)
 
 IsValidBlock(b) ==
@@ -103,7 +100,6 @@ IsValidBlock(b) ==
  * Child carries slot(parent(b)) and hash(parent(b)) in its data, so we can check
  * child.parent = parent.hash (Def. 3). The protocol mandates child.slot > parent.slot.
  * References: §2.1 Def. 3 (p. 15); §1.5 (p. 11)
- * :contentReference[oaicite:17]{index=17} :contentReference[oaicite:18]{index=18}
  * ------------------------------------------------------------------------------ *)
 
 ValidParentChild(parent, child) ==
@@ -116,7 +112,7 @@ ValidParentChild(parent, child) ==
  * Table 5 defines voting messages including NotarVote(slot(b), hash(b)) and
  * NotarFallbackVote(slot(b), hash(b)). These wrappers keep the slot–hash pairing
  * consistent at call sites.
- * Reference: §2.4 Table 5 (p. 20)  :contentReference[oaicite:19]{index=19}
+ * Reference: §2.4 Table 5 (p. 20)
  ***************************************************************************)
 CreateNotarVoteForBlock(v, b) ==
     CreateNotarVote(v, b.slot, b.hash)
@@ -128,15 +124,15 @@ CreateNotarFallbackVoteForBlock(v, b) ==
  * Ancestor reasoning (IsAncestor, GetAncestors, ComparableByAncestry)
  * ------------------------------------------------------------------------------
  * Ancestor/descendant is reachability via parent links; the relation is reflexive:
- * “b is its own ancestor and descendant.” (Def. 5)  :contentReference[oaicite:20]{index=20}
+ * “b is its own ancestor and descendant.” (Def. 5)
  * The backward step is enabled by block data containing slot(parent(b)) and hash(parent(b)).
- * (Def. 3)  :contentReference[oaicite:21]{index=21}
- * Termination uses the notional genesis block. (§1.5)  :contentReference[oaicite:22]{index=22}
+ * (Def. 3)
+ * Termination uses the notional genesis block. (§1.5)
  *
  * CHOOSE on parents assumes hash uniqueness. The paper assumes collision-resistant
  * hashing and shows encode/decode properties that make the Merkle root r uniquely
  * associated with payload M, with a pass/fail decode check. (§1.6)
- * :contentReference[oaicite:23]{index=23} :contentReference[oaicite:24]{index=24} :contentReference[oaicite:25]{index=25}
+ *
  * ------------------------------------------------------------------------------ *)
 
 IsAncestor(b1, b2, allBlocks) ==
@@ -156,6 +152,27 @@ IsAncestor(b1, b2, allBlocks) ==
 GetAncestors(b, allBlocks) ==
     {ancestor \in allBlocks : IsAncestor(ancestor, b, allBlocks)}
 
+(* ------------------------------------------------------------------------------
+ * AncestorAtSlot - Find the specific ancestor at a given slot
+ * ------------------------------------------------------------------------------
+ * For Lemma 30 (ancestor coverage, §2.9): given a block b and a slot s, return
+ * the unique ancestor of b that occupies slot s, or NoBlock if none exists.
+ *
+ * Whitepaper reference: Lemma 30 requires checking that "for every slot s' in
+ * the window, the corresponding ancestor has ≥40% notar votes or a notar-
+ * fallback certificate." This helper enables that per-slot ancestor lookup.
+ *
+ * Precondition: allBlocks forms a valid chain (no forks in b's ancestry).
+ * Returns: The ancestor block a where a.slot = targetSlot, or NoBlock.
+ * ------------------------------------------------------------------------------ *)
+
+AncestorAtSlot(b, targetSlot, allBlocks) ==
+    LET ancestors == GetAncestors(b, allBlocks)
+        matching == {a \in ancestors : a.slot = targetSlot}
+    IN IF matching = {} 
+       THEN NoBlock
+       ELSE CHOOSE a \in matching : TRUE
+
 ComparableByAncestry(b1, b2, allBlocks) ==
     IsAncestor(b1, b2, allBlocks) \/ IsAncestor(b2, b1, allBlocks)
 
@@ -164,10 +181,8 @@ ComparableByAncestry(b1, b2, allBlocks) ==
  * ------------------------------------------------------------------------------
  * Each slot has a designated leader; leaders control fixed-length “leader windows”,
  * and a threshold VRF yields a publicly known leader schedule. (§1.1)
- * :contentReference[oaicite:26]{index=26}
  * The protocol reasons about windowSlots(s) and branches on “first slot in leader
  * window”; ParentReady is only for the first slot. (Alg. 2; Def. 15; Def. 17)
- * :contentReference[oaicite:27]{index=27} :contentReference[oaicite:28]{index=28} :contentReference[oaicite:29]{index=29}
  *
  * We model this with a fixed WindowSize and a mapping WindowLeader[WindowIndex(s)].
  * ------------------------------------------------------------------------------ *)
@@ -179,7 +194,7 @@ Leader(slot) == WindowLeader[WindowIndex(slot)]
 
 (* Domain/range sanity for the schedule: leader(s) maps to a node; schedule known
  * before epoch; leaders are drawn from the node set for the epoch. (§1.1)
- * :contentReference[oaicite:30]{index=30} :contentReference[oaicite:31]{index=31} *)
+ * *)
 ASSUME
     /\ {WindowIndex(s) : s \in Slots} \subseteq DOMAIN WindowLeader
     /\ \A k \in {WindowIndex(s) : s \in Slots} : WindowLeader[k] \in Validators
@@ -198,11 +213,11 @@ LeaderMatchesSchedule(b) == b.leader = Leader(b.slot)
  * ------------------------------------------------------------------------------
  * windowSlots(s) (Alg. 2) returns the slot numbers of the leader window for s and
  * is used to set timeouts across the window from the first slot (Def. 17).
- * :contentReference[oaicite:32]{index=32} :contentReference[oaicite:33]{index=33}
+
  * The leader of the window beginning with slot s produces blocks for all slots
- * in windowSlots(s). (§2.7 Block Creation)  :contentReference[oaicite:34]{index=34}
+ * in windowSlots(s). (§2.7 Block Creation)
  * On any linear chain ordered by slots with child.slot > parent.slot, the max-slot
- * element is the tip. (§1.5)  :contentReference[oaicite:35]{index=35}
+ * element is the tip. (§1.5)
  * ------------------------------------------------------------------------------ *)
 
 WindowSlots(slot) ==
@@ -212,7 +227,7 @@ WindowSlots(slot) ==
         /\ s < first + WindowSize
         /\ s >= 1}
 
-\* Sequence form for ordered iteration in timeouts (Alg. 2 “array with slot numbers”).  :contentReference[oaicite:36]{index=36}
+\* Sequence form for ordered iteration in timeouts (Alg. 2 “array with slot numbers”).
 WindowSlotsSeq(slot) ==
     LET first == FirstSlotOfWindow(slot)
     IN [ i \in 1..WindowSize |-> first + i - 1 ]
@@ -224,13 +239,11 @@ Tip(chain) == CHOOSE x \in chain : \A y \in chain : x.slot >= y.slot
  * ------------------------------------------------------------------------------
  * Finalized blocks form a single chain of parent-child links, and when a block is
  * finalized, all ancestors are finalized as well. (§1.5 correctness; also noted in §2.6)
- * :contentReference[oaicite:37]{index=37} :contentReference[oaicite:38]{index=38}
  * At most one block can be notarized in a slot (Lemma 24), and “fast/slow” rules
  * ensure consistent uniqueness across finalization. (§2.9 Lemmas 23–25)
- * :contentReference[oaicite:39]{index=39} :contentReference[oaicite:40]{index=40} :contentReference[oaicite:41]{index=41}
  * UniqueBlockHashes models the crypto assumptions: collision-resistant hash and
  * encode/decode guarantee that the Merkle root r is uniquely associated with M.
- * (§1.6)  :contentReference[oaicite:42]{index=42} :contentReference[oaicite:43]{index=43}
+ * (§1.6)
  * ------------------------------------------------------------------------------ *)
 
 ExtendsChain(newBlock, existingChain) ==
@@ -242,11 +255,13 @@ ExtendsChain(newBlock, existingChain) ==
 AllBlocksValid(blocks) ==
     \A b \in blocks : IsGenesis(b) \/ IsValidBlock(b)
 
+\* If same slot, must have same hash
 UniqueBlocksPerSlot(finalizedBlocks) ==
     \A b1, b2 \in finalizedBlocks :
         b1.slot = b2.slot => b1.hash = b2.hash
 
-SingleChain(finalizedBlocks) ==
+
+SameChain(finalizedBlocks) ==
     \A b1, b2 \in finalizedBlocks :
         ComparableByAncestry(b1, b2, finalizedBlocks)
 
