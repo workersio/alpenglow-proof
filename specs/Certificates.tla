@@ -2,6 +2,29 @@
 
 EXTENDS Naturals, FiniteSets, Messages, Sequences
 
+(*
+ Alpenglow WP v1.1 alignment (citations point to exact locations):
+
+ - Fast vs. slow thresholds:
+   • Fast-finalization: NotarVote Σ ≥ 80%; all other certs at Σ ≥ 60%.
+     (Table 6, p.20; §2.4–§2.6)
+   • One-round @80% and two-round @60% run in parallel; latency min(δ80%, 2δ60%).
+     (Abstract p.1; §1.3 p.6; §2.6 p.22–25)
+
+ - Stake model & finiteness:
+   • Validators (nodes) are finite and fixed within an epoch; each has positive stake ρ_i > 0.
+     (§1.5 “Node”, “Epoch”, “Stake”, p.8–10 incl. “Stake” p.9)
+
+ - Fault assumptions using these thresholds:
+   • Safety with <20% byzantine (Assumption 1); extra crash tolerance up to an additional 20% under Assumptions 2–3.
+     (§1.2 p.4–5; §2.11 p.38–39)  :contentReference[oaicite:17]{index=17}
+   • Safety and liveness results rely on the 80/60 machinery (Theorem 1 p.32; Theorem 2 p.37).
+     (§2.9–§2.10)  :contentReference[oaicite:18]{index=18}
+
+ - Modeling note:
+   • Paper uses stake sums Σ over sets; enumeration order is irrelevant. Any sequence witnessing a bijection with S is fine.
+     (Table 6 p.20; global set-based reasoning)  :contentReference[oaicite:19]{index=19}
+*)
 
 CONSTANTS
     StakeMap
@@ -18,23 +41,37 @@ EnumerateSet(S) ==
         /\ {seq[i] : i \in 1 .. Len(seq)} = S
         /\ \A i, j \in 1 .. Len(seq) : i # j => seq[i] # seq[j]
 
-TotalStake == 
-    LET vals == DOMAIN StakeMap
-    IN IF vals = {} THEN 0
-       ELSE LET Sum[S \in SUBSET vals] == 
-                IF S = {} THEN 0
-                ELSE LET v == CHOOSE x \in S : TRUE
-                     IN StakeMap[v] + Sum[S \ {v}]
-            IN Sum[vals]
+(* Block (paper-aligned)
+Representation: b = { ⟨s,t,z_t,r_t,M_t,σ_t⟩ : t=1..k }, with z_k=1 and z_t=0 for t<k. §2.1, Def. 3, p.15. 
+Slot/parent: slot(b)=s; M=(M_1..M_k) includes slot(parent(b)) and hash(parent(b)). §2.1, Def. 3, p.15. 
+Hash: hash(b)=Merkle root over r_1..r_k padded to next power‑of‑two leaves (double‑Merkle: shreds→slice root r_t; slice roots→block root). §2.1, Fig. 2 & Def. 4, p.14–15. 
+Slices/Shreds (context): each slice t is RS‑coded into Γ shreds; any γ suffice; each shred carries a Merkle path to r_t and leader sig on Slice(s,t,z_t,r_t). §2.1, Defs. 1–2 & §2.2, p.14–17. 
+Validity invariants to model: z_k=1 ∧ ∀t<k: z_t=0; slot(parent(b)) < slot(b); hash(parent(b)) matches the parent link encoded in M. §2.1, Defs. 3–5, p.15–16. 
+Interface to voting: on first complete block for slot s, emit Block(s, hash(b), hash(parent(b))) to Pool/Votor. §2.3, Def. 10, p.19. 
+*)
+
+TotalStake ==
+  LET vals == DOMAIN StakeMap IN
+  IF vals = {} THEN 0
+  ELSE
+    LET RECURSIVE Sum(_)
+        Sum(S) ==
+          IF S = {} THEN 0
+          ELSE LET v == CHOOSE x \in S : TRUE
+               IN  StakeMap[v] + Sum(S \ {v})
+    IN  Sum(vals)
+
 
 CalculateStake(validatorSet) ==
     LET vals == validatorSet \cap DOMAIN StakeMap
     IN IF vals = {} THEN 0
-       ELSE LET Sum[S \in SUBSET vals] == 
+        ELSE
+        LET RECURSIVE Sum(_)
+            Sum(S) ==
                 IF S = {} THEN 0
                 ELSE LET v == CHOOSE x \in S : TRUE
-                     IN StakeMap[v] + Sum[S \ {v}]
-            IN Sum[vals]
+                    IN StakeMap[v] + Sum(S \ {v})
+        IN Sum(vals)
 
 UniqueValidators(votes) ==
     {v.validator : v \in votes}
