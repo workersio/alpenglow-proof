@@ -65,6 +65,7 @@ CanCreateNotarizationCert(votes, slot, blockHash) ==
         /\ v.blockHash = blockHash}
     IN MeetsThreshold(StakeFromVotes(relevantVotes), DefaultThreshold)
 
+
 CanCreateNotarFallbackCert(votes, slot, blockHash) ==
     LET relevantVotes == {v \in votes :
         /\ v.slot = slot
@@ -85,7 +86,7 @@ CanCreateFinalizationCert(votes, slot) ==
 
 
 CanonicalizeSkipVotes(votes, slot) ==
-    LET S == {v \in votes :hah /\ IsSkipVote(v) /\ v.slot = slot}
+    LET S == {v \in votes : /\ IsSkipVote(v) /\ v.slot = slot}
         V == {v.validator : v \in S}
         Pick(val) ==
             IF \E x \in S : /\ x.validator = val /\ x.type = "SkipFallbackVote"
@@ -127,6 +128,7 @@ CreateFinalizationCert(votes, slot) ==
      blockHash |-> NoBlock,
      votes |-> {v \in votes : 
         v.type = "FinalVote" /\ v.slot = slot}]
+
 
 IsValidCertificate(cert) ==
     LET RelevantVotes ==
@@ -200,6 +202,7 @@ SkipVsBlockCertExclusion(certificates) ==
                         c.type \in {"NotarizationCert", "NotarFallbackCert", "FastFinalizationCert"}
     IN ~(hasSkip /\ hasBlock)
 
+\* Optional helper: all certificates in a set are structurally well-formed
 AllCertificatesWellFormed(certificates) ==
     \A cert \in certificates : CertificateWellFormed(cert)
 
