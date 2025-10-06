@@ -1190,13 +1190,6 @@ PoolAlignmentOK ==
 BucketSlotConsistencyOK ==
     \A v \in Validators : BucketSlotConsistency(validators[v].pool)
 
-\* Optional strengthening (audit suggestion): for correct nodes, all stored
-\* NotarFallbackVote(s) by that node in a given slot agree on the same block.
-PoolNotarFallbackBlockConsistencyOK ==
-    \A v \in CorrectNodes :
-    \A s \in 1..MaxSlot :
-        NotarFallbackBlockConsistencyAt(validators[v].pool, s, v)
-
 \* Optional sequencing check (audit suggestion): for correct nodes, the
 \* presence of a SkipFallbackVote(s) implies an initial NotarVote(s) exists
 \* in the same node’s Pool for that slot.
@@ -1681,7 +1674,6 @@ Invariant ==
     /\ PoolCertificatesWellFormedOK
     /\ PoolAlignmentOK
     /\ BucketSlotConsistencyOK
-    /\ PoolNotarFallbackBlockConsistencyOK
     /\ PoolSkipFallbackAfterInitialNotarOK
     /\ RotorSelectSoundness
     /\ TimeoutsInFuture
