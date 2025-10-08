@@ -90,22 +90,42 @@ axiom finalized_unique_in_slot :
     isFinalized b → isFinalized b' →
     slotOf b = slotOf b' → b = b'
 
--- Lemma 31: Same window safety
--- Within the same leader window, if block b_i is finalized and b_k is notarized
--- in a later or equal slot, then b_k is a descendant of b_i
-axiom same_window_safety :
+-- Fundamental notarized-chain properties abstracting Lemmas 31 and 32
+axiom notarized_same_window_descends :
   ∀ b_i b_k : Block, ∀ w : LeaderWindow,
-    isFinalized b_i →
+    isNotarized b_i →
     isNotarized b_k →
     (slotOf b_i).inWindow w →
     (slotOf b_k).inWindow w →
     slotOf b_i ≤ slotOf b_k →
     isDescendant b_k b_i
 
--- Lemma 32: Different window safety
--- Across different leader windows, if b_i is finalized and b_k is notarized
--- in a strictly later slot, then b_k is a descendant of b_i
-axiom different_window_safety :
+axiom notarized_cross_window_descends :
+  ∀ b_i b_k : Block, ∀ w_i w_k : LeaderWindow,
+    isNotarized b_i →
+    isNotarized b_k →
+    (slotOf b_i).inWindow w_i →
+    (slotOf b_k).inWindow w_k →
+    w_i ≠ w_k →
+    slotOf b_i < slotOf b_k →
+    isDescendant b_k b_i
+
+-- Lemma 31 formalization: Same window safety
+lemma same_window_safety :
+  ∀ b_i b_k : Block, ∀ w : LeaderWindow,
+    isFinalized b_i →
+    isNotarized b_k →
+    (slotOf b_i).inWindow w →
+    (slotOf b_k).inWindow w →
+    slotOf b_i ≤ slotOf b_k →
+    isDescendant b_k b_i := by
+  intro b_i b_k w hfin_bi hnotar_bk hwn_bi hwn_bk hle
+  have hnotar_bi : isNotarized b_i :=
+    finalized_implies_notarized b_i hfin_bi
+  exact notarized_same_window_descends b_i b_k w hnotar_bi hnotar_bk hwn_bi hwn_bk hle
+
+-- Lemma 32 formalization: Different window safety
+lemma different_window_safety :
   ∀ b_i b_k : Block, ∀ w_i w_k : LeaderWindow,
     isFinalized b_i →
     isNotarized b_k →
@@ -113,7 +133,11 @@ axiom different_window_safety :
     (slotOf b_k).inWindow w_k →
     w_i ≠ w_k →
     slotOf b_i < slotOf b_k →
-    isDescendant b_k b_i
+    isDescendant b_k b_i := by
+  intro b_i b_k w_i w_k hfin_bi hnotar_bk hwn_bi hwn_bk hw_ne hlt
+  have hnotar_bi : isNotarized b_i :=
+    finalized_implies_notarized b_i hfin_bi
+  exact notarized_cross_window_descends b_i b_k w_i w_k hnotar_bi hnotar_bk hwn_bi hwn_bk hw_ne hlt
 
 -- Axiom: Each slot belongs to exactly one leader window
 axiom slot_has_unique_window (s : Slot) : ∃ w : LeaderWindow, s.inWindow w ∧ ∀ w' : LeaderWindow, s.inWindow w' → w' = w
