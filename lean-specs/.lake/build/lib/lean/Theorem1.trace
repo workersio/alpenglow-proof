@@ -1,0 +1,47 @@
+{"synthetic": false,
+ "outputs":
+ {"o": ["9291116254189749708"],
+  "i": "12605806769542239939",
+  "c": "16571395333499598403"},
+ "log":
+ [{"message":
+   ".> LEAN_PATH=/Users/shrenikborad/workersio/alpenglow-proof/lean-specs/.lake/packages/Cli/.lake/build/lib/lean:/Users/shrenikborad/workersio/alpenglow-proof/lean-specs/.lake/packages/batteries/.lake/build/lib/lean:/Users/shrenikborad/workersio/alpenglow-proof/lean-specs/.lake/packages/Qq/.lake/build/lib/lean:/Users/shrenikborad/workersio/alpenglow-proof/lean-specs/.lake/packages/aesop/.lake/build/lib/lean:/Users/shrenikborad/workersio/alpenglow-proof/lean-specs/.lake/packages/proofwidgets/.lake/build/lib/lean:/Users/shrenikborad/workersio/alpenglow-proof/lean-specs/.lake/packages/importGraph/.lake/build/lib/lean:/Users/shrenikborad/workersio/alpenglow-proof/lean-specs/.lake/packages/LeanSearchClient/.lake/build/lib/lean:/Users/shrenikborad/workersio/alpenglow-proof/lean-specs/.lake/packages/plausible/.lake/build/lib/lean:/Users/shrenikborad/workersio/alpenglow-proof/lean-specs/.lake/packages/mathlib/.lake/build/lib/lean:/Users/shrenikborad/workersio/alpenglow-proof/lean-specs/.lake/build/lib/lean /Users/shrenikborad/.elan/toolchains/leanprover--lean4---v4.24.0-rc1/bin/lean /Users/shrenikborad/workersio/alpenglow-proof/lean-specs/Theorem1.lean -o /Users/shrenikborad/workersio/alpenglow-proof/lean-specs/.lake/build/lib/lean/Theorem1.olean -i /Users/shrenikborad/workersio/alpenglow-proof/lean-specs/.lake/build/lib/lean/Theorem1.ilean -c /Users/shrenikborad/workersio/alpenglow-proof/lean-specs/.lake/build/ir/Theorem1.c --setup /Users/shrenikborad/workersio/alpenglow-proof/lean-specs/.lake/build/ir/Theorem1.setup.json --json",
+   "level": "trace"},
+  {"message":
+   "Theorem1.lean:498:0: alpenglow_safety [params : ProtocolParams] [store : BlockStore] (b b' : Block) :\n  _root_.isFinalized b → _root_.isFinalized b' → slotOf b ≤ slotOf b' → isDescendant b' b",
+   "level": "info"},
+  {"message":
+   "Theorem1.lean:499:0: finalized_blocks_form_chain [params : ProtocolParams] [store : BlockStore] (b1 b2 : Block) :\n  _root_.isFinalized b1 → _root_.isFinalized b2 → isDescendant b1 b2 ∨ isDescendant b2 b1",
+   "level": "info"},
+  {"message":
+   "Theorem1.lean:500:0: no_fork_in_slot [params : ProtocolParams] [store : BlockStore] (b1 b2 : Block) (hfin1 : _root_.isFinalized b1)\n  (hfin2 : _root_.isFinalized b2) (hslot_eq : slotOf b1 = slotOf b2) : b1 = b2",
+   "level": "info"},
+  {"message":
+   "Theorem1.lean:501:0: no_fork_between_finalized [params : ProtocolParams] [store : BlockStore] (b b' b_mid : Block) :\n  _root_.isFinalized b →\n    _root_.isFinalized b' →\n      _root_.isFinalized b_mid →\n        isDescendant b' b →\n          slotOf b ≤ slotOf b_mid → slotOf b_mid ≤ slotOf b' → isDescendant b_mid b ∧ isDescendant b' b_mid",
+   "level": "info"}],
+ "inputs":
+ [["Theorem1:deps",
+   [["deps",
+     [["«alpenglow-specs»/Theorem1:extraDep",
+       [["@«alpenglow-specs»:extraDep", "1723"]]],
+      ["imports",
+       [["Mathlib.Data.Nat.Basic transitive imports (legacy)",
+         "12167347246731311134"],
+        ["Mathlib.Data.Nat.Basic:importAllArts", "18383659940890600959"],
+        ["Mathlib.Order.Basic transitive imports (legacy)",
+         "5931760037417031683"],
+        ["Mathlib.Order.Basic:importAllArts", "17504377192170205330"],
+        ["Mathlib.Tactic transitive imports (legacy)", "13220092089669395727"],
+        ["Mathlib.Tactic:importAllArts", "7197590995583949584"]]]]],
+    ["libs",
+     [["import dynlibs", "1723"],
+      ["package external libraries", "1723"],
+      ["module dynlibs", "1723"],
+      ["module plugins", "1723"]]]]],
+  ["Lean 4.24.0, commit 919e297292280cdb27598edd4e03437be5850221",
+   "16820442660988836695"],
+  ["/Users/shrenikborad/workersio/alpenglow-proof/lean-specs/Theorem1.lean",
+   "15843610029075175385"],
+  ["options", "1723"],
+  ["Module.leanArgs: #[]", "1723"]],
+ "depHash": "3062326366091610732"}

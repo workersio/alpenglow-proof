@@ -42,32 +42,290 @@ instance : LT Slot where
 instance (s1 s2 : Slot) : Decidable (s1 ≤ s2) :=
   inferInstanceAs (Decidable (s1.num ≤ s2.num))
 
--- Leader windows: consecutive sequences of slots controlled by one leader
+class ProtocolParams where
+  windowSize : Nat
+  windowSize_pos : 0 < windowSize
+
+attribute [simp] ProtocolParams.windowSize
+
+-- Leader windows are indexed intervals determined by protocol parameters
 structure LeaderWindow where
-  firstSlot : Nat  -- First slot number in the window
-  windowSize : Nat  -- Number of slots in the window
+  index : Nat
   deriving DecidableEq, Repr
 
+@[ext]
+theorem LeaderWindow.ext {w1 w2 : LeaderWindow} (h : w1.index = w2.index) : w1 = w2 := by
+  cases w1; cases w2
+  simp only [LeaderWindow.mk.injEq]
+  exact h
+
+namespace LeaderWindow
+
+variable [params : ProtocolParams]
+
+@[simp]
+def firstSlot (w : LeaderWindow) : Nat :=
+  w.index * params.windowSize
+
+@[simp]
+def lastSlot (w : LeaderWindow) : Nat :=
+  w.firstSlot + params.windowSize - 1
+
+@[simp]
+def ofSlot (s : Slot) : LeaderWindow :=
+  ⟨s.num / params.windowSize⟩
+
+@[simp]
+lemma firstSlot_ofSlot (s : Slot) :
+    (ofSlot s).firstSlot = (s.num / params.windowSize) * params.windowSize :=
+  rfl
+
+lemma firstSlot_le_ofSlot (s : Slot) :
+    (ofSlot s).firstSlot ≤ s.num := by
+  classical
+  rw [firstSlot_ofSlot]
+  exact Nat.div_mul_le_self s.num params.windowSize
+
+lemma lt_add_window_ofSlot (s : Slot) :
+    s.num < (ofSlot s).firstSlot + params.windowSize := by
+  classical
+  rw [firstSlot_ofSlot]
+  have hmod : s.num % params.windowSize < params.windowSize :=
+    Nat.mod_lt s.num params.windowSize_pos
+  calc s.num = s.num / params.windowSize * params.windowSize + s.num % params.windowSize := by
+        have : params.windowSize * (s.num / params.windowSize) + s.num % params.windowSize = s.num :=
+          Nat.div_add_mod s.num params.windowSize
+        rw [Nat.mul_comm] at this; exact this.symm
+      _ < s.num / params.windowSize * params.windowSize + params.windowSize :=
+        Nat.add_lt_add_left hmod _
+
+end LeaderWindow
+
+variable [params : ProtocolParams]
+
 def Slot.inWindow (s : Slot) (w : LeaderWindow) : Prop :=
-  w.firstSlot ≤ s.num ∧ s.num < w.firstSlot + w.windowSize
+  w.firstSlot ≤ s.num ∧ s.num < w.firstSlot + params.windowSize
 
--- Each block is associated with a slot
-axiom slotOf : Block → Slot
+lemma Slot.inWindow_ofSlot (s : Slot) :
+    s.inWindow (LeaderWindow.ofSlot s) := by
+  constructor
+  · simpa using LeaderWindow.firstSlot_le_ofSlot (params := params) s
+  · simpa using LeaderWindow.lt_add_window_ofSlot (params := params) s
 
--- Block descendant relationship
--- b' is a descendant of b means b' is in the chain extending from b
-axiom isDescendant : Block → Block → Prop
+lemma slot_window_unique (s : Slot) :
+    ∀ w : LeaderWindow,
+      s.inWindow w → w = LeaderWindow.ofSlot s := by
+  classical
+  intro w hw
+  have hk_pos : 0 < params.windowSize := params.windowSize_pos
+  have hk_ne : params.windowSize ≠ 0 :=
+    Nat.pos_iff_ne_zero.mp hk_pos
+  set q := s.num / params.windowSize with hq
+  have hmod : s.num % params.windowSize < params.windowSize :=
+    Nat.mod_lt s.num hk_pos
+  have hdecomp :
+      s.num =
+        q * params.windowSize + s.num % params.windowSize := by
+    have : params.windowSize * (s.num / params.windowSize) + s.num % params.windowSize = s.num :=
+      Nat.div_add_mod s.num params.windowSize
+    rw [Nat.mul_comm] at this
+    exact this.symm
+  have hIndex_le_q : w.index ≤ q := by
+    by_contra hnot
+    have hlt : q < w.index := Nat.lt_of_not_ge hnot
+    have hsucc : q + 1 ≤ w.index := Nat.succ_le_of_lt hlt
+    have hmul_le :
+        (q + 1) * params.windowSize ≤ w.index * params.windowSize :=
+      Nat.mul_le_mul_right _ hsucc
+    have hnum_lt :
+        s.num < (q + 1) * params.windowSize := by
+      calc s.num = q * params.windowSize + s.num % params.windowSize := hdecomp
+        _ < q * params.windowSize + params.windowSize := Nat.add_lt_add_left hmod _
+        _ = (q + 1) * params.windowSize := by ring
+    have : s.num < w.firstSlot := by
+      have := lt_of_lt_of_le hnum_lt hmul_le
+      simpa [LeaderWindow.firstSlot, Nat.mul_comm, Nat.mul_left_comm,
+        Nat.mul_assoc] using this
+    exact lt_irrefl _ (lt_of_le_of_lt hw.left this)
+  have hq_le_index : q ≤ w.index := by
+    by_contra hnot
+    have hlt : w.index < q := Nat.lt_of_not_ge hnot
+    have hsucc : w.index + 1 ≤ q := Nat.succ_le_of_lt hlt
+    have hmul_le :
+        (w.index + 1) * params.windowSize ≤ q * params.windowSize :=
+      Nat.mul_le_mul_right _ hsucc
+    have hgoal : ¬(w.firstSlot + params.windowSize ≤ s.num) :=
+      not_le_of_gt hw.right
+    apply hgoal
+    calc w.firstSlot + params.windowSize
+        = w.index * params.windowSize + params.windowSize := by rfl
+      _ = (w.index + 1) * params.windowSize := by ring
+      _ ≤ q * params.windowSize := hmul_le
+      _ ≤ q * params.windowSize + s.num % params.windowSize := Nat.le_add_right _ _
+      _ = s.num := hdecomp.symm
+  have : w.index = q := le_antisymm hIndex_le_q hq_le_index
+  ext
+  · simpa [LeaderWindow.ofSlot, hq] using this
 
--- Reflexivity: every block is a descendant of itself
-axiom descendant_refl : ∀ b : Block, isDescendant b b
+theorem slot_has_unique_window (s : Slot) :
+    ∃ w : LeaderWindow,
+      s.inWindow w ∧ ∀ w' : LeaderWindow, s.inWindow w' → w' = w := by
+  refine ⟨LeaderWindow.ofSlot s, ?_, ?_⟩
+  · exact Slot.inWindow_ofSlot (params := params) s
+  · intro w' hw'
+    simpa using slot_window_unique (params := params) s w' hw'
 
--- Transitivity: descendant relation is transitive
-axiom descendant_trans : ∀ b1 b2 b3 : Block,
-  isDescendant b2 b1 → isDescendant b3 b2 → isDescendant b3 b1
+-- =====================================================
+-- Block graph structure and basic descendant relation
+-- =====================================================
 
--- Antisymmetry: if b' descends from b and b descends from b', they're equal
-axiom descendant_antisymm : ∀ b b' : Block,
-  isDescendant b' b → isDescendant b b' → b = b'
+class BlockStore where
+  slotOf : Block → Slot
+  parent : Block → Option Block
+  parent_slot_lt :
+    ∀ {b p : Block}, parent b = some p → (slotOf p).num < (slotOf b).num
+
+attribute [simp] BlockStore.slotOf
+
+variable [store : BlockStore]
+
+def slotOf (b : Block) : Slot :=
+  BlockStore.slotOf b
+
+def parentOf (b : Block) : Option Block :=
+  BlockStore.parent b
+
+private def parentRel (x y : Block) : Prop :=
+  parentOf x = some y
+
+def isDescendant (b b' : Block) : Prop :=
+  Relation.ReflTransGen parentRel b b'
+
+set_option linter.unusedSectionVars false in
+lemma descendant_refl (b : Block) : isDescendant b b :=
+  Relation.ReflTransGen.refl
+
+set_option linter.unusedSectionVars false in
+lemma descendant_trans {b₁ b₂ b₃ : Block}
+    (h₁ : isDescendant b₁ b₂) (h₂ : isDescendant b₂ b₃) :
+    isDescendant b₁ b₃ :=
+  Relation.ReflTransGen.trans h₁ h₂
+
+set_option linter.unusedSectionVars false in
+lemma slot_mono_of_parent {b p : Block}
+    (h : parentOf b = some p) :
+    (slotOf p).num < (slotOf b).num :=
+  BlockStore.parent_slot_lt h
+
+lemma slot_le_of_descendant {b₁ b₂ : Block}
+    (h : isDescendant b₁ b₂) :
+    (slotOf b₂).num ≤ (slotOf b₁).num := by
+  classical
+  induction h with
+  | refl =>
+    exact le_rfl
+  | tail _ hrel ih =>
+    exact Nat.le_trans (Nat.le_of_lt (slot_mono_of_parent hrel)) ih
+
+lemma slot_eq_of_descendant {b₁ b₂ : Block}
+    (h₁ : isDescendant b₁ b₂) (h₂ : isDescendant b₂ b₁) :
+    (slotOf b₁).num = (slotOf b₂).num := by
+  exact le_antisymm (slot_le_of_descendant h₂) (slot_le_of_descendant h₁)
+
+lemma descendant_antisymm {b₁ b₂ : Block}
+    (h₁ : isDescendant b₁ b₂) (h₂ : isDescendant b₂ b₁) :
+    b₁ = b₂ := by
+  classical
+  have hslot := slot_eq_of_descendant h₁ h₂
+  cases h₁ with
+  | refl => rfl
+  | tail hrest hrel =>
+    -- hrest : isDescendant b₁ (some intermediate block)
+    -- hrel : parentRel (that intermediate) b₂
+    -- This means b₁ descends to some block which has b₂ as parent
+    have hb2_le : (slotOf b₂).num ≤ (slotOf b₁).num :=
+      slot_le_of_descendant (Relation.ReflTransGen.tail hrest hrel)
+    have hb1_le : (slotOf b₁).num ≤ (slotOf b₂).num :=
+      slot_le_of_descendant h₂
+    have : (slotOf b₁).num = (slotOf b₂).num :=
+      le_antisymm hb1_le hb2_le
+    -- Now we need to show the contradiction
+    -- From h₁.tail, there exists an intermediate block
+    have : False := by
+      have hlt : (slotOf b₂).num < (slotOf b₁).num := by
+        have hparent := slot_mono_of_parent hrel
+        exact lt_of_lt_of_le hparent (slot_le_of_descendant hrest)
+      omega
+    cases this
+
+-- =====================================================
+-- Voting/Pool state machine (simplified)
+-- =====================================================
+
+inductive Event
+  | notarize (b : Block)
+  | finalize (b : Block)
+
+structure ProtocolState where
+  notarizedAt : Slot → Option Block
+  finalizedAt : Slot → Option Block
+  chainTip : Option Block
+
+namespace ProtocolState
+
+def init : ProtocolState :=
+  { notarizedAt := fun _ => none
+    , finalizedAt := fun _ => none
+    , chainTip := none }
+
+def isNotarized (σ : ProtocolState) (b : Block) : Prop :=
+  σ.notarizedAt (slotOf b) = some b
+
+def isFinalized (σ : ProtocolState) (b : Block) : Prop :=
+  σ.finalizedAt (slotOf b) = some b
+
+def notarizedSlots (σ : ProtocolState) : Set Slot :=
+  { s | ∃ b, σ.notarizedAt s = some b }
+
+def finalizedSlots (σ : ProtocolState) : Set Slot :=
+  { s | ∃ b, σ.finalizedAt s = some b }
+
+end ProtocolState
+
+open ProtocolState
+
+inductive Step : ProtocolState → Event → ProtocolState → Prop
+  | notarize_none (σ : ProtocolState) (b : Block)
+      (hslot : σ.notarizedAt (slotOf b) = none)
+      (hchain : σ.chainTip = none) :
+      Step σ (Event.notarize b)
+        { notarizedAt := fun s =>
+            if _ : s = slotOf b then some b else σ.notarizedAt s
+          finalizedAt := σ.finalizedAt
+          chainTip := some b }
+  | notarize_extend (σ : ProtocolState) (b tip : Block)
+      (hslot : σ.notarizedAt (slotOf b) = none)
+      (htip : σ.chainTip = some tip)
+      (hchain : isDescendant b tip) :
+      Step σ (Event.notarize b)
+        { notarizedAt := fun s =>
+            if _ : s = slotOf b then some b else σ.notarizedAt s
+          finalizedAt := σ.finalizedAt
+          chainTip := some b }
+  | finalize (σ : ProtocolState) (b : Block)
+      (hnotar : σ.notarizedAt (slotOf b) = some b)
+      (hfin : σ.finalizedAt (slotOf b) = none) :
+      Step σ (Event.finalize b)
+        { notarizedAt := σ.notarizedAt
+          finalizedAt := fun s =>
+          if _ : s = slotOf b then some b else σ.finalizedAt s
+          chainTip := σ.chainTip }
+
+inductive Reachable : ProtocolState → Prop
+  | init : Reachable ProtocolState.init
+  | step {σ σ' : ProtocolState} {e : Event}
+      (h₁ : Reachable σ) (h₂ : Step σ e σ') :
+      Reachable σ'
 
 -- Notarization: a block has received enough votes (60%+ stake)
 axiom isNotarized : Block → Prop
@@ -139,9 +397,6 @@ lemma different_window_safety :
     finalized_implies_notarized b_i hfin_bi
   exact notarized_cross_window_descends b_i b_k w_i w_k hnotar_bi hnotar_bk hwn_bi hwn_bk hw_ne hlt
 
--- Axiom: Each slot belongs to exactly one leader window
-axiom slot_has_unique_window (s : Slot) : ∃ w : LeaderWindow, s.inWindow w ∧ ∀ w' : LeaderWindow, s.inWindow w' → w' = w
-
 -- =====================================================
 -- Main Theorem 1: Safety
 -- =====================================================
@@ -208,17 +463,16 @@ theorem finalized_blocks_form_chain :
     left
     exact alpenglow_safety b2 b1 hfin2 hfin1 h
 
+set_option linter.unusedSectionVars false in
 /--
 Corollary: No two different blocks can both be finalized in the same slot
 -/
-theorem no_fork_in_slot :
-  ∀ b1 b2 : Block,
-    isFinalized b1 →
-    isFinalized b2 →
-    slotOf b1 = slotOf b2 →
-    b1 = b2 := by
-  intro b1 b2 hfin1 hfin2 hslot_eq
-  exact finalized_unique_in_slot b1 b2 hfin1 hfin2 hslot_eq
+theorem no_fork_in_slot (b1 b2 : Block)
+    (hfin1 : isFinalized b1)
+    (hfin2 : isFinalized b2)
+    (hslot_eq : slotOf b1 = slotOf b2) :
+    b1 = b2 :=
+  finalized_unique_in_slot b1 b2 hfin1 hfin2 hslot_eq
 
 /--
 Corollary: The safety property ensures no forks in finalized chains
