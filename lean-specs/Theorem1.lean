@@ -338,17 +338,20 @@ axiom isFinalized : Block → Prop
 -- =====================================================
 
 -- Lemma 25: If a block is finalized, it is also notarized
+-- Reference: Whitepaper Lemma 25 (Page 30, Line 30)
 axiom finalized_implies_notarized :
   ∀ b : Block, isFinalized b → isNotarized b
 
 -- Lemma 21 & 26: If a block is finalized in a slot, no other block
 -- can be finalized or notarized in that slot
+-- Reference: Whitepaper Lemmas 21 & 26 (Pages 29-30)
 axiom finalized_unique_in_slot :
   ∀ b b' : Block,
     isFinalized b → isFinalized b' →
     slotOf b = slotOf b' → b = b'
 
 -- Fundamental notarized-chain properties abstracting Lemmas 31 and 32
+-- Reference: Whitepaper Lemma 31 (Page 32)
 axiom notarized_same_window_descends :
   ∀ b_i b_k : Block, ∀ w : LeaderWindow,
     isNotarized b_i →
@@ -358,6 +361,7 @@ axiom notarized_same_window_descends :
     slotOf b_i ≤ slotOf b_k →
     isDescendant b_k b_i
 
+-- Reference: Whitepaper Lemma 32 (Page 32)
 axiom notarized_cross_window_descends :
   ∀ b_i b_k : Block, ∀ w_i w_k : LeaderWindow,
     isNotarized b_i →
@@ -369,6 +373,7 @@ axiom notarized_cross_window_descends :
     isDescendant b_k b_i
 
 -- Lemma 31 formalization: Same window safety
+-- Reference: Derived from Whitepaper Lemmas 25 & 31
 lemma same_window_safety :
   ∀ b_i b_k : Block, ∀ w : LeaderWindow,
     isFinalized b_i →
@@ -383,6 +388,7 @@ lemma same_window_safety :
   exact notarized_same_window_descends b_i b_k w hnotar_bi hnotar_bk hwn_bi hwn_bk hle
 
 -- Lemma 32 formalization: Different window safety
+-- Reference: Derived from Whitepaper Lemmas 25 & 32
 lemma different_window_safety :
   ∀ b_i b_k : Block, ∀ w_i w_k : LeaderWindow,
     isFinalized b_i →
@@ -409,6 +415,7 @@ then b' is a descendant of b.
 This ensures that once a block is finalized, all future finalized blocks
 must extend from it, preventing forks in the finalized chain.
 -/
+-- Reference: Whitepaper Theorem 1 (Page 32)
 theorem alpenglow_safety :
   ∀ b b' : Block,
     isFinalized b →
