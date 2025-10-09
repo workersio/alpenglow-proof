@@ -1,0 +1,13 @@
+/-
+  Alpenglow Protocol Verification
+  Main entry point for the formal verification
+-/
+
+import Basics
+import Lemmas
+import Theorem1
+
+def main : IO Unit := do
+  IO.println "Alpenglow Protocol Formal Verification"
+  IO.println "This project contains formal proofs of the Alpenglow consensus protocol."
+  return ()
