@@ -4,6 +4,9 @@ open Lake DSL
 package «alpenglow-specs» where
   -- add package configuration options here
 
+lean_lib «Basics» where
+  -- Basic data structures for Alpenglow protocol
+
 lean_lib «Theorem1» where
   -- add library configuration options here
 

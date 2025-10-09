@@ -17,4 +17,3 @@ hyper-tla
 .tlacache
 tlapm
 lean-specs/.lake/
-lean-specs
