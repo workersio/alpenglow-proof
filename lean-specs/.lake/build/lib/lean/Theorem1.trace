@@ -1,41 +1,30 @@
 {"synthetic": false,
  "outputs":
- {"o": ["6011764550484542894"],
-  "i": "1499395777144216106",
-  "c": "5613915253291174237"},
+ {"o": ["14344840656448668957"],
+  "i": "3894606268718557484",
+  "c": "1594518418263217921"},
  "log":
  [{"message":
    ".> LEAN_PATH=/Users/shrenikborad/workersio/alpenglow-proof/lean-specs/.lake/packages/Cli/.lake/build/lib/lean:/Users/shrenikborad/workersio/alpenglow-proof/lean-specs/.lake/packages/batteries/.lake/build/lib/lean:/Users/shrenikborad/workersio/alpenglow-proof/lean-specs/.lake/packages/Qq/.lake/build/lib/lean:/Users/shrenikborad/workersio/alpenglow-proof/lean-specs/.lake/packages/aesop/.lake/build/lib/lean:/Users/shrenikborad/workersio/alpenglow-proof/lean-specs/.lake/packages/proofwidgets/.lake/build/lib/lean:/Users/shrenikborad/workersio/alpenglow-proof/lean-specs/.lake/packages/importGraph/.lake/build/lib/lean:/Users/shrenikborad/workersio/alpenglow-proof/lean-specs/.lake/packages/LeanSearchClient/.lake/build/lib/lean:/Users/shrenikborad/workersio/alpenglow-proof/lean-specs/.lake/packages/plausible/.lake/build/lib/lean:/Users/shrenikborad/workersio/alpenglow-proof/lean-specs/.lake/packages/mathlib/.lake/build/lib/lean:/Users/shrenikborad/workersio/alpenglow-proof/lean-specs/.lake/build/lib/lean /Users/shrenikborad/.elan/toolchains/leanprover--lean4---v4.24.0-rc1/bin/lean /Users/shrenikborad/workersio/alpenglow-proof/lean-specs/Theorem1.lean -o /Users/shrenikborad/workersio/alpenglow-proof/lean-specs/.lake/build/lib/lean/Theorem1.olean -i /Users/shrenikborad/workersio/alpenglow-proof/lean-specs/.lake/build/lib/lean/Theorem1.ilean -c /Users/shrenikborad/workersio/alpenglow-proof/lean-specs/.lake/build/ir/Theorem1.c --setup /Users/shrenikborad/workersio/alpenglow-proof/lean-specs/.lake/build/ir/Theorem1.setup.json --json",
-   "level": "trace"},
-  {"message":
-   "Theorem1.lean:220:0: automatically included section variable(s) unused in theorem `descendant_cases`:\n  params\nconsider restructuring your `variable` declarations so that the variables are not in scope or explicitly omit them:\n  omit params in theorem ...\n\nNote: This linter can be disabled with `set_option linter.unusedSectionVars false`",
-   "level": "warning"},
-  {"message":
-   "Theorem1.lean:623:0: alpenglow_safety [params : ProtocolParams] [store : BlockStore] (σ : ProtocolState) (b b' : Block)\n  (hfin_b : σ.isFinalized b) (hfin_b' : σ.isFinalized b') (hslot_le : slotOf b ≤ slotOf b') : isDescendant b' b",
-   "level": "info"},
-  {"message":
-   "Theorem1.lean:624:0: finalized_blocks_form_chain [params : ProtocolParams] [store : BlockStore] (σ : ProtocolState) (b1 b2 : Block)\n  (hfin1 : σ.isFinalized b1) (hfin2 : σ.isFinalized b2) : isDescendant b1 b2 ∨ isDescendant b2 b1",
-   "level": "info"},
-  {"message":
-   "Theorem1.lean:625:0: no_fork_in_slot [params : ProtocolParams] [store : BlockStore] (σ : ProtocolState) (b1 b2 : Block)\n  (hfin1 : σ.isFinalized b1) (hfin2 : σ.isFinalized b2) (hslot_eq : slotOf b1 = slotOf b2) : b1 = b2",
-   "level": "info"},
-  {"message":
-   "Theorem1.lean:626:0: no_fork_between_finalized [params : ProtocolParams] [store : BlockStore] (σ : ProtocolState) (b b' b_mid : Block)\n  (hfin_b : σ.isFinalized b) (hfin_b' : σ.isFinalized b') (hfin_mid : σ.isFinalized b_mid)\n  (_hdesc_b'_b : isDescendant b' b) (hslot_le1 : slotOf b ≤ slotOf b_mid) (hslot_le2 : slotOf b_mid ≤ slotOf b') :\n  isDescendant b_mid b ∧ isDescendant b' b_mid",
-   "level": "info"}],
+   "level": "trace"}],
  "inputs":
  [["Theorem1:deps",
    [["deps",
      [["«alpenglow-specs»/Theorem1:extraDep",
        [["@«alpenglow-specs»:extraDep", "1723"]]],
       ["imports",
-       [["Mathlib.Data.Nat.Basic transitive imports (legacy)",
-         "12167347246731311134"],
-        ["Mathlib.Data.Nat.Basic:importAllArts", "18383659940890600959"],
-        ["Mathlib.Order.Basic transitive imports (legacy)",
-         "5931760037417031683"],
-        ["Mathlib.Order.Basic:importAllArts", "17504377192170205330"],
-        ["Mathlib.Tactic transitive imports (legacy)", "13220092089669395727"],
-        ["Mathlib.Tactic:importAllArts", "7197590995583949584"]]]]],
+       [["Mathlib.Data.Real.Basic transitive imports (legacy)",
+         "9097198001146434724"],
+        ["Mathlib.Data.Real.Basic:importAllArts", "9139094329547471548"],
+        ["Mathlib.Data.Finset.Basic transitive imports (legacy)",
+         "11288601048666589806"],
+        ["Mathlib.Data.Finset.Basic:importAllArts", "407825248152852551"],
+        ["Mathlib.Algebra.BigOperators.Group.Finset.Basic transitive imports (legacy)",
+         "8532609944716552437"],
+        ["Mathlib.Algebra.BigOperators.Group.Finset.Basic:importAllArts",
+         "8419768585348290567"],
+        ["Basics transitive imports (legacy)", "5568276499872519962"],
+        ["Basics:importAllArts", "10755165295266120262"]]]]],
     ["libs",
      [["import dynlibs", "1723"],
       ["package external libraries", "1723"],
@@ -44,7 +33,7 @@
   ["Lean 4.24.0, commit 919e297292280cdb27598edd4e03437be5850221",
    "16820442660988836695"],
   ["/Users/shrenikborad/workersio/alpenglow-proof/lean-specs/Theorem1.lean",
-   "12719156690321520832"],
+   "6274427428386611280"],
   ["options", "1723"],
   ["Module.leanArgs: #[]", "1723"]],
- "depHash": "16340105783505124481"}
+ "depHash": "1975168820203805329"}

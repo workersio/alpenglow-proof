@@ -169,6 +169,12 @@ structure SafeToSkipCondition (SP : StakeProfile) (P : Pool Hash) (s : Slot) : P
   /-- skip(s) + Σ_b notar(b) - max_b notar(b) ≥ 40% -/
   skipPlusNotarMinus40 : True  -- Abstract condition from Definition 16
 
+/-! ## Window Properties -/
+
+/-- A slot is always contained in its own leader window -/
+axiom slot_in_own_window (sched : Schedule) (s : Slot) :
+  s ∈ (sched.window s).slots
+
 /-! ## Safety Lemmas -/
 
 /-- **Lemma 20 (notarization or skip, exclusivity)** from p.28:
@@ -277,11 +283,22 @@ axiom lemma24_uniqueness_of_notarization (P : Pool Hash) (SP : StakeProfile)
 
     Whitepaper reference: p.30, Lemma 25
 -/
-axiom lemma25_finalization_implies_notarization (P : Pool Hash) (SP : StakeProfile)
+lemma lemma25_finalization_implies_notarization (P : Pool Hash) (SP : StakeProfile)
   (correct : Correct) (h : Header Hash) :
   Assumption1 SP correct →
   BlockFinalized P SP h →
-  Notarized P h
+  Notarized P h := by
+  intro _ hFin
+  cases hFin with
+  | fast hFastCert =>
+    -- Fast-finalized: by definition there's a fast-finalization cert which is also a notar cert
+    unfold Notarized
+    obtain ⟨cert, hCert, _⟩ := hFastCert
+    exact ⟨cert, hCert⟩
+  | slow hFinalCert hNotarCert =>
+    -- Slow-finalized: by definition there's already a notarization certificate
+    unfold Notarized
+    exact hNotarCert
 
 /-- **Lemma 26 (slow-finalization property)** from p.30:
     "If a block b is slow-finalized:
@@ -428,12 +445,41 @@ axiom lemma32_cross_window_chain (P : Pool Hash) (SP : StakeProfile)
     Whitepaper reference: p.32, Theorem 1
 -/
 theorem theorem1_safety (P : Pool Hash) (SP : StakeProfile) (correct : Correct)
-  (b b' : Header Hash) :
+  (sched : Schedule) (b b' : Header Hash) :
   Assumption1 SP correct →
   BlockFinalized P SP b →
   BlockFinalized P SP b' →
   b.s ≤ b'.s →
   BlockNode.IsDescendant b' b := by
-  sorry  -- Proof would combine lemmas 25, 31, 32
+  intro hAssump hFinB hFinB' hSlotOrder
+
+  -- By Lemma 25, b' is notarized
+  have hNotarB' := lemma25_finalization_implies_notarization P SP correct b' hAssump hFinB'
+
+  -- Case split: are they in the same window or different windows?
+  by_cases hSameWindow : b'.s ∈ (sched.window b.s).slots
+  case pos =>
+    -- Same window: use Lemma 31
+    have hSameSlot : b.s ∈ (sched.window b.s).slots := slot_in_own_window sched b.s
+    apply lemma31_same_window_chain P SP correct b b' sched hAssump hFinB
+    · exact hSlotOrder
+    · exact ⟨hSameSlot, hSameWindow⟩
+    · exact Or.inl hNotarB'
+  case neg =>
+    -- Different windows: use Lemma 32
+    -- We need to show b.s < b'.s (strict inequality)
+    have hStrictLt : b.s < b'.s := by
+      cases Nat.lt_or_eq_of_le hSlotOrder with
+      | inl hLt => exact hLt
+      | inr hEq =>
+        -- If b.s = b'.s, then b'.s should be in window b.s
+        -- But we know b'.s is in its own window
+        have h1 : b'.s ∈ (sched.window b'.s).slots := slot_in_own_window sched b'.s
+        -- Since b.s = b'.s, we have b'.s ∈ (sched.window b.s).slots
+        have h2 : b'.s ∈ (sched.window b.s).slots := hEq ▸ h1
+        -- This contradicts hSameWindow
+        exact absurd h2 hSameWindow
+    apply lemma32_cross_window_chain P SP correct b b' sched hAssump hFinB hStrictLt hSameWindow
+    exact Or.inl hNotarB'
 
 end Alpenglow
