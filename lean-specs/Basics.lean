@@ -44,22 +44,44 @@ structure Hasher (Hash : Type u) where
 
 variable {Hash : Type u} (H : Hasher Hash)
 
-/-- Combine a level of Merkle leaves pairwise, duplicating the final element if
-    necessary so the resulting list has half the length (rounded up). -/
+/-! We follow the whitepaper's Merkle definition precisely:
+    - Apply the leaf-domain label only to base leaves (including padding ⊥),
+    - Internal nodes are computed by `branch` only (no leaf label),
+    - The tree is completed to the next power-of-two number of leaves by
+      padding with ⊥ at the leaf level (p.15, Def. 4).
+ -/
+
+/-- Smallest power-of-two `m` with `m ≥ n`. For `n = 0`, returns `1`. -/
+def nextPow2AtLeast : Nat → Nat
+  | 0 => 1
+  | n + 1 =>
+      let m := nextPow2AtLeast n
+      if (n + 1) ≤ m then m else m * 2
+
+/-- Label the given leaves and pad with `⊥` (via `padding`) so that the
+    resulting list has length a power of two, as required by the whitepaper. -/
+def padLeavesToPow2 (xs : List Hash) : List Hash :=
+  let k := xs.length
+  let m := nextPow2AtLeast k
+  let base := xs.map H.leafLabel
+  let padLeaf := H.leafLabel H.padding
+  base ++ List.replicate (m - k) padLeaf
+
+/-- Combine one internal level by branching adjacent nodes. Assumes inputs are
+    already leaf-labeled if they are leaves. Internal nodes are not leaf-labeled. -/
 def level (xs : List Hash) : List Hash :=
   match xs with
   | [] => []
-  | [x] => [H.branch (H.leafLabel x) (H.leafLabel x)]
-  | x :: y :: rest =>
-      H.branch (H.leafLabel x) (H.leafLabel y) :: level rest
--- [p.12–15: pairwise branching; duplicate last leaf when odd]
+  | [x] => [x]
+  | x :: y :: rest => H.branch x y :: level rest
+-- [p.12–15: internal nodes are hashes of children; no duplication beyond leaf padding]
 
 /-- Recursively compute a Merkle root with an explicit fuel argument to ensure
     structural termination in Lean. The fuel is typically the length of the
     input list. -/
 def rootAux : Nat → List Hash → Hash
   | _, [] => H.leafLabel H.padding
-  | _, [x] => H.leafLabel x
+  | _, [x] => x
   | 0, _ :: _ :: _ => H.leafLabel H.padding
   | Nat.succ fuel, xs@(_ :: _ :: _) =>
       rootAux fuel (level H xs)
@@ -67,12 +89,12 @@ def rootAux : Nat → List Hash → Hash
 
 /-- Compute the Merkle root for an arbitrary list of leaf hashes.
     The algorithm follows the whitepaper description:
-    - Leaves are labelled via `leafLabel`
-    - Pairs of leaves are combined with `branch`
-    - If the number of leaves is odd, the final leaf is duplicated to maintain a
-      full binary tree (equivalently, padding up to the next power of two). -/
+    - Pad the leaves to the next power-of-two with `⊥`,
+    - Apply `leafLabel` to all base leaves (including `⊥`),
+    - Combine internal nodes using `branch` only (no leaf labels). -/
 def root (xs : List Hash) : Hash :=
-  rootAux H xs.length xs
+  let leaves := padLeavesToPow2 H xs
+  rootAux H leaves.length leaves
 -- [p.15 Def. 4: block hash as Merkle root over slice roots]
 end Merkle
 
@@ -254,7 +276,8 @@ inductive VoteType
 | notar          -- notarization vote (round 1)
 | notarFallback  -- notar-fallback
 | skip           -- skip vote for a slot
-| final          -- finalization vote (round 2)
+| skipFallback   -- skip-fallback vote for a slot
+| final          -- slow finalization (slot-scoped)
 deriving DecidableEq, Repr
 -- [p.19 Def. 11 baseline; p.20–22, 28–36, 38, 43–46 for the specific kinds]
 
@@ -286,6 +309,8 @@ structure Certificate (Hash : Type _) where
 def NotarCert   (Hash : Type _) := Certificate Hash  -- [p.19–22, 28–36]
 def SkipCert    (Hash : Type _) := Certificate Hash  -- [p.19, 21–22, 28, 30, 32–36]
 def FinalCert   (Hash : Type _) := Certificate Hash  -- [p.19, 21, 38, 43–46]
+-- Fast-finalization is represented at the theorem level via a higher threshold
+-- notarization certificate (block-scoped) rather than a separate kind here.
 
 /-- The local storage of observed votes & certificates. -/
 structure Pool (Hash : Type v) : Type (max 1 v) where
@@ -307,11 +332,13 @@ def skipCert? (P : Pool Hash) (s : Slot) : Option (SkipCert Hash) :=
   P.certs VoteType.skip (VoteKey.slot s)
 -- [pp.19, 21–22, 28, 30, 32–36]
 
-/-- Accessor: finalization certificate for (s,b). -/
-def finalCert? (P : Pool Hash) (s : Slot) (b : BlockId Hash) :
+/-- Accessor: finalization certificate for slot s. -/
+def finalCert? (P : Pool Hash) (s : Slot) :
     Option (FinalCert Hash) :=
-  P.certs VoteType.final (VoteKey.block s b)
+  P.certs VoteType.final (VoteKey.slot s)
 -- [pp.19, 21, 38, 43–46]
+
+-- No separate accessor for fast-finalization; use notarCert? with a stronger threshold.
 end Pool
 
 /-- Events that drive the protocol handlers (Alg. 1/2). -/
@@ -332,7 +359,7 @@ abbrev LeaderSchedule := Slot → NodeId
 /-- The “leader window” for slot s (WINDOWSLOTS(s)). -/
 structure LeaderWindow where
   slots : List Slot
-  contains : ∀ {s}, s ∈ slots → True
+  nonempty : slots ≠ []
   deriving Repr
 -- [WINDOWSLOTS references p.31, 33–37 (also 23,25,34–36)]
 
@@ -347,11 +374,18 @@ def Notarized (P : Pool Hash) (h : Header Hash) : Prop :=
   ∃ C, P.notarCert? h.s h.id = some C
 -- [pp.19–22, 28–36]
 
-/-- Finalization predicate (fast/slow); specialized later to the paper’s exact defs. -/
+/-- Finalization predicate approximating Def. 14 p.21 without a separate fast-final kind:
+    - fast: existence of a block-scoped notar certificate for (s, id) (80% threshold
+      is enforced in theorem modules via `FastFinalizationCertValid`).
+    - slow: a slot-scoped finalization certificate exists for the slot and the
+      block is the notarized block of that slot. -/
 inductive Finalized (P : Pool Hash) (h : Header Hash) : Prop
-| fast  : P.finalCert? h.s h.id ≠ none → Finalized P h
-| slow  : (∃ _ : SkipCert Hash, True) → Finalized P h
--- [overview p.4–8,11; mechanism pp.19–22,33–38,42–47; fast path p.6; fallback pp.29–36]
+| fast  : (∃ C, P.notarCert? h.s h.id = some C) →
+          Finalized P h
+| slow  : (∃ C, P.finalCert? h.s = some C) →
+          (∃ Cn, P.notarCert? h.s h.id = some Cn) →
+          Finalized P h
+-- [Def. 14 p.21; fast path uses notar cert with stronger threshold handled elsewhere]
 
 /-- A convenient slot order predicate. -/
 def SlotLe (a b : Header Hash) : Prop := a.s ≤ b.s
