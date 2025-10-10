@@ -13,6 +13,15 @@ lean_lib «Theorem1» where
 lean_lib «Lemmas» where
   -- Detailed proofs of Lemmas 20, 23, 24, 27-31
 
+lean_lib «Algorithm1» where
+  -- Votor event loop (Algorithm 1 from whitepaper)
+
+lean_lib «Algorithm2» where
+  -- Votor helper functions (Algorithm 2 from whitepaper)
+
+lean_lib «Blockstor» where
+  -- Blockstor data structures and operations
+
 @[default_target]
 lean_exe «alpenglow-specs» where
   root := `Main
