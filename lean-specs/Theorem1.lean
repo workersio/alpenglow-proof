@@ -57,12 +57,12 @@ structure Assumption1 (SP : StakeProfile) (correct : Correct) : Prop where
 
     Whitepaper reference: p.19-20, Definition 11, Table 6
 -/
-def CertificateThreshold (vt : VoteType) : ℚ :=
-  match vt with
-  | VoteType.notar => 60 / 100  -- Notarization: 60%
-  | VoteType.notarFallback => 60 / 100  -- Notar-Fallback: 60%
-  | VoteType.skip => 60 / 100  -- Skip: 60%
-  | VoteType.final => 60 / 100  -- Finalization: 60%
+def CertificateThreshold : VoteType → ℚ
+  | .notar => 60 / 100        -- Notarization: 60%
+  | .notarFallback => 60 / 100 -- Notar-Fallback: 60%
+  | .skip => 60 / 100         -- Skip: 60%
+  | .skipFallback => 60 / 100 -- Skip-Fallback
+  | .final => 60 / 100        -- Slot finalization: 60%
 
 /-- Fast-finalization threshold is 80% -/
 def FastFinalizationThreshold : ℚ := 80 / 100
@@ -98,7 +98,7 @@ def CertificateValid (_SP : StakeProfile) (cert : Certificate Hash) (vt : VoteTy
   -- Concrete: (∑v ∈ cert.voters, SP.weight v) / (∑v, SP.weight v) ≥ CertificateThreshold vt
   cert.thrOK ∧ cert.kind = vt
 
-/-- Fast-finalization certificate requires 80% stake -/
+/-- Fast-finalization certificate requires 80% stake and is block-scoped. -/
 def FastFinalizationCertValid (_SP : StakeProfile) (cert : Certificate Hash) : Prop :=
   -- Abstract: certificate voters control at least 80% of stake
   -- Concrete: (∑v ∈ cert.voters, SP.weight v) / (∑v, SP.weight v) ≥ 80/100
