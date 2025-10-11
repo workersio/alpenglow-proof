@@ -13,6 +13,9 @@ lean_lib «Theorem1» where
 lean_lib «Lemmas» where
   -- Detailed proofs of Lemmas 20, 23, 24, 27-31
 
+lean_lib «Lemma20» where
+  -- Formal proof of Lemma 20 (notarization or skip exclusivity)
+
 lean_lib «Algorithm1» where
   -- Votor event loop (Algorithm 1 from whitepaper)
 
