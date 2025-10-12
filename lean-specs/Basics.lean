@@ -1,12 +1,3 @@
-/-
-  Alpenglow Proof Basics
-
-  This module collects the core data structures shared across the Lean
-  formalization of the Alpenglow protocol.  In particular we capture
-  the whitepaper definitions for shreds, slices, and blocks so that the
-  subsequent lemmas can refer to a single source of truth.
--/
-
 import Mathlib.Data.Nat.Basic
 import Mathlib.Data.List.Basic
 import Mathlib.Data.Finset.Basic
@@ -14,91 +5,71 @@ import Mathlib.Data.Finset.Basic
 namespace Alpenglow
 
 universe u v w x
+-- Natural-number indices as in Defs. 1–3 (p.13–15)
+abbrev Slot := Nat         -- s
+abbrev SliceIndex := Nat   -- t
+abbrev ShredIndex := Nat   -- i
 
-/-- Slots, slice indices, and shred indices are natural numbers in the formalization,
-    matching the whitepaper's notation. -/
-abbrev Slot := Nat            -- [p.14, Defs. 1–2 use s,t]
-abbrev SliceIndex := Nat      -- [p.14, Defs. 1–2]
-abbrev ShredIndex := Nat      -- [p.14, Def. 1 (i)]
-
-/-- A helper object bundling shred payload and its Merkle path `(d_i, π_i)`. -/
+/-– Merkle opening (Section 1.6): (d_i, π_i) under a Merkle root. -/
 structure MerkleWitness (Data : Type u) (Path : Type v) where
-  d : Data
-  pi : Path
+  d  : Data
+  π  : Path
   deriving Repr
--- [p.16 “Merkle path”; p.12 padding notion; p.15 full tree]
-
-/-! ### Merkle hashing infrastructure -/
 
 namespace Merkle
 
-/-- Abstract interface describing the hashing functions used when constructing
-    Merkle trees for block data.  The `padding` value supplies the hash inserted
-    when completing the tree to the next power-of-two number of leaves, matching
-    the whitepaper's requirement that the tree be full. -/
+/-– Merkle algebra (Section 1.6): leaf labeling, branching, and ⊥ padding. -/
 structure Hasher (Hash : Type u) where
   leafLabel : Hash → Hash
-  branch : Hash → Hash → Hash
-  padding : Hash
--- [p.12 padding to next power of two; p.15 full binary tree]
+  branch    : Hash → Hash → Hash
+  padding   : Hash
 
 variable {Hash : Type u} (H : Hasher Hash)
 
-/-! We follow the whitepaper's Merkle definition precisely:
-    - Apply the leaf-domain label only to base leaves (including padding ⊥),
-    - Internal nodes are computed by `branch` only (no leaf label),
-    - The tree is completed to the next power-of-two number of leaves by
-      padding with ⊥ at the leaf level (p.15, Def. 4).
- -/
-
-/-- Smallest power-of-two `m` with `m ≥ n`. For `n = 0`, returns `1`. -/
+/-- Next power of two ≥ n (complete full tree; Def. 4, p.15). -/
 def nextPow2AtLeast : Nat → Nat
-  | 0 => 1
-  | n + 1 =>
-      let m := nextPow2AtLeast n
-      if (n + 1) ≤ m then m else m * 2
+  | 0     => 1
+  | n+1   =>
+    let m := nextPow2AtLeast n
+    if n+1 ≤ m then m else m * 2
 
-/-- Label the given leaves and pad with `⊥` (via `padding`) so that the
-    resulting list has length a power of two, as required by the whitepaper. -/
+/-- Pad leaves with ⊥ to a power of two (Def. 4, p.15). -/
+@[simp]
 def padLeavesToPow2 (xs : List Hash) : List Hash :=
   let k := xs.length
   let m := nextPow2AtLeast k
   let base := xs.map H.leafLabel
-  let padLeaf := H.leafLabel H.padding
-  base ++ List.replicate (m - k) padLeaf
+  let pad  := H.leafLabel H.padding
+  base ++ List.replicate (m - k) pad
 
-/-- Combine one internal level by branching adjacent nodes. Assumes inputs are
-    already leaf-labeled if they are leaves. Internal nodes are not leaf-labeled. -/
-def level (xs : List Hash) : List Hash :=
-  match xs with
-  | [] => []
-  | [x] => [x]
+/-– One Merkle level (pairwise branch; odd tail passes through). -/
+@[simp] def level : List Hash → List Hash
+  | []             => []
+  | [x]            => [x]
   | x :: y :: rest => H.branch x y :: level rest
--- [p.12–15: internal nodes are hashes of children; no duplication beyond leaf padding]
 
-/-- Recursively compute a Merkle root with an explicit fuel argument to ensure
-    structural termination in Lean. The fuel is typically the length of the
-    input list. -/
+/-- Fuelled fold-up to the root. -/
 def rootAux : Nat → List Hash → Hash
-  | _, [] => H.leafLabel H.padding
-  | _, [x] => x
-  | 0, _ :: _ :: _ => H.leafLabel H.padding
-  | Nat.succ fuel, xs@(_ :: _ :: _) =>
+  | _, []                    => H.leafLabel H.padding
+  | _, [x]                   => x
+  | 0, _ :: _ :: _           => H.leafLabel H.padding
+  | Nat.succ fuel, xs@(_::_::_) =>
       rootAux fuel (level H xs)
--- [p.12 padding default; structural recursion for totality (formalization detail)]
 
-/-- Compute the Merkle root for an arbitrary list of leaf hashes.
-    The algorithm follows the whitepaper description:
-    - Pad the leaves to the next power-of-two with `⊥`,
-    - Apply `leafLabel` to all base leaves (including `⊥`),
-    - Combine internal nodes using `branch` only (no leaf labels). -/
+/-- Block/slice root = Merkle root of padded leaves (Defs. 2 & 4, p.14–15). -/
 def root (xs : List Hash) : Hash :=
   let leaves := padLeavesToPow2 H xs
   rootAux H leaves.length leaves
--- [p.15 Def. 4: block hash as Merkle root over slice roots]
 end Merkle
 
-/-- Definition 1 (shred) from the whitepaper. -/
+/-- Definition 1 (shred), §2.1, p.13–14.
+    Tuple: (s, t, i, z_t, r_t, (d_i, π_i), σ_t)
+    - s: slot, t: slice index, i: shred index (all ∈ ℕ)
+    - z: last-slice flag z_t ∈ {0,1}
+    - r: Merkle root r_t of the slice
+    - witness: (d_i, π_i) opening under r_t (Section 1.6)
+    - sigma: signature σ_t on Slice(s, t, z_t, r_t) by leader(s)
+-/
 structure Shred (Data : Type u) (Path : Type v) (Hash : Type w)
     (Signature : Type x) where
   s : Slot
@@ -106,12 +77,11 @@ structure Shred (Data : Type u) (Path : Type v) (Hash : Type w)
   i : ShredIndex
   z : Bool
   r : Hash
-  witness : MerkleWitness Data Path
+  witness : MerkleWitness Data Path  -- (d_i, π_i)
   sigma : Signature
   deriving Repr
--- [p.14, Def. 1: fields s,t,i, z flag, Merkle witness, signature]
 
-/-- Definition 2 (slice) from the whitepaper. -/
+/-- Definition 2 (slice), §2.1, p.14: (s, t, z_t, r_t, M_t, σ_t). -/
 structure Slice (Message : Type u) (Hash : Type v) (Signature : Type w) where
   s : Slot
   t : SliceIndex
@@ -120,288 +90,214 @@ structure Slice (Message : Type u) (Hash : Type v) (Signature : Type w) where
   M : Message
   sigma : Signature
   deriving Repr
--- [p.14, Def. 2: (s, t, z_t, r_t, M, σ)]
 
 namespace Slice
-
 variable {Message : Type u} {Hash : Type v} {Signature : Type w}
 
-/-- Convenience: the metadata tuple `(s, t, z_t, r_t)` of a slice. -/
+/-- Header part of a slice: Slice(s, t, z_t, r_t) (p.13–14). -/
 def header (sl : Slice Message Hash Signature) :
     Slot × SliceIndex × Bool × Hash :=
   (sl.s, sl.t, sl.z, sl.r)
--- [p.14, Def. 2 metadata projection]
 end Slice
 
-/-! We write `k = b.sliceCount` to mirror the notation in Definition 3. -/
-/-- Definition 3 (block) from the whitepaper.  A block is a sequence of slices
-    that all belong to the same slot. -/
+/-- Definition 3 (block), §2.1, p.14–15.
+    A block is the sequence of all slices in a slot s with terminal flag z_k = 1
+    and z_t = 0 for t < k. The block data is the concatenation of slice payloads.
+-/
 structure Block (Message : Type u) (Hash : Type v) (Signature : Type w) where
   s : Slot
   slices : List (Slice Message Hash Signature)
   deriving Repr
--- [p.15, Def. 3: same-slot sequence of slices]
 
 namespace Block
-
 variable {Message : Type u} {Hash : Type v} {Signature : Type w}
 
-/-- Number of slices stored in the block. -/
-@[simp]
-def sliceCount (b : Block Message Hash Signature) : Nat :=
+@[simp] def sliceCount (b : Block Message Hash Signature) : Nat :=
   b.slices.length
--- [p.15, Def. 3 notation k = |slices|]
 
-/-- Optional access to the last slice of the block. -/
 def lastSlice?
     (b : Block Message Hash Signature) :
     Option (Slice Message Hash Signature) :=
   b.slices.getLast?
--- [p.14–15: uses terminal flag on last slice]
 
-/-- Extract the decoded slice data for the block. -/
 def data (b : Block Message Hash Signature) : List Message :=
   b.slices.map (·.M)
--- [p.14–15: block carries messages from slices]
 
-/-- Extract the Merkle roots from each slice. -/
 def sliceRoots (b : Block Message Hash Signature) : List Hash :=
   b.slices.map (·.r)
--- [p.15, Def. 4 input leaves r_t]
 
-/-- Definition 4 (block hash).  The block hash is the root of the complete
-    Merkle tree obtained from the slice roots `r_t`. -/
+/-– Definition 4 (block hash), §2.1, p.15: Merkle root over slice roots padded
+    to the next power-of-two leaves (first k leaves r₁..r_k labeled as leaves; rest ⊥). -/
 def hash (b : Block Message Hash Signature) (H : Merkle.Hasher Hash) : Hash :=
   Merkle.root H (b.sliceRoots)
--- [p.15, Def. 4; also referenced p.40]
 
-/-- Checks that the block contains a designated terminal slice. -/
 def hasTerminalSlice (b : Block Message Hash Signature) : Prop :=
   match b.lastSlice? with
   | some sl => sl.z = true
-  | none => False
--- [p.14–15: terminal flag z_t = 1 on final slice]
+  | none    => False
 
-/-- Predicate stating that every slice in the block belongs to the same slot. -/
 def allSlicesInSlot (b : Block Message Hash Signature) : Prop :=
-  ∀ {sl}, sl ∈ b.slices → sl.s = b.s
--- [p.15, Def. 3: same-slot condition]
+  ∀ sl, sl ∈ b.slices → sl.s = b.s
 
-/-- Helper predicate capturing the typical well-formedness conditions mentioned
-    in the whitepaper: slices belong to the same slot and the terminal slice is
-    marked with `z_t = 1`.  Further constraints (e.g. bounds on size) can be
-    layered on top as needed by the proofs. -/
+/-- Block validity per Def. 3 (p.14–15): nonempty; all slices in slot;
+    terminal slice has z = 1; all earlier slices have z = 0. -/
 def valid (b : Block Message Hash Signature) : Prop :=
-  (b.slices ≠ []) ∧
-    b.allSlicesInSlot ∧
-    b.hasTerminalSlice ∧
-    ∀ {sl}, sl ∈ b.slices.dropLast → sl.z = false
--- [p.14–15: z_t usage; Def. 3 requires same slot; terminal marker discipline]
+  b.slices ≠ [] ∧
+  b.allSlicesInSlot ∧
+  b.hasTerminalSlice ∧
+  ∀ sl, sl ∈ b.slices.dropLast → sl.z = false
 end Block
 
-/-
-  ============================
-  Additions for Theorem 1 setup
-  ============================
--/
-
--- Node ids / crypto / headers / ancestry / stake / votes / certs / pool / events / schedule
--- Page references follow the whitepaper sections indicated in the cross-walk.
-
+/-– Node identifier (proof-of-stake node id). -/
 abbrev NodeId := Nat
--- [p.8 validators; nodes throughout pp.1–11]
 
-variable {Message : Type u} {Hash : Type v} {Signature : Type w}
-
-/-- Signature verification relation (opaque; implemented by the crypto layer). -/
+/-– Signature scheme placeholder (Section 1.6: aggregate signatures on p.18). -/
 class SigScheme (Signature : Type*) (Hash : Type*) (NodeId : Type*) where
   verify : NodeId → Hash → Signature → Prop
--- [pp.12, 14, 16, 19–20: signatures/verification mentions]
 
-/-- Canonical identifier for a block (hash of the block in the paper). -/
+/-– Block identifier equals block hash (Def. 4). -/
 abbrev BlockId (Hash : Type _) := Hash
--- [p.15 Def. 4; also p.42–43 when talking about ancestors by id]
 
-/-- A minimal header that captures exactly what Theorem 1 needs:
-    slot number, parent pointer, and the block's own id. -/
+/-– Block header capturing (slot, parent pointer, id = hash(b)); parent chain per Def. 5 (p.15). -/
 structure Header (Hash : Type _) where
   s        : Slot
-  parentId : Option Hash  -- none for genesis
+  parentId : Option Hash
   id       : Hash
   deriving DecidableEq
--- [p.15: parent relations implied; pp.31–33, 42–43: parent/ancestor usage]
 
-/-- A "node" in the block tree: header + the body you already defined. -/
+/-– Coupling of header and body (same slot), cf. Defs. 3–5. -/
 structure BlockNode
     (Message : Type u) (Hash : Type v) (Signature : Type w) where
   header : Header Hash
   body   : Block Message Hash Signature
--- [p.15 Def. 3 (body) + pp.31–33 parent/slot interplay]
 
 namespace BlockNode
-
-/-- Immediate-parent relation on headers. -/
+/-– Parent relation: c.parentId = p.id and p.s < c.s (Def. 5, p.15). -/
 def isParentOf (p c : Header Hash) : Prop :=
   c.parentId = some p.id ∧ p.s < c.s
--- [pp.31–33: parent older slot; pointer equality via ids]
 
-/-- Ancestor/descendant (reflexive–transitive closure of `isParentOf`). -/
+/-– Ancestor/descendant closure over parent links (Def. 5, p.15). -/
 inductive IsAncestor (root : Header Hash) : Header Hash → Prop
 | refl  : IsAncestor root root
-| step  : ∀ {mid child}, IsAncestor root mid → isParentOf mid child → IsAncestor root child
--- [pp.11, 15, 31–33, 42–43: ancestry language]
+| step  : ∀ {mid child}, IsAncestor root mid → isParentOf (Hash:=Hash) mid child → IsAncestor root child
 
-def IsDescendant (child root : Header Hash) : Prop := IsAncestor root child
--- [pp.31–33, 42–43]
+def IsDescendant (child root : Header Hash) : Prop := IsAncestor (Hash:=Hash) root child
 end BlockNode
 
-/-- Nonnegative stake weights. The actual sum-to-1 constraint and big operators
-    are defined in modules that import Real numbers. -/
+/-- Stake model placeholder; weights drive thresholds (Assumption 1, p.4). -/
 structure StakeProfile where
-  N           : Nat
-  weight      : NodeId → Nat  -- Simplified to Nat for basic module
--- [pp.4–5 overview of stake; thresholds p.20–22; used throughout safety proofs]
+  N      : Nat
+  weight : NodeId → Nat
 
-/-- "Correct" node predicate (Byzantine = ¬correct). Parameter for the protocol. -/
 def Correct := NodeId → Prop
--- [pp.4–5, 28–31: correct vs Byzantine]
 
-/-- Byzantine stake bound (paper uses < 20%). Exact constraint deferred to theorem modules. -/
 structure AdversaryBound (SP : StakeProfile) (correct : Correct) where
-  byzStakeBounded : Prop  -- Actual constraint: byzantine stake < 20%
--- [pp.4–5 overview; pp.28–31 technical lemmas with 20% bound; pp.38–41 recaps]
+  byzStakeBounded : Prop
 
-/-- Vote types used for certificates. -/
-inductive VoteType
-| notar          -- notarization vote (round 1)
-| notarFallback  -- notar-fallback
-| skip           -- skip vote for a slot
-| skipFallback   -- skip-fallback vote for a slot
-| final          -- slow finalization (slot-scoped)
+inductive VoteType | notar | notarFallback | skip | skipFallback | final
 deriving DecidableEq, Repr
--- [p.19 Def. 11 baseline; p.20–22, 28–36, 38, 43–46 for the specific kinds]
 
-/-- Votes are keyed either by slot or by (slot, block). -/
+/-– Vote keys (Table 5, §2.4, p.19): slot-scoped (Skip/Final) and block-scoped (Notar). -/
 inductive VoteKey (Hash : Type _)
 | slot  : Slot → VoteKey Hash
 | block : Slot → BlockId Hash → VoteKey Hash
 deriving DecidableEq, Repr
--- [pp.19–21 Def. 11; keys attest to slots or (slot,block)]
 
-/-- A vote message from a node with stake. -/
+/-– Voting message (Table 5, §2.4, p.19). -/
 structure Vote (Hash : Type _) (Signature : Type _) where
   voter : NodeId
   kind  : VoteType
   key   : VoteKey Hash
   sig   : Signature
--- [pp.19–21 Def. 11; signatures p.19–20]
 
-/-- A certificate is a set of votes with total stake weight ≥ threshold. -/
+/-– Certificate (Table 6, §2.4, p.20): aggregation of votes for a key.
+    `kind` denotes the underlying aggregated vote type; thresholds (e.g., 80% fast vs. 60%)
+    are captured via `thrOK` and by usage in Def. 14. -/
 structure Certificate (Hash : Type _) where
-  kind        : VoteType
-  key         : VoteKey Hash
-  voters      : Finset NodeId
-  weightSum   : Nat  -- Simplified to Nat for basic module
-  thrOK       : Prop   -- "weightSum ≥ τ(kind)" (to be specialized)
--- [pp.20–21 Def. 12; thresholds also p.22, p.10 overview]
+  kind      : VoteType
+  key       : VoteKey Hash
+  voters    : Finset NodeId
+  weightSum : Nat
+  thrOK     : Prop   -- “≥ 80%” for fast-finalization; “≥ 60%” otherwise (Table 6)
 
-/-- Named certificates for clarity. -/
-def NotarCert   (Hash : Type _) := Certificate Hash  -- [p.19–22, 28–36]
-def SkipCert    (Hash : Type _) := Certificate Hash  -- [p.19, 21–22, 28, 30, 32–36]
-def FinalCert   (Hash : Type _) := Certificate Hash  -- [p.19, 21, 38, 43–46]
--- Fast-finalization is represented at the theorem level via a higher threshold
--- notarization certificate (block-scoped) rather than a separate kind here.
+abbrev NotarCert   (Hash : Type _) := Certificate Hash
+abbrev SkipCert    (Hash : Type _) := Certificate Hash
+abbrev FinalCert   (Hash : Type _) := Certificate Hash
 
-/-- The local storage of observed votes & certificates. -/
+/-– Pool (Defs. 12–13, §2.5, p.20–21): storage for votes and certificates per (type,key). -/
 structure Pool (Hash : Type v) : Type (max 1 v) where
-  votes        : VoteType → VoteKey Hash → Finset NodeId
-  certs        : VoteType → VoteKey Hash → Option (Certificate Hash)
--- [pp.20–23, 27, 29, 32–34: pools of votes/certs; also "pool" p.3, p.49]
+  votes : VoteType → VoteKey Hash → Finset NodeId
+  certs : VoteType → VoteKey Hash → Option (Certificate Hash)
 
 namespace Pool
 variable {Hash : Type v}
-
-/-- Accessor: notarization certificate for (s,b). -/
+/-– Notarization certificate lookup (Table 6). -/
 def notarCert? (P : Pool Hash) (s : Slot) (b : BlockId Hash) :
     Option (NotarCert Hash) :=
   P.certs VoteType.notar (VoteKey.block s b)
--- [pp.19–22, 28–36]
 
-/-- Accessor: skip certificate for slot s. -/
 def skipCert? (P : Pool Hash) (s : Slot) : Option (SkipCert Hash) :=
   P.certs VoteType.skip (VoteKey.slot s)
--- [pp.19, 21–22, 28, 30, 32–36]
 
-/-- Accessor: finalization certificate for slot s. -/
 def finalCert? (P : Pool Hash) (s : Slot) :
     Option (FinalCert Hash) :=
   P.certs VoteType.final (VoteKey.slot s)
--- [pp.19, 21, 38, 43–46]
 
--- No separate accessor for fast-finalization; use notarCert? with a stronger threshold.
+/-- Fast-finalization (Def. 14, §2.4/§2.6): notar certificate satisfying the 80% threshold. -/
+def fastFinalCert (P : Pool Hash) (s : Slot) (b : BlockId Hash) : Prop :=
+  ∃ C, P.notarCert? s b = some C ∧ C.thrOK
 end Pool
 
-/-- Events that drive the protocol handlers (Alg. 1/2). -/
+/-– Events (Defs. 15–16, §2.4–§2.6, p.21–22). -/
 inductive Event (Hash : Type _)
 | BlockNotarized  (s : Slot) (b : BlockId Hash)
 | ParentReady     (s : Slot) (parent : BlockId Hash)
 | SafeToNotar     (s : Slot) (b : BlockId Hash)
 | SafeToSkip      (s : Slot)
 deriving Repr, DecidableEq
--- [Defs. 15–16 p.21; occurrences: ParentReady p.21,23–27,32–37,42;
---  BlockNotarized p.21,23–25,30,33; SafeToNotar p.19,21,24,29–31,34–39;
---  SafeToSkip p.21–22,24,29,34,36–39]
 
-/-- Leader schedule for slots. -/
+/-– Leader schedule mapping slots to leaders (overview §1.1, §2.7). -/
 abbrev LeaderSchedule := Slot → NodeId
--- [“leader” and slots throughout; used with WINDOWSLOTS: p.31,33–37]
 
-/-- The “leader window” for slot s (WINDOWSLOTS(s)). -/
+/-– Leader window: consecutive slots led by the same leader (overview §1.1). -/
 structure LeaderWindow where
-  slots : List Slot
+  slots    : List Slot
   nonempty : slots ≠ []
   deriving Repr
--- [WINDOWSLOTS references p.31, 33–37 (also 23,25,34–36)]
 
-/-- A schedule provides both leader and per-slot windows. -/
+/-– Schedule bundles leader mapping and leader windows. -/
 structure Schedule where
-  leader    : LeaderSchedule
-  window    : Slot → LeaderWindow
--- [p.31, 33–37]
+  leader : LeaderSchedule
+  window : Slot → LeaderWindow
 
-/-- A block is notarized if Pool has a notar certificate for (s, b). -/
+/-– Notarized(h): Pool holds a notarization certificate for h (Table 6). -/
 def Notarized (P : Pool Hash) (h : Header Hash) : Prop :=
   ∃ C, P.notarCert? h.s h.id = some C
--- [pp.19–22, 28–36]
 
-/-- Finalization predicate approximating Def. 14 p.21 without a separate fast-final kind:
-    - fast: existence of a block-scoped notar certificate for (s, id) (80% threshold
-      is enforced in theorem modules via `FastFinalizationCertValid`).
-    - slow: a slot-scoped finalization certificate exists for the slot and the
-      block is the notarized block of that slot. -/
+/-- Finalization (Def. 14, §2.4/§2.6): fast (80%) or slow (final cert + notar cert). -/
+def hasFinalCert (P : Pool Hash) (s : Slot) : Prop :=
+  ∃ C, P.finalCert? s = some C
+def hasNotarCert (P : Pool Hash) (s : Slot) (b : BlockId Hash) : Prop :=
+  ∃ C, P.notarCert? s b = some C
+
+/-– Finalized per Def. 14: either via fast-finalization (80% notar votes) or via
+    slow path (finalization cert on slot + notarization cert for the unique block). -/
 inductive Finalized (P : Pool Hash) (h : Header Hash) : Prop
-| fast  : (∃ C, P.notarCert? h.s h.id = some C) →
-          Finalized P h
-| slow  : (∃ C, P.finalCert? h.s = some C) →
-          (∃ Cn, P.notarCert? h.s h.id = some Cn) →
-          Finalized P h
--- [Def. 14 p.21; fast path uses notar cert with stronger threshold handled elsewhere]
+| fast : P.fastFinalCert (Hash:=Hash) h.s h.id → Finalized P h
+| slow : hasFinalCert (Hash:=Hash) P h.s → hasNotarCert (Hash:=Hash) P h.s h.id → Finalized P h
 
-/-- A convenient slot order predicate. -/
+
 def SlotLe (a b : Header Hash) : Prop := a.s ≤ b.s
--- [ordering on slots used throughout; see p.11, 15, 31–33]
 
-/-- Body validity + header-slot coherence. -/
+/-– Block/body matches header slot and satisfies Def. 3 invariants. -/
 def WellFormed (bn : BlockNode Message Hash Signature) : Prop :=
   bn.body.valid ∧ bn.body.s = bn.header.s
--- [p.14–15 z_t & same-slot; p.27 consistency constraints]
 
-/-- Abstract view a node has of the tree and pool. -/
+/-– Keep only headers closed under parent links (Def. 5, p.15). -/
 structure View (Message : Type u) (Hash : Type v) (Signature : Type w) : Type (max u (max v (max w 1))) where
-  pool     : Pool Hash
-  headers  : Finset (Header Hash)
-  parentRel :
-    ∀ {p c}, p ∈ headers → c ∈ headers →
-      (BlockNode.isParentOf (Hash:=Hash) p c ∨ True) -- to be refined with actual edges
--- [pp.21–27, 31–37: algorithms over known parents/headers and pool]
+  pool    : Pool Hash
+  headers : Finset (Header Hash)
+  closedUnderParents :
+    ∀ {c pid}, c ∈ headers → c.parentId = some pid →
+      ∃ p, p ∈ headers ∧ p.id = pid ∧ p.s < c.s
 end Alpenglow
