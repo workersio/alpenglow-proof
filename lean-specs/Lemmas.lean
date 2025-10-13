@@ -8,6 +8,7 @@ import Mathlib.Data.Real.Basic
 import Mathlib.Probability.ProbabilityMassFunction.Basic
 import Mathlib.Analysis.SpecificLimits.Basic
 import Basics
+import Lemma24
 
 namespace Alpenglow
 
