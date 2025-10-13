@@ -67,9 +67,9 @@ theorem tryFinal_sets_itsOver
   set alreadyFinal := st.hasTag s SlotTag.itsOver with hOver
   simp [tryFinal] at h_final ⊢
   split_ifs at h_final with hguard
-  · simpa [tryFinal, hBlock, hVoted, hBad, hOver, hguard]
-      using Lemma20.addTag_has_tag st s SlotTag.itsOver
-  · exact False.elim (by simpa using h_final)
+  · simp [hguard]
+    exact Lemma20.addTag_has_tag st s SlotTag.itsOver
+  · simp at h_final
 
 /-- tryFinal only succeeds when BadWindow is not set (part of the guard condition). -/
 theorem tryFinal_requires_no_badWindow
@@ -81,13 +81,11 @@ theorem tryFinal_requires_no_badWindow
   split_ifs at h_final with hguard
   · -- The guard is: blockNotarized && votedNotar && !badWindow && !alreadyFinal = true
     -- From a && b && c && d = true, we can derive each component is true
-    have : (st.hasTag s (SlotTag.blockNotarized h) && st.hasTag s (SlotTag.votedNotar h) &&
-            !st.hasTag s SlotTag.badWindow && !st.hasTag s SlotTag.itsOver) = true := hguard
     -- Extract just the !badWindow part
     cases hbad : st.hasTag s SlotTag.badWindow
     · rfl
     · -- badWindow = true, but the guard requires !badWindow = true, contradiction
-      simp [hbad] at this
+      simp [hbad] at hguard
   · simp at h_final
 
 /-! ## Skip-window broadcast structure -/
