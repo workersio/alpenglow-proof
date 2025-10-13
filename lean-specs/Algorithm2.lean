@@ -2,31 +2,35 @@
   Algorithm 2 (Votor helper functions)
   ====================================
 
+  Ground truth reference: white-paper-origintal.pdf
+  - Algorithm 2 (Votor, helper functions): pages 24–25 (Alg. 2 lines 1–30)
+  - Definition 17 (timeout schedule): page 23 (formula for Timeout(i))
+  - Definition 18 (Votor state markers): page 23 (state[s] flags)
+
   The whitepaper’s Algorithm 2 collects the local helper routines that every
   validator executes while processing events:
 
   * `WINDOWSLOTS(s)` enumerates the slots belonging to the leader window
-    that contains slot `s` (Alg. 2, line 1).
+    that contains slot `s` (Alg. 2, line 1; p.24).
   * `SETTIMEOUTS(s)` programs the per-slot timers using the window layout and
-    timing parameters `Δ_timeout`, `Δ_block` (lines 3–5).
+    timing parameters `Δ_timeout`, `Δ_block` (Alg. 2, lines 3–5; p.24; Def. 17 p.23).
   * `TRYNOTAR` attempts to cast a notarization vote for the given block.  The
-    guard mirrors lines 8–14, while the successful branch also delegates to
-    `TRYFINAL` (line 15) and clears the pending-buffer entry for the slot.
+    guard mirrors Alg. 2 lines 8–14 (p.24), while the successful branch also
+    delegates to `TRYFINAL` (line 15) and clears the pending-buffer entry.
   * `TRYFINAL` issues a finalization vote once the local state contains the
     notarization certificate for the block and no fallback votes were cast
-    in the same slot (lines 18–21).
+    in the same slot (Alg. 2, lines 18–21; p.24).
   * `TRYSKIPWINDOW` iterates over the leader window and casts skip votes for
     every slot whose state still lacks the `Voted` flag, marking the window as
-    “bad” in the process (lines 22–27).
+    “bad” in the process (Alg. 2, lines 22–27; p.24–25).
   * `CHECKPENDINGBLOCKS` retries notarization for buffered blocks, scanning
-    slots in nondecreasing order (lines 28–30).
+    slots in nondecreasing order (Alg. 2, lines 28–30; p.25).
 
-  This file provides a concrete Lean formalization of these routines.  We keep
+  This file provides a concrete Lean formalization of these routines. We keep
   the implementation deliberately functional: each helper consumes a validator
   state, produces an updated state, and returns a list of broadcast actions
-  (the votes that would be sent on the network).  The state and configuration
-  records are thin wrappers around the notions introduced in Section 2 of the
-  whitepaper (Definition 17 for timers, Definition 18 for per-slot flags).
+  (votes to be sent on the network). The state and configuration records are
+  thin wrappers around the notions introduced in the referenced definitions.
 -/
 
 import Basics
@@ -57,8 +61,8 @@ structure PendingBlock (Hash : Type _) where
   parent : Option Hash
   deriving DecidableEq, Repr
 
-/-- Votes emitted by the helpers.  We only model the three kinds that arise in
-    Algorithm 2 (lines 12, 20, 25). -/
+/-- Votes emitted by the helpers. Includes the three kinds used in Algorithm 2
+    (Alg. 2 lines 12, 20, 25; p.24) and the fallback kinds driven by Algorithm 1. -/
 inductive Broadcast (Hash : Type _) where
   | notar (s : Slot) (hash : Hash)
   | final (s : Slot)
@@ -97,15 +101,16 @@ end LeaderWindow
 
 namespace VotorConfig
 
-/-- Slots in the leader window containing `s` (Alg. 2, line 1). -/
+/-- Slots in the leader window containing `s` (Alg. 2, line 1; p.24). -/
 def windowSlots (cfg : VotorConfig) (s : Slot) : List Slot :=
   (cfg.schedule.window s).slots
 
-/-- First slot of the window that contains `s`. -/
+/-- First slot of the window that contains `s` (used by Alg. 2 line 11; p.24). -/
 def windowFirstSlot (cfg : VotorConfig) (s : Slot) : Slot :=
   (cfg.schedule.window s).firstSlot
 
-/-- Boolean predicate indicating whether `s` is the first slot in its window. -/
+/-- Boolean predicate indicating whether `s` is the first slot in its window
+    (Alg. 2, line 10–11 computes `firstSlot`; p.24). -/
 def isFirstSlot (cfg : VotorConfig) (s : Slot) : Bool :=
   decide (cfg.windowFirstSlot s = s)
 
@@ -196,8 +201,10 @@ section Helpers
 
 variable {Hash : Type v} [DecidableEq Hash]
 
-/-- Attempt to cast a finalization vote, as specified in Algorithm 2
-    (lines 18–21).  Returns the updated state together with any broadcast. -/
+/-- Algorithm 2 `TRYFINAL` (lines 18–21; p.24): if
+    `BlockNotarized(hash(b)) ∈ state[s]` and `VotedNotar(hash(b)) ∈ state[s]` and
+    `BadWindow ∉ state[s]`, then broadcast `FinalVote(s)` and add `ItsOver` to
+    `state[s]`. Returns the updated state together with any broadcast. -/
 def tryFinal
     (st : VotorState Hash)
     (slot : Slot) (hash : Hash) :
@@ -208,15 +215,16 @@ def tryFinal
     st.hasTag slot (SlotTag.votedNotar hash)
   let badWindow :=
     st.hasTag slot SlotTag.badWindow
-  let alreadyFinal :=
-    st.hasTag slot SlotTag.itsOver
-  if blockNotarized && votedNotar && !badWindow && !alreadyFinal then
+  if blockNotarized && votedNotar && !badWindow then
     let st1 := st.addTag slot SlotTag.itsOver
     (st1, [Broadcast.final slot])
   else
     (st, [])
 
-/-- Guard of `TRYNOTAR`, i.e. the large boolean in lines 8–14. -/
+/-- Guard of `TRYNOTAR` (Alg. 2 lines 8–14; p.24):
+    - if `Voted ∈ state[s]` then return false (handled in `tryNotar` precheck), else
+    - compute `firstSlot` boolean; if first slot then require `ParentReady(hash_parent) ∈ state[s]`,
+      otherwise require `VotedNotar(hash_parent) ∈ state[s-1]`. -/
 private def canNotarize
     (cfg : VotorConfig) (st : VotorState Hash)
     (blk : PendingBlock Hash) : Bool :=
@@ -232,9 +240,14 @@ private def canNotarize
           let previous := blk.slot - 1
           st.hasTag previous (SlotTag.votedNotar parentHash)
 
-/-- Implementation of Algorithm 2 `TRYNOTAR`.  On success it returns the new
-    state and the list of emitted broadcasts (notar vote plus any final vote).
-    When the guard is not satisfied, the function yields `none`. -/
+/-- Algorithm 2 `TRYNOTAR` (p.24, lines 7–17):
+    - lines 8–9: if `Voted ∈ state[s]` then return false (here: `none`).
+    - lines 10–11: compute `firstSlot` and test readiness condition.
+    - line 12: broadcast `NotarVote(s, hash)`.
+    - line 13: add `{Voted, VotedNotar(hash)}` to `state[s]`.
+    - line 14: set `pendingBlocks[s] ← ⊥`.
+    - line 15: call `tryFinal(s, hash)`.
+    - line 16: return true (here: `some ...`). -/
 def tryNotar
     (cfg : VotorConfig) (st : VotorState Hash)
     (blk : PendingBlock Hash) :
@@ -253,8 +266,10 @@ def tryNotar
   else
     none
 
-/-- Implementation of Algorithm 2 `TRYSKIPWINDOW`.  The returned list contains
-    every `SkipVote(k)` that would be broadcast (line 25). -/
+/-- Algorithm 2 `TRYSKIPWINDOW` (p.24–25, lines 22–27): iterate over `windowSlots(s)`;
+    for each `k` with `Voted ∉ state[k]`, broadcast `SkipVote(k)`, add `{Voted,BadWindow}`
+    to `state[k]`, and set `pendingBlocks[k] ← ⊥`. Returns the updated state and
+    the concatenation of emitted `SkipVote(k)` broadcasts. -/
 def trySkipWindow
     (cfg : VotorConfig) (slot : Slot) (st : VotorState Hash) :
     VotorState Hash × List (Broadcast Hash) :=
@@ -270,8 +285,9 @@ def trySkipWindow
         (st3, accLogs ++ [Broadcast.skip currentSlot]))
     (st, [])
 
-/-- Program all timeouts for the leader window beginning at slot `first`.
-    Mirrors Algorithm 2 `SETTIMEOUTS` (lines 3–5). -/
+/-- Algorithm 2 `SETTIMEOUTS` (p.24, lines 3–5): for `i ∈ windowSlots(s)` schedule
+    `Timeout(i)` at `clock() + Δ_timeout + (i − s + 1)·Δ_block`. Here `clock()` is
+    `st.clock`, and `Δ_timeout`, `Δ_block` are `cfg.deltaTimeout`, `cfg.deltaBlock`. -/
 def setTimeouts
     (cfg : VotorConfig) (first : Slot) (st : VotorState Hash) :
     VotorState Hash :=
@@ -283,8 +299,9 @@ def setTimeouts
       acc.setTimeout slot timestamp)
     st
 
-/-- Retry notarization for every pending block, in nondecreasing slot order
-    (Algorithm 2 `CHECKPENDINGBLOCKS`, lines 28–30). -/
+/-- Algorithm 2 `CHECKPENDINGBLOCKS` (p.25, lines 28–30): iterate all `s` with
+    `pendingBlocks[s] ≠ ⊥` in nondecreasing `s` and call `tryNotar(pendingBlocks[s])`.
+    The state field `pending` is maintained in slot-sorted order. -/
 def checkPendingBlocks
     (cfg : VotorConfig) (st : VotorState Hash) :
     VotorState Hash × List (Broadcast Hash) :=
