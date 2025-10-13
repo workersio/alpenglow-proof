@@ -1,11 +1,11 @@
 /-
-  Alpenglow Blockstor
+  Alpenglow Blokstor
 
   This module formalizes Definition 10 (“Blokstor”) from the Alpenglow
-  whitepaper [p.19].  The Blockstor is the data structure responsible for
+  whitepaper [p.19].  The Blokstor is the data structure responsible for
   ingesting shreds produced by Rotor, enforcing the authenticity checks
   spelled out in the definition, and materializing the first complete block
-  that arrives for each slot.  When such a block is assembled, Blockstor
+  that arrives for each slot.  When such a block is assembled, Blokstor
   produces the `Block` event containing the slot, the block hash, and the
   hash of its parent as described in the whitepaper.
 -/
@@ -16,7 +16,7 @@ namespace Alpenglow
 
 universe u v w x y
 
-/-- The event emitted by Blockstor once a slot's first complete block has
+/-- The event emitted by Blokstor once a slot's first complete block has
     been reconstructed.  The payload matches the triple
     `Block(slot(b), hash(b), hash(parent(b)))` from the whitepaper. -/
 structure BlockEvent (Hash : Type u) where
@@ -27,12 +27,12 @@ structure BlockEvent (Hash : Type u) where
 -- [p.19, Def. 10: emitted event structure]
 
 /--
-  Configuration data describing how Blockstor validates shreds and extracts
+  Configuration data describing how Blokstor validates shreds and extracts
   parent information from blocks.  The predicates abstract over concrete
   cryptographic checks so that the formalization can remain agnostic of the
   underlying implementations.
 -/
-structure BlockstorConfig
+structure BlokstorConfig
     (Data : Type u) (Path : Type v) (Message : Type w)
     (Hash : Type x) (Signature : Type y) where
   /-- The Merkle hasher used to compute `hash(b)` for completed blocks. -/
@@ -46,12 +46,12 @@ structure BlockstorConfig
   /-- Extracts the hash of the parent block from the decoded block data. -/
   parentHash : Block Message Hash Signature → Hash
 
-namespace BlockstorConfig
+namespace BlokstorConfig
 
-end BlockstorConfig
+end BlokstorConfig
 
 /--
-  Blockstor state together with the invariants mandated by Definition 10.
+  Blokstor state together with the invariants mandated by Definition 10.
   The structure records
 
   * the shreds stored for each slot/slice/shred index triple,
@@ -59,10 +59,10 @@ end BlockstorConfig
   * well-formedness guarantees mirroring the acceptance checks performed
     when new shreds arrive.
 -/
-structure Blockstor
+structure Blokstor
     {Data : Type u} {Path : Type v} {Message : Type w}
     {Hash : Type x} {Signature : Type y}
-    (cfg : BlockstorConfig Data Path Message Hash Signature) where
+    (cfg : BlokstorConfig Data Path Message Hash Signature) where
   /-- Partial map of stored shreds keyed by `(slot, slice, shred)` indices. -/
   stored :
       Slot → SliceIndex → ShredIndex →
@@ -91,28 +91,28 @@ structure Blockstor
         firstComplete s = some b →
           b.s = s ∧ Block.valid b
 
-namespace Blockstor
+namespace Blokstor
 
 variable {Data : Type u} {Path : Type v} {Message : Type w}
 variable {Hash : Type x} {Signature : Type y}
-variable {cfg : BlockstorConfig Data Path Message Hash Signature}
+variable {cfg : BlokstorConfig Data Path Message Hash Signature}
 
-/-- Condition under which Blockstor may ingest a new shred.  The shred must
+/-- Condition under which Blokstor may ingest a new shred.  The shred must
     not have been stored under the same `(s, t, i)` key yet and it must
     satisfy the Merkle and signature predicates from Definition 10. -/
 def canInsert
-    (bs : Blockstor cfg) (sh : Shred Data Path Hash Signature) : Prop :=
+    (bs : Blokstor cfg) (sh : Shred Data Path Hash Signature) : Prop :=
   bs.stored sh.s sh.t sh.i = none ∧
     cfg.validWitness sh ∧
     cfg.signedSlice sh
 -- [p.19, Def. 10: admission criteria for shreds]
 
 /--
-  The `Block` event emitted for a slot, if Blockstor reconstructed the first
+  The `Block` event emitted for a slot, if Blokstor reconstructed the first
   complete block for that slot.  This packages the information required by
   Algorithm 1 in the whitepaper.
 -/
-def eventForSlot (bs : Blockstor cfg) (s : Slot) :
+def eventForSlot (bs : Blokstor cfg) (s : Slot) :
     Option (BlockEvent Hash) :=
   (bs.firstComplete s).map fun b =>
     { slot := s
@@ -120,6 +120,6 @@ def eventForSlot (bs : Blockstor cfg) (s : Slot) :
       parentHash := cfg.parentHash b }
 -- [p.19, Def. 10: event content]
 
-end Blockstor
+end Blokstor
 
 end Alpenglow
