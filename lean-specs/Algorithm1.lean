@@ -2,31 +2,31 @@
   Algorithm 1 (Votor event loop)
   ==============================
 
+  Ground truth reference: white-paper-origintal.pdf
+  - Algorithm 1 (Votor, event loop, single-threaded): page 24, lines 1–25
+  - Definition 18 (Votor state): page 23
+  - Definition 15 (Pool events): page 21
+  - Definition 16 (fallback events): pages 21–22
+
   The whitepaper's Algorithm 1 describes the main event-driven control loop
-  for the Votor voting protocol.  Each validator node reacts to a sequence of
+  for the Votor voting protocol. Each validator node reacts to a sequence of
   events:
 
-  * `Block(s, hash, hash_parent)` – Blokstor has received a complete block.
-  * `Timeout(s)` – The local timeout for slot `s` has expired.
-  * `BlockNotarized(s, hash(b))` – Pool has generated a notarization certificate.
-  * `ParentReady(s, hash(b))` – The parent block is ready for the leader window
-    starting at `s`.
-  * `SafeToNotar(s, hash(b))` – It is safe to cast a notar-fallback vote.
-  * `SafeToSkip(s)` – It is safe to cast a skip-fallback vote.
+  * Block(s, hash, hash_parent) — Blokstor has received a complete block.
+  * Timeout(s) — The local timeout for slot s has expired.
+  * BlockNotarized(s, hash(b)) — Pool has generated a notarization certificate.
+  * ParentReady(s, hash(b)) — The parent block is ready for the leader window
+    starting at s.
+  * SafeToNotar(s, hash(b)) — It is safe to cast a notar-fallback vote.
+  * SafeToSkip(s) — It is safe to cast a skip-fallback vote.
 
   This file provides a concrete Lean formalization of Algorithm 1's event
-  handlers.  The implementation is functional: each handler consumes the
+  handlers. The implementation is functional: each handler consumes the
   current validator state, produces an updated state, and returns a list of
   broadcast actions (votes to be sent on the network).
 
   The event handlers delegate to helper functions defined in Algorithm2.lean
   (TRYNOTAR, CHECKPENDINGBLOCKS, TRYSKIPWINDOW, TRYFINAL, SETTIMEOUTS).
-
-  References:
-  - Algorithm 1 appears on page 24 of the whitepaper
-  - Definition 15 (Pool events) on page 21
-  - Definition 16 (fallback events) on pages 21-22
-  - Definition 18 (Votor state) on page 23
 -/
 
 import Basics
@@ -58,7 +58,7 @@ section EventHandlers
 
 variable {Hash : Type v} [DecidableEq Hash]
 
-/-- Algorithm 1, lines 1-5: upon Block(s, hash, hash_parent)
+/-- Algorithm 1 (white-paper-origintal.pdf:24, lines 1–5): upon Block(s, hash, hash_parent)
 
     When a block is received:
     1. Try to notarize it immediately
@@ -87,7 +87,7 @@ def handleBlock
         -- Buffer for later (line 5)
         (st.recordPending blk, [])
 
-/-- Algorithm 1, lines 6-8: upon Timeout(s)
+/-- Algorithm 1 (white-paper-origintal.pdf:24, lines 6–8): upon Timeout(s)
 
     When a timeout expires for slot s:
     - If we haven't voted yet, skip the entire leader window -/
@@ -102,7 +102,7 @@ def handleTimeout
     -- Skip the window (line 8)
     trySkipWindow cfg s st
 
-/-- Algorithm 1, lines 9-11: upon BlockNotarized(s, hash(b))
+/-- Algorithm 1 (white-paper-origintal.pdf:24, lines 9–11): upon BlockNotarized(s, hash(b))
 
     When Pool emits a notarization certificate:
     1. Record the notarization in state
@@ -116,7 +116,7 @@ def handleBlockNotarized
   -- Line 11: try to finalize
   tryFinal st1 s hash
 
-/-- Algorithm 1, lines 12-15: upon ParentReady(s, hash(b))
+/-- Algorithm 1 (white-paper-origintal.pdf:24, lines 12–15): upon ParentReady(s, hash(b))
 
     When the parent block is ready for a leader window:
     1. Record ParentReady in state
@@ -134,7 +134,7 @@ def handleParentReady
   let st3 := setTimeouts cfg s st2
   (st3, broadcasts)
 
-/-- Algorithm 1, lines 16-20: upon SafeToNotar(s, hash(b))
+/-- Algorithm 1 (white-paper-origintal.pdf:24, lines 16–20): upon SafeToNotar(s, hash(b))
 
     When it's safe to cast a notar-fallback vote:
     1. Skip the window
@@ -149,10 +149,13 @@ def handleSafeToNotar
   if st1.hasTag s SlotTag.itsOver then
     (st1, skipBroadcasts)
   else
+    -- Line 19: broadcast notar-fallback vote
+    let broadcasts := skipBroadcasts ++ [Broadcast.notarFallback s hash]
+    -- Line 20: add BadWindow to state[s]
     let st2 := st1.addTag s SlotTag.badWindow
-    (st2, skipBroadcasts ++ [Broadcast.notarFallback s hash])
+    (st2, broadcasts)
 
-/-- Algorithm 1, lines 21-25: upon SafeToSkip(s)
+/-- Algorithm 1 (white-paper-origintal.pdf:24, lines 21–25): upon SafeToSkip(s)
 
     When it's safe to cast a skip-fallback vote:
     1. Skip the window
@@ -167,8 +170,11 @@ def handleSafeToSkip
   if st1.hasTag s SlotTag.itsOver then
     (st1, skipBroadcasts)
   else
+    -- Line 24: broadcast skip-fallback vote
+    let broadcasts := skipBroadcasts ++ [Broadcast.skipFallback s]
+    -- Line 25: add BadWindow to state[s]
     let st2 := st1.addTag s SlotTag.badWindow
-    (st2, skipBroadcasts ++ [Broadcast.skipFallback s])
+    (st2, broadcasts)
 
 /-- Main event handler that dispatches to the appropriate handler based on
     the event type. -/
