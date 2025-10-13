@@ -8,6 +8,8 @@ import Algorithm1
 import Lemmas
 import Lemma20
 import Lemma21
+import Lemma22
+import Lemma23
 import Theorem1
 
 def main : IO Unit := do

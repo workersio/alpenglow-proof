@@ -22,6 +22,9 @@ lean_lib «Lemma21» where
 lean_lib «Lemma22» where
   -- Formal proof of Lemma 22 (finalization and fallback mutual exclusivity)
 
+lean_lib «Lemma23» where
+  -- Formal proof of Lemma 23 (notarization exclusivity with correct majority)
+
 lean_lib «Algorithm1» where
   -- Votor event loop (Algorithm 1 from whitepaper)
 
