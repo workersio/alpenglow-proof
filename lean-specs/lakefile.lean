@@ -25,6 +25,12 @@ lean_lib «Lemma22» where
 lean_lib «Lemma23» where
   -- Formal proof of Lemma 23 (notarization exclusivity with correct majority)
 
+lean_lib «Lemma24» where
+  -- Formal proof of Lemma 24 (uniqueness of notarization per slot)
+
+lean_lib «Lemma25» where
+  -- Formal proof of Lemma 25
+
 lean_lib «Algorithm1» where
   -- Votor event loop (Algorithm 1 from whitepaper)
 
