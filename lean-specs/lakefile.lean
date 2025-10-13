@@ -31,6 +31,9 @@ lean_lib «Lemma24» where
 lean_lib «Lemma25» where
   -- Formal proof of Lemma 25
 
+lean_lib «Lemma27» where
+  -- Formal proof of Lemma 27 (correct notar voter exists)
+
 lean_lib «Algorithm1» where
   -- Votor event loop (Algorithm 1 from whitepaper)
 
