@@ -64,6 +64,12 @@ lean_lib «Lemma36» where
 lean_lib «Lemma37» where
   -- Formal proof of Lemma 37 (timeout skip-or-majority)
 
+lean_lib «Lemma38» where
+  -- Formal proof of Lemma 38 (notar-fallback certificates from correct majority)
+
+lean_lib «Lemma39» where
+  -- Formal proof of Lemma 39 (window certificates after timeouts)
+
 lean_lib «Algorithm1» where
   -- Votor event loop (Algorithm 1 from whitepaper)
 
