@@ -73,6 +73,9 @@ lean_lib «Lemma38» where
 lean_lib «Lemma39» where
   -- Formal proof of Lemma 39 (window certificates after timeouts)
 
+lean_lib «Lemma40» where
+  -- Formal proof of Lemma 40 (ParentReady after window timeouts)
+
 lean_lib «Algorithm1» where
   -- Votor event loop (Algorithm 1 from whitepaper)
 
