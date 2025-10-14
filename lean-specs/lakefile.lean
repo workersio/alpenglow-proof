@@ -58,6 +58,9 @@ lean_lib «Lemma33» where
 lean_lib «Lemma35» where
   -- Formal proof of Lemma 35 (votes after timeout)
 
+lean_lib «Lemma36» where
+  -- Formal proof of Lemma 36 (finalization requires notar majority)
+
 lean_lib «Algorithm1» where
   -- Votor event loop (Algorithm 1 from whitepaper)
 
