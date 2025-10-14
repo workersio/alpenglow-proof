@@ -52,6 +52,9 @@ lean_lib «Lemma31» where
 lean_lib «Lemma32» where
   -- Formal proof of Lemma 32 (cross-window finalization ancestry)
 
+lean_lib «Lemma33» where
+  -- Formal proof of Lemma 33 (timeout scheduling after ParentReady)
+
 lean_lib «Algorithm1» where
   -- Votor event loop (Algorithm 1 from whitepaper)
 
