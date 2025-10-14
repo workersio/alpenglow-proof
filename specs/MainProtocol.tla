@@ -2,6 +2,104 @@
 
 (* WP Sec. 2 overview + Sec. 1.5 model. Module encodes Votor + Rotor + Blokstor + Repair at the level of messages, slots, leader windows, and GST. Safety follows Sec. 2.9; liveness after GST follows Sec. 2.10. :contentReference[oaicite:1]{index=1} *)
 
+(***************************************************************************
+ * DESIGN DECISIONS AND MODELING ABSTRACTIONS
+ *
+ * This specification makes several intentional design choices to focus on
+ * consensus-layer correctness while keeping the model tractable:
+ *
+ * 1. OPTIMISTIC BLOCK CREATION (Algorithm 3, §2.7, p.26-27):
+ *    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ *    OMITTED: The protocol allows leaders to start building blocks
+ *    "optimistically" before ParentReady(s, hash(b_p)) fires, then
+ *    potentially switch parent once in the first slot of a window.
+ *
+ *    Our model: Conservatively requires ParentReady before block proposal
+ *    for all slots (see HonestProposeBlock guard line 184-185).
+ *
+ *    Rationale: This optimization reduces latency by ~1Δ in the common
+ *    case but does NOT affect safety properties. The protocol explicitly
+ *    states "affects latency only, not safety" (§2.7, Fig. 8 caption).
+ *    We prioritize clarity and verifiable safety over latency modeling.
+ *
+ * 2. DATA PLANE ABSTRACTION (Definitions 1-2, §2.1, p.14-15):
+ *    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ *    ABSTRACTED: Shred-level details, slice reconstruction, Merkle path
+ *    validation, and erasure-coded data pieces.
+ *
+ *    Our model: Works with complete blocks only. A block is either fully
+ *    available to a node or not (blockAvailability variable).
+ *
+ *    Rationale: Standard practice for control-plane consensus models.
+ *    The consensus algorithm reasons about complete blocks; shred-level
+ *    details are data-plane concerns that don't affect consensus safety.
+ *    Rotor.tla models the structural constraints (PS-P sampling, success
+ *    conditions) without byte-level details.
+ *
+ * 3. REPAIR MECHANISM (Algorithm 4, §2.8, p.27-28):
+ *    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ *    SIMPLIFIED: Repair is modeled as atomic block transfer from a
+ *    correct supplier to a node needing the block (RepairBlock action).
+ *
+ *    Our model: RepairBlock(v, block, supplier) instantly makes block
+ *    available to v if supplier has it and v needs it (NeedsBlockRepair).
+ *
+ *    Rationale: The detailed repair algorithm (concurrent slice fetches,
+ *    retry loops, getSliceCount/getSliceHash/getShred functions) affects
+ *    repair latency and bandwidth, not consensus safety. Nodes obtain
+ *    blocks they need for notarized/fast-finalized slots; the mechanism
+ *    is orthogonal to consensus correctness.
+ *
+ * 4. SINGLE EPOCH SCOPE (§1.5, p.8-9):
+ *    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ *    SCOPED: Model covers one epoch with a fixed validator set and stake
+ *    distribution.
+ *
+ *    Our model: Validators and StakeMap are constants. No validator
+ *    registration/unregistration, no stake updates, no epoch transitions.
+ *
+ *    Rationale: Single-epoch correctness is the foundational property.
+ *    Multi-epoch concerns (epoch boundaries, validator set changes, stake
+ *    re-weighting) are important but orthogonal to core consensus safety.
+ *    Standard approach: prove single-epoch safety first, then extend.
+ *
+ * 5. CRYPTOGRAPHIC PRIMITIVES (§1.6, p.12):
+ *    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ *    ASSUMED: Hash collision resistance, signature unforgeability,
+ *    aggregate signature correctness, Merkle proof soundness.
+ *
+ *    Our model: Hashes are abstract identifiers (UniqueBlockHashes
+ *    invariant), signatures are implicit via validator fields, aggregate
+ *    signatures via NoDupValidators constraint.
+ *
+ *    Rationale: Standard cryptographic assumptions. Models assume these
+ *    primitives work correctly; vulnerabilities in implementations are
+ *    out of scope for consensus-layer verification.
+ *
+ * IMPLICATIONS FOR VERIFICATION:
+ * ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ * SCOPE: This is a SAFETY-ONLY specification. All invariants check safety
+ * properties (Theorem 1, Lemmas 20-26). No temporal operators or fairness
+ * constraints are included.
+ *
+ * This model is suitable for:
+ *   ✓ Safety verification (Theorem 1: no conflicting finalizations)
+ *   ✓ Invariant checking (all safety Lemmas 20-26)
+ *   ✓ Certificate generation correctness
+ *   ✓ Vote storage and pool behavior
+ *   ✓ Dual voting path (fast 80%, slow 60%) correctness
+ *   ✓ Byzantine resilience up to protocol assumptions
+ *
+ * Additional work needed for:
+ *   • Liveness verification (Theorem 2: eventual finalization; requires
+ *     fairness constraints on message delivery, clock advancement, event
+ *     processing, and certificate propagation per §2.10)
+ *   • Latency bounds (requires optimistic start, slice pipelining)
+ *   • Bandwidth analysis (requires shred-level modeling)
+ *   • Repair latency (requires detailed Algorithm 4)
+ *   • Multi-epoch transitions
+ ***************************************************************************)
+
 EXTENDS Naturals, FiniteSets, Sequences, TLC,
         Messages, Blocks,
         Certificates, VoteStorage,
@@ -866,6 +964,19 @@ StateConstraint ==
            Cardinality(GetVotesForSlot(validators[v].pool, s)) <= NumValidators * 5
 (* CHANGE (soundness): removed “time <= GST + 10”. WP Sec. 1.5/3.4 give no global time cap; timeouts can be extended to restore liveness. A finite cap can mask liveness violations. :contentReference[oaicite:84]{index=84} *)
 
+
+ParentSlotConsistency ==
+    \A b \in blocks :
+        /\ ~IsGenesis(b)
+        => (\E p \in blocks :
+               /\ p.hash = b.parent
+               /\ p.slot < b.slot)
+(* WP Def. 3 (p.15): Block data M carries slot(parent(b)) and hash(parent(b)).
+   We store only hash(parent(b)) in the parent field, but this invariant ensures
+   that parent blocks exist in the blocks set with correct slot ordering.
+   Combined with UniqueBlockHashes, this guarantees parent slot is uniquely
+   recoverable: given b.parent hash, there exists exactly one block p with
+   p.hash = b.parent, and that block's slot p.slot < b.slot. *)
 Invariant ==
     /\ TypeInvariant
     /\ SafetyInvariant
@@ -902,6 +1013,7 @@ Invariant ==
     /\ TimeoutsInFuture
     /\ LocalClockMonotonic
     /\ UniqueBlockHashes(blocks)
+    /\ ParentSlotConsistency
     /\ AllBlocksValid(blocks)
     /\ (\A v \in Validators : UniqueBlocksPerSlot(finalized[v]))
     /\ FinalizedAncestorClosure
