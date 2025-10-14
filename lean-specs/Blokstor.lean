@@ -1,13 +1,24 @@
 /-
   Alpenglow Blokstor
+  ===================
 
-  This module formalizes Definition 10 (“Blokstor”) from the Alpenglow
-  whitepaper [p.19].  The Blokstor is the data structure responsible for
-  ingesting shreds produced by Rotor, enforcing the authenticity checks
-  spelled out in the definition, and materializing the first complete block
-  that arrives for each slot.  When such a block is assembled, Blokstor
-  produces the `Block` event containing the slot, the block hash, and the
-  hash of its parent as described in the whitepaper.
+  Ground truth reference: white-paper-origintal.pdf
+  - Definition 10 (Blokstor): page 19
+    • Admission checks on received shred (s, t, i, z_t, r_t, (d_i, π_i), σ_t)
+      1) no shred stored yet at key (s, t, i),
+      2) (d_i, π_i) is a valid path/witness for Merkle root r_t at index i,
+      3) σ_t is the signature of Slice(s, t, z_t, r_t) by leader(s).
+    • Protocol: “Blokstor emits the event Block(slot(b), hash(b), hash(parent(b)))
+      as input for Algorithm 1 when it receives the first complete block b for slot(b).”
+    • Repair (Section 2.8): Blokstor may additionally collect/store another block b;
+      if a block is finalized (Def. 14) only that block is stored; otherwise, before
+      SafeToNotar(slot(b), hash(b)) (Def. 16) is emitted, b must be stored.
+
+  This module formalizes the admission checks and the emitted event content from
+  Definition 10. We keep the cryptographic predicates abstract via the configuration
+  record, and we expose the “first complete block” event required by Algorithm 1.
+  Storage and timing obligations tied to Repair/SafeToNotar are orchestrated by
+  higher-level modules (Pool/Protocol) and are referenced here for completeness.
 -/
 
 import Basics
@@ -24,7 +35,7 @@ structure BlockEvent (Hash : Type u) where
   hash : Hash
   parentHash : Hash
   deriving Repr
--- [p.19, Def. 10: emitted event structure]
+-- [white-paper-origintal.pdf p.19, Def. 10: emitted event structure]
 
 /--
   Configuration data describing how Blokstor validates shreds and extracts
@@ -105,7 +116,7 @@ def canInsert
   bs.stored sh.s sh.t sh.i = none ∧
     cfg.validWitness sh ∧
     cfg.signedSlice sh
--- [p.19, Def. 10: admission criteria for shreds]
+-- [white-paper-origintal.pdf p.19, Def. 10: admission criteria bullets (1)–(3)]
 
 /--
   The `Block` event emitted for a slot, if Blokstor reconstructed the first
@@ -118,7 +129,7 @@ def eventForSlot (bs : Blokstor cfg) (s : Slot) :
     { slot := s
       hash := Block.hash b cfg.hasher
       parentHash := cfg.parentHash b }
--- [p.19, Def. 10: event content]
+-- [white-paper-origintal.pdf p.19, Def. 10 Protocol: Block(slot(b), hash(b), hash(parent(b)))]
 
 end Blokstor
 

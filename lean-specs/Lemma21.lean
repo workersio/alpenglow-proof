@@ -427,10 +427,10 @@ theorem lemma21_fast_finalization_exclusivity
 /-! ## Verification Status Summary
 
 **Main Results:**
-- ✅ lemma21_part_i_no_other_notarization: FULLY PROVEN (no sorry)
-- ✅ lemma21_part_ii_no_notar_fallback: FULLY PROVEN (no sorry)
-- ✅ lemma21_part_iii_no_skip_cert: FULLY PROVEN (no sorry)
-- ✅ lemma21_fast_finalization_exclusivity: FULLY PROVEN (no sorry)
+- lemma21_part_i_no_other_notarization: FULLY PROVEN (no sorry)
+- lemma21_part_ii_no_notar_fallback: FULLY PROVEN (no sorry)
+- lemma21_part_iii_no_skip_cert: FULLY PROVEN (no sorry)
+- lemma21_fast_finalization_exclusivity: FULLY PROVEN (no sorry)
 
 **Axioms Used:**
 
