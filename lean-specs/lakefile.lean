@@ -46,6 +46,12 @@ lean_lib «Lemma29» where
 lean_lib «Lemma30» where
   -- Formal proof of Lemma 30 (window ancestor coverage with support)
 
+lean_lib «Lemma31» where
+  -- Formal proof of Lemma 31
+
+lean_lib «Lemma32» where
+  -- Formal proof of Lemma 32 (cross-window finalization ancestry)
+
 lean_lib «Algorithm1» where
   -- Votor event loop (Algorithm 1 from whitepaper)
 
@@ -54,6 +60,9 @@ lean_lib «Algorithm2» where
 
 lean_lib «Blockstor» where
   -- Blockstor data structures and operations
+
+lean_lib «Theorem1_new» where
+  -- Formal proof of Theorem 1 (safety)
 
 @[default_target]
 lean_exe «alpenglow-specs» where

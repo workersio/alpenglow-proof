@@ -13,6 +13,7 @@ import Lemma23
 import Lemma27
 import Lemma28
 import Theorem1
+import Theorem1_new
 
 def main : IO Unit := do
   IO.println "Alpenglow Protocol Formal Verification"
