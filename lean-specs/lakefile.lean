@@ -31,11 +31,20 @@ lean_lib «Lemma24» where
 lean_lib «Lemma25» where
   -- Formal proof of Lemma 25
 
+lean_lib «Lemma26» where
+  -- Formal proof of Lemma 26 (slow-finalization property)
+
 lean_lib «Lemma27» where
   -- Formal proof of Lemma 27 (correct notar voter exists)
 
 lean_lib «Lemma28» where
   -- Formal proof of Lemma 28 (correct finalizer voter exists)
+
+lean_lib «Lemma29» where
+  -- Formal proof of Lemma 29 (parent support for notar-fallback votes)
+
+lean_lib «Lemma30» where
+  -- Formal proof of Lemma 30 (window ancestor coverage with support)
 
 lean_lib «Algorithm1» where
   -- Votor event loop (Algorithm 1 from whitepaper)

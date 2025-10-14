@@ -1,0 +1,176 @@
+ℹ [1614/1813] Replayed Lemma20
+info: Lemma20.lean:306:0: Alpenglow.Lemma20.tryNotar_requires_notVoted.{u_1} {Hash : Type u_1} [DecidableEq Hash] (cfg : VotorConfig)
+  (st : VotorState Hash) (blk : PendingBlock Hash) (st' : VotorState Hash) (broadcasts : List (Broadcast Hash)) :
+  tryNotar cfg st blk = some (st', broadcasts) → st.hasTag blk.slot SlotTag.voted = false
+info: Lemma20.lean:307:0: Alpenglow.Lemma20.tryNotar_broadcasts_notar.{u_1} {Hash : Type u_1} [DecidableEq Hash] (cfg : VotorConfig)
+  (st : VotorState Hash) (blk : PendingBlock Hash) (st' : VotorState Hash) (broadcasts : List (Broadcast Hash)) :
+  tryNotar cfg st blk = some (st', broadcasts) → HasNotarVote blk.slot broadcasts
+info: Lemma20.lean:308:0: Alpenglow.Lemma20.lemma20_core_exclusivity.{u_1} {Hash : Type u_1} [DecidableEq Hash] (cfg : VotorConfig)
+  (st : VotorState Hash) (s : Slot) (blk : PendingBlock Hash) :
+  blk.slot = s →
+    ∀ (st' : VotorState Hash) (bc : List (Broadcast Hash)),
+      tryNotar cfg st blk = some (st', bc) → st.hasTag s SlotTag.voted = false
+info: Lemma20.lean:309:0: Alpenglow.Lemma20.tryNotar_sets_voted.{u_1} {Hash : Type u_1} [DecidableEq Hash] (cfg : VotorConfig)
+  (st : VotorState Hash) (blk : PendingBlock Hash) (st' : VotorState Hash) (broadcasts : List (Broadcast Hash)) :
+  tryNotar cfg st blk = some (st', broadcasts) → st'.hasTag blk.slot SlotTag.voted = true
+info: Lemma20.lean:310:0: Alpenglow.Lemma20.trySkipWindow_slot_requires_notVoted.{u_1} {Hash : Type u_1} [DecidableEq Hash] (cfg : VotorConfig)
+  (s k : Slot) (st st' : VotorState Hash) (broadcasts : List (Broadcast Hash)) :
+  (st', broadcasts) = trySkipWindow cfg s st →
+    HasSkipVote k broadcasts → k ∈ cfg.windowSlots s → st.hasTag k SlotTag.voted = false
+info: Lemma20.lean:311:0: Alpenglow.Lemma20.trySkipWindow_sets_voted.{u_1} {Hash : Type u_1} [DecidableEq Hash] (cfg : VotorConfig) (s k : Slot)
+  (st st' : VotorState Hash) (broadcasts : List (Broadcast Hash)) :
+  (st', broadcasts) = trySkipWindow cfg s st →
+    HasSkipVote k broadcasts → k ∈ cfg.windowSlots s → st'.hasTag k SlotTag.voted = true
+info: Lemma20.lean:312:0: Alpenglow.Lemma20.sequential_exclusivity_notar_then_skip.{u_1} {Hash : Type u_1} [DecidableEq Hash] (cfg : VotorConfig)
+  (st : VotorState Hash) (s : Slot) (blk : PendingBlock Hash) :
+  blk.slot = s →
+    st.hasTag s SlotTag.voted = false →
+      ∀ (st_n : VotorState Hash) (bc_n : List (Broadcast Hash)),
+        tryNotar cfg st blk = some (st_n, bc_n) →
+          ∀ (st_s : VotorState Hash) (bc_s : List (Broadcast Hash)),
+            (st_s, bc_s) = trySkipWindow cfg s st_n → ¬HasSkipVote s bc_s
+ℹ [1615/1813] Replayed Lemma21
+info: Lemma21.lean:474:0: Alpenglow.Lemma21.lemma21_part_i_no_other_notarization.{u_1} {Hash : Type u_1} [DecidableEq Hash] (w : StakeWeight)
+  (correct : IsCorrect) (byzBound : ByzantineStakeBound w correct) (s : Slot) (b b' : Hash)
+  (votes : Finset (NotarVote Hash)) (h_fast : FastFinalized w s b votes) (h_diff : b ≠ b') :
+  stakeSum w (notarVotesFor s b' votes) < notarizationThreshold
+info: Lemma21.lean:475:0: Alpenglow.Lemma21.lemma21_part_ii_no_notar_fallback.{u_1} {Hash : Type u_1} [DecidableEq Hash] (w : StakeWeight)
+  (correct : IsCorrect) (byzBound : ByzantineStakeBound w correct) (s : Slot) (b b' : Hash)
+  (notarVotes : Finset (NotarVote Hash)) (skipVotes : Finset SkipVote) (h_fast : FastFinalized w s b notarVotes)
+  (h_diff : b ≠ b') :
+  stakeSum w (notarVotesFor s b' notarVotes) < fallbackThreshold ∧
+    stakeSum w (notarVotesFor s b' notarVotes ∪ skipVotesFor s skipVotes) < notarizationThreshold
+info: Lemma21.lean:476:0: Alpenglow.Lemma21.lemma21_part_iii_no_skip_cert.{u_1} {Hash : Type u_1} [DecidableEq Hash] (w : StakeWeight)
+  (correct : IsCorrect) (byzBound : ByzantineStakeBound w correct) (s : Slot) (b : Hash)
+  (notarVotes : Finset (NotarVote Hash)) (skipVotes : Finset SkipVote) (h_fast : FastFinalized w s b notarVotes) :
+  stakeSum w (skipVotesFor s skipVotes) < notarizationThreshold
+info: Lemma21.lean:477:0: Alpenglow.Lemma21.lemma21_fast_finalization_exclusivity.{u_1} {Hash : Type u_1} [DecidableEq Hash] (w : StakeWeight)
+  (correct : IsCorrect) (byzBound : ByzantineStakeBound w correct) (s : Slot) (b : Hash)
+  (notarVotes : Finset (NotarVote Hash)) (skipVotes : Finset SkipVote) (h_fast : FastFinalized w s b notarVotes) :
+  (∀ (b' : Hash), b' ≠ b → stakeSum w (notarVotesFor s b' notarVotes) < notarizationThreshold) ∧
+    (∀ (b' : Hash),
+        b' ≠ b →
+          stakeSum w (notarVotesFor s b' notarVotes) < fallbackThreshold ∧
+            stakeSum w (notarVotesFor s b' notarVotes ∪ skipVotesFor s skipVotes) < notarizationThreshold) ∧
+      stakeSum w (skipVotesFor s skipVotes) < notarizationThreshold
+⚠ [1616/1813] Replayed Lemma23
+warning: Lemma23.lean:93:0: automatically included section variable(s) unused in theorem `Alpenglow.Lemma23.node_in_filtered_correct_is_correct`:
+  [DecidableEq Hash]
+consider restructuring your `variable` declarations so that the variables are not in scope or explicitly omit them:
+  omit [DecidableEq Hash] in theorem ...
+
+Note: This linter can be disabled with `set_option linter.unusedSectionVars false`
+warning: Lemma23.lean:114:0: automatically included section variable(s) unused in theorem `Alpenglow.Lemma23.lemma23_no_other_block_notarized`:
+  [DecidableEq Hash]
+consider restructuring your `variable` declarations so that the variables are not in scope or explicitly omit them:
+  omit [DecidableEq Hash] in theorem ...
+
+Note: This linter can be disabled with `set_option linter.unusedSectionVars false`
+warning: Lemma23.lean:147:0: automatically included section variable(s) unused in theorem `Alpenglow.Lemma23.lemma23_no_other_block_notarized_complete`:
+  [DecidableEq Hash]
+consider restructuring your `variable` declarations so that the variables are not in scope or explicitly omit them:
+  omit [DecidableEq Hash] in theorem ...
+
+Note: This linter can be disabled with `set_option linter.unusedSectionVars false`
+warning: Lemma23.lean:185:5: unused variable `h_notarized`
+
+Note: This linter can be disabled with `set_option linter.unusedVariables false`
+warning: Lemma23.lean:211:0: automatically included section variable(s) unused in theorem `Alpenglow.Lemma23.notarized_has_correct_majority`:
+  [DecidableEq Hash]
+consider restructuring your `variable` declarations so that the variables are not in scope or explicitly omit them:
+  omit [DecidableEq Hash] in theorem ...
+
+Note: This linter can be disabled with `set_option linter.unusedSectionVars false`
+info: Lemma23.lean:339:0: Alpenglow.Lemma23.lemma23_no_other_block_notarized_complete.{u_1} {Hash : Type u_1} [DecidableEq Hash] (w : StakeWeight)
+  (correct : IsCorrect) (s : Slot) (b b' : Hash) (votes : Finset (NotarVote Hash))
+  (h_correct_maj : CorrectMajorityVoted w correct s b votes) (h_diff : b ≠ b') : ¬IsNotarized w s b' votes
+info: Lemma23.lean:340:0: Alpenglow.Lemma23.notarized_has_correct_majority.{u_1} {Hash : Type u_1} [DecidableEq Hash] (w : StakeWeight)
+  (correct : IsCorrect) (byzBound : Lemma21.ByzantineStakeBound w correct) (s : Slot) (b : Hash)
+  (votes : Finset (NotarVote Hash)) (h_notarized : IsNotarized w s b votes) :
+  stakeSum w (Finset.filter correct (notarVotesFor s b votes)) > 40
+info: Lemma23.lean:341:0: Alpenglow.Lemma23.notarization_implies_exclusivity.{u_1} {Hash : Type u_1} [DecidableEq Hash] (w : StakeWeight)
+  (correct : IsCorrect) (s : Slot) (b : Hash) (votes : Finset (NotarVote Hash)) (h_notarized : IsNotarized w s b votes)
+  (h_correct_maj : CorrectMajorityVoted w correct s b votes) (b' : Hash) : b' ≠ b → ¬IsNotarized w s b' votes
+info: Lemma23.lean:342:0: Alpenglow.Lemma23.at_most_one_notarization_per_slot.{u_1} {Hash : Type u_1} [DecidableEq Hash] (w : StakeWeight)
+  (correct : IsCorrect) (byzBound : Lemma21.ByzantineStakeBound w correct) (s : Slot) (b b' : Hash)
+  (votes : Finset (NotarVote Hash)) (h_b_notarized : IsNotarized w s b votes) (h_diff : b ≠ b') :
+  ¬IsNotarized w s b' votes
+⚠ [3092/3101] Replayed Lemma28
+warning: Lemma28.lean:74:0: automatically included section variable(s) unused in theorem `Alpenglow.Lemma28.BlockTopology.ancestor_parent`:
+  [DecidableEq Hash]
+consider restructuring your `variable` declarations so that the variables are not in scope or explicitly omit them:
+  omit [DecidableEq Hash] in theorem ...
+
+Note: This linter can be disabled with `set_option linter.unusedSectionVars false`
+warning: Lemma28.lean:79:0: automatically included section variable(s) unused in theorem `Alpenglow.Lemma28.BlockTopology.ancestor_trans`:
+  [DecidableEq Hash]
+consider restructuring your `variable` declarations so that the variables are not in scope or explicitly omit them:
+  omit [DecidableEq Hash] in theorem ...
+
+Note: This linter can be disabled with `set_option linter.unusedSectionVars false`
+warning: Lemma28.lean:174:10: try 'simp' instead of 'simpa'
+
+Note: This linter can be disabled with `set_option linter.unnecessarySimpa false`
+warning: Lemma28.lean:242:8: Try `simp at this` instead of `simpa using this`
+
+Note: This linter can be disabled with `set_option linter.unnecessarySimpa false`
+⚠ [3093/3101] Replayed Lemma29
+warning: Lemma29.lean:118:0: automatically included section variable(s) unused in theorem `Alpenglow.Lemma29.parent_support_for_fallback`:
+  [DecidableEq Hash]
+consider restructuring your `variable` declarations so that the variables are not in scope or explicitly omit them:
+  omit [DecidableEq Hash] in theorem ...
+
+Note: This linter can be disabled with `set_option linter.unusedSectionVars false`
+⚠ [3094/3101] Replayed Lemma26
+warning: Lemma26.lean:93:0: 'variables' has been replaced by 'variable' in lean 4
+warning: Lemma26.lean:93:11: unused variable `w`
+
+Note: This linter can be disabled with `set_option linter.unusedVariables false`
+warning: Lemma26.lean:93:29: unused variable `correct`
+
+Note: This linter can be disabled with `set_option linter.unusedVariables false`
+warning: Lemma26.lean:172:12: `le_of_not_lt` has been deprecated: Use `le_of_not_gt` instead
+⚠ [3095/3101] Replayed Lemma22
+warning: Lemma22.lean:96:8: automatically included section variable(s) unused in theorem `_private.Lemma22.0.Alpenglow.Lemma22.onlySkips_nil`:
+  [DecidableEq Hash]
+consider restructuring your `variable` declarations so that the variables are not in scope or explicitly omit them:
+  omit [DecidableEq Hash] in theorem ...
+
+Note: This linter can be disabled with `set_option linter.unusedSectionVars false`
+warning: Lemma22.lean:100:8: automatically included section variable(s) unused in theorem `_private.Lemma22.0.Alpenglow.Lemma22.onlySkips_append_skip`:
+  [DecidableEq Hash]
+consider restructuring your `variable` declarations so that the variables are not in scope or explicitly omit them:
+  omit [DecidableEq Hash] in theorem ...
+
+Note: This linter can be disabled with `set_option linter.unusedSectionVars false`
+info: Lemma22.lean:301:0: Alpenglow.Lemma22.lemma22_part_a_final_implies_no_prior_fallback.{u_1} {Hash : Type u_1} [DecidableEq Hash] :
+  ∀ (x : VotorConfig) (st : VotorState Hash) (s : Slot) (h : Hash) (h_final : Broadcast.final s ∈ (tryFinal st s h).2),
+    st.hasTag s SlotTag.badWindow = false
+info: Lemma22.lean:302:0: Alpenglow.Lemma22.lemma22_part_d_fallback_blocks_future_final.{u_1} {Hash : Type u_1} [DecidableEq Hash]
+  (cfg : VotorConfig) (st : VotorState Hash) (s : Slot) (h h' : Hash)
+  (h_fallback : Broadcast.notarFallback s h ∈ (handleSafeToNotar cfg st s h).2)
+  (h_final_attempt : Broadcast.final s ∈ (tryFinal (handleSafeToNotar cfg st s h).1 s h').2) : False
+info: Lemma22.lean:303:0: Alpenglow.Lemma22.lemma22_finalization_fallback_mutual_exclusion.{u_1} {Hash : Type u_1} [DecidableEq Hash]
+  (cfg : VotorConfig) (st : VotorState Hash) (s : Slot) (h h' : Hash) :
+  (Broadcast.notarFallback s h ∈ (handleSafeToNotar cfg st s h).2 →
+      Broadcast.final s ∉ (tryFinal (handleSafeToNotar cfg st s h).1 s h').2) ∧
+    (Broadcast.final s ∈ (tryFinal st s h).2 → st.hasTag s SlotTag.badWindow = false)
+⚠ [6180/6186] Built Lemma30 (7.0s)
+warning: Lemma30.lean:87:10: try 'simp' instead of 'simpa'
+
+Note: This linter can be disabled with `set_option linter.unnecessarySimpa false`
+warning: Lemma30.lean:155:0: automatically included section variable(s) unused in theorem `Alpenglow.Lemma30.majority_support_parent`:
+  [DecidableEq Hash]
+consider restructuring your `variable` declarations so that the variables are not in scope or explicitly omit them:
+  omit [DecidableEq Hash] in theorem ...
+
+Note: This linter can be disabled with `set_option linter.unusedSectionVars false`
+warning: Lemma30.lean:254:10: try 'simp' instead of 'simpa'
+
+Note: This linter can be disabled with `set_option linter.unnecessarySimpa false`
+✔ [6181/6186] Built Lemma30:c.o (282ms)
+✔ [6182/6186] Built Lemmas (2.1s)
+✔ [6183/6186] Built Lemmas:c.o (90ms)
+✔ [6184/6186] Built Main (1.6s)
+✔ [6186/6186] Built «alpenglow-specs»:exe (2.1s)
+Build completed successfully (6186 jobs).
