@@ -232,6 +232,11 @@ HandleParentReady(validator, slot, parentHash) ==
                 IF remainingSlots = {} THEN val
                 ELSE
                     LET s == CHOOSE x \in remainingSlots : TRUE
+                        \* Definition 17 (p.23): Timeout(i) = clock() + Δ_timeout + (i - s_window + 1) · Δ_block
+                        \* Variable mapping: s (TLA+) = i (protocol), first (TLA+) = s_window (protocol)
+                        \* Example: Window starts at first=5, scheduling slot s=7:
+                        \*   timeout = clock + Δ_timeout + (7-5+1)·Δ_block = clock + Δ_timeout + 3·Δ_block ✓
+                        \*   (Slot 7 is 3rd slot in window, so timeout is 3 block-times after ParentReady)
                         timeout == val.clock + DeltaTimeout + ((s - first + 1) * DeltaBlock)
                     IN SetTimeouts[[val EXCEPT !.timeouts[s] = timeout], remainingSlots \ {s}]
             \* Note: WindowSlots already ranges over production slots; no extra \cap Slots needed
