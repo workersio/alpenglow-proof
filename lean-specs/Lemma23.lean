@@ -281,10 +281,10 @@ theorem at_most_one_notarization_per_slot
 /-! ## Verification Status Summary
 
 **Main Results:**
-- ✅ **lemma23_no_other_block_notarized_complete**: FULLY PROVEN (main theorem)
-- ✅ **notarized_has_correct_majority**: FULLY PROVEN (no axiom - proved from stake partition)
-- ✅ **notarization_implies_exclusivity**: FULLY PROVEN (corollary)
-- ✅ **at_most_one_notarization_per_slot**: FULLY PROVEN (main result)
+- **lemma23_no_other_block_notarized_complete**: FULLY PROVEN (main theorem)
+- **notarized_has_correct_majority**: FULLY PROVEN (no axiom - proved from stake partition)
+- **notarization_implies_exclusivity**: FULLY PROVEN (corollary)
+- **at_most_one_notarization_per_slot**: FULLY PROVEN (main result)
 
 **Axioms Used:**
 

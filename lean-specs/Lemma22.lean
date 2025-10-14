@@ -282,13 +282,13 @@ theorem lemma22_finalization_fallback_mutual_exclusion
 /-! ## Verification Status Summary
 
 **Main Results:**
-- ✅ tryFinal_sets_itsOver
-- ✅ tryFinal_requires_no_badWindow
-- ✅ cast_notar_fallback_sets_badWindow
-- ✅ cast_skip_fallback_sets_badWindow
-- ✅ lemma22_part_a_final_implies_no_prior_fallback
-- ✅ lemma22_part_d_fallback_blocks_future_final
-- ✅ lemma22_finalization_fallback_mutual_exclusion
+- tryFinal_sets_itsOver
+- tryFinal_requires_no_badWindow
+- cast_notar_fallback_sets_badWindow
+- cast_skip_fallback_sets_badWindow
+- lemma22_part_a_final_implies_no_prior_fallback
+- lemma22_part_d_fallback_blocks_future_final
+- lemma22_finalization_fallback_mutual_exclusion
 
 **Supporting Lemmas:**
 - `Lemma20.addTag_has_tag` (axiom from Lemma 20) ensures inserted tags are present.
