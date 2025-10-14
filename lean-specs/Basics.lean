@@ -5,7 +5,7 @@ import Mathlib.Data.Finset.Basic
 namespace Alpenglow
 
 universe u v w x
--- Natural-number indices as in Defs. 1–3 (p.13–15)
+-- Natural-number indices as in Defs. 1–3 (p.14–15)
 abbrev Slot := Nat         -- s
 abbrev SliceIndex := Nat   -- t
 abbrev ShredIndex := Nat   -- i
@@ -62,7 +62,7 @@ def root (xs : List Hash) : Hash :=
   rootAux H leaves.length leaves
 end Merkle
 
-/-- Definition 1 (shred), §2.1, p.13–14.
+/-- Definition 1 (shred), §2.1, p.14.
     Tuple: (s, t, i, z_t, r_t, (d_i, π_i), σ_t)
     - s: slot, t: slice index, i: shred index (all ∈ ℕ)
     - z: last-slice flag z_t ∈ {0,1}
@@ -94,7 +94,7 @@ structure Slice (Message : Type u) (Hash : Type v) (Signature : Type w) where
 namespace Slice
 variable {Message : Type u} {Hash : Type v} {Signature : Type w}
 
-/-- Header part of a slice: Slice(s, t, z_t, r_t) (p.13–14). -/
+/-- Header part of a slice: Slice(s, t, z_t, r_t) (p.14). -/
 def header (sl : Slice Message Hash Signature) :
     Slot × SliceIndex × Bool × Hash :=
   (sl.s, sl.t, sl.z, sl.r)
@@ -151,7 +151,7 @@ end Block
 /-– Node identifier (proof-of-stake node id). -/
 abbrev NodeId := Nat
 
-/-– Signature scheme placeholder (Section 1.6: aggregate signatures on p.18). -/
+/-– Signature scheme placeholder (Section 1.6: aggregate signatures on p.12). -/
 class SigScheme (Signature : Type*) (Hash : Type*) (NodeId : Type*) where
   verify : NodeId → Hash → Signature → Prop
 
