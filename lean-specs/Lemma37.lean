@@ -93,4 +93,3 @@ theorem timeout_skip_or_majority
 
 end Lemma37
 end Alpenglow
-
