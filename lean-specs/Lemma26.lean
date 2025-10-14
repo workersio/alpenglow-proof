@@ -90,7 +90,7 @@ axiom complement_stake_lt_threshold
   sets introduced in Lemma 21 and Lemma 23.
 -/
 
-variables {w : StakeWeight} {correct : IsCorrect}
+variable {w : StakeWeight} {correct : IsCorrect}
 
 /-- **Lemma 26 (Slow-Finalization Property).**
 
@@ -169,7 +169,7 @@ theorem slow_finalization_exclusivity
     by_contra h_ge
     have h_is_notarized : IsNotarized w s b' notarVotes := by
       unfold IsNotarized notarizationThreshold
-      exact le_of_not_lt h_ge
+      exact not_lt.mp h_ge
     exact h_no_conflict h_is_notarized
   · -- (ii) No notar-fallback certificate on a different block.
     intro b' h_diff
