@@ -1,0 +1,116 @@
+\documentclass[a4paper]{article}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage[english]{babel}
+
+%\usepackage[urw-garamond,expert,uppercase=upright,greeklowercase=upright]{mathdesign}
+%\usepackage[osf,swashQ]{garamondx}
+%
+%\usepackage{microtype}
+
+\usepackage[textwidth=17cm, textheight=27cm]{geometry}
+\usepackage{booktabs, xspace}
+\usepackage{amsmath,amsfonts,amssymb}
+
+\newcommand{\lean}[1]{{\tt #1}}
+\newcommand{\nv}{\textit{new\_name} }
+\newcommand{\nom}{\textit{name} }
+\newcommand{\expr}{\textit{expr} }
+\newcommand{\proposition}{\textit{proposition} }
+\newcommand{\hyp}{\textit{hyp}\xspace}
+
+% Original authors (Lean 3 version): Patrick Massot and Johan Commelin
+% https://github.com/leanprover-community/lftcm2020/blob/master/lean-tactics.tex
+
+\usepackage{makecell}
+\usepackage{xcolor}
+
+\begin{document}
+\pagestyle{empty}
+\begin{center}
+ \large\textsc{Lean 4 Cheatsheet}
+\end{center}
+
+In the following tables,
+\nom always refers to a name already known to Lean
+while \nv is a new name provided by the user;
+\expr means an expression,
+for example the name of an object in the context,
+an arithmetic expression that is a function of such objects,
+a hypothesis in the context,
+or a lemma applied to any of these;
+\proposition is an expression of the type \lean{Prop} (e.g. \lean{0 < x})
+When one of these words appears twice in the same cell,
+the appearances do not designate the same name or
+the same expression.
+
+\begin{center}
+\setlength\tabcolsep{5mm}
+\def\arraystretch{1.3}
+\begin{tabular}{@{}lll@{}}
+  \toprule
+  Logical symbol & Appears in goal & Appears in hypothesis \\
+  \midrule
+ $\exists$ (there exists) & \makecell[lt]{\lean{use} \expr} & \makecell[lt]{
+\lean{obtain} $\langle$\nv, \nv$\!\!\rangle$ \lean{:=} \expr
+} \\
+ $\forall$ (for all) & \lean{intro} \nv & \lean{apply} \expr or \lean{specialize} \nom \expr  \\
+ $\lnot$ (not) & \lean{intro} \nv & \lean{apply} \expr or \lean{specialize} \nom \expr  \\
+ $\to$ (implies) & \lean{intro} \nv & \lean{apply} \expr or \lean{specialize} \nom \expr \\
+ $\leftrightarrow$ (if and only if)~~ & \lean{constructor}  & \lean{rw [}\expr\lean{]} or \lean{rw [←} \expr\lean{]}\\
+ $\land$ (and) & \lean{constructor} & \makecell[lt]{
+\lean{obtain} $\langle$\nv, \nv$\!\!\rangle$ \lean{:=} \expr
+} \\
+ $\lor$ (or) & \makecell[lt]{\lean{left} or \lean{right}} & \makecell[lt]{
+\lean{cases} \expr \lean{with} \\
+\lean{| inl }\nv \lean{=> ...} \\
+\lean{| inr }\nv \lean{=> ...}
+} \\
+  \bottomrule
+\end{tabular}
+\end{center}
+
+\medskip
+In the left-hand column of the following table,
+the parts in parentheses are optional.
+The effect of these parts is also in parentheses in the right-hand column.
+
+\begin{center}
+\setlength\tabcolsep{5mm}
+\def\arraystretch{1.3}
+\begin{tabular}{@{}lp{10cm}@{}}
+  \toprule
+  Tactic & Effect \\
+  \midrule
+  \lean{exact} \expr & the goal is satisfied by \expr \\
+  \lean{refine} \expr & similar to \lean{exact} but allows to leave any number of \lean{?\_} in the \expr to denote holes that will be filled later (creates goals) \\
+  \makecell[lt]{\lean{convert} \expr} & prove the goal by transforming it to an existing fact \expr and create goals for propositions used in the transformation that were not proved automatically \\
+  \makecell[lt]{\lean{convert\_to} \proposition} & transform the goal into the goal \proposition and create additional goals for propositions used in the transformation that were not proved automatically \\
+  \makecell[lt]{\lean{have} \nv : \proposition} & introduce a name \nv asserting that \proposition is true; at the same time, create and focus a goal for \proposition \\
+  \lean{unfold} \nom (\lean{at} \hyp) & unfold the definition \nom in the goal
+  (or in the hypothesis \hyp) \\
+  \lean{rw [} (\lean{←}) \expr\lean{]} (\lean{at} \hyp) & in the goal (or in the
+  hypothesis \hyp), replace (all occurrences of) the left-hand side
+  (or the right-hand side, if \lean{←} is present)
+  of the equality or equivalence \expr by its other side \\
+  \lean{rw [} \expr\lean{,} \expr\lean{,} \expr\lean{]} (\lean{at} \hyp) & do more rewrites in the given order (any number of \lean{←} possible) \\
+  \lean{calc} & start a proof by calculation (uses transitivity) \\
+  \lean{by\_cases} \nv : \proposition & split the proof into two cases
+  depending on whether \proposition is true or false,
+  using \nv as name for this hypothesis \\
+  \makecell[lt]{\lean{exfalso}} & apply the rule ``False implies anything'' a.k.a.~``ex falso quodlibet'' (replaces the current goal by \lean{False}) \\
+  \makecell[lt]{\lean{by\_contra} \nv} & start a proof by contradiction,
+  using \nv as name for the hypothesis that is the negation of the goal \\
+  \makecell[lt]{\lean{push\_neg} (\lean{at} \hyp)} & push negations in the goal
+  (or in the hypothesis \hyp); e.g.~change $\neg\;\forall$ x, \proposition to $\exists$ x, $\neg\;$\proposition \\
+  \makecell[lt]{\lean{linarith}} & prove the goal by a linear combination of hypotheses \\
+  \makecell[lt]{\lean{ring}} & prove the goal by combining the axioms of a (semi)ring \\
+  \makecell[lt]{\lean{simp} (\lean{at} \hyp)} & simplify the goal (or the hypothesis \hyp) using standard equalities \\
+  \makecell[lt]{\lean{exact?}} & search for a single existing lemma which closes the goal, also using local hypotheses \\
+  \makecell[lt]{\lean{apply?}} & search for lemmas whose conclusion matches the goal; suggest those that may be used with \lean{apply} or \lean{refine} \\
+  \makecell[lt]{\lean{aesop}} & try to solve the goal using magic \\
+  \bottomrule
+\end{tabular}
+\end{center}
+
+\end{document}

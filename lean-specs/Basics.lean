@@ -1,10 +1,12 @@
 import Mathlib.Data.Nat.Basic
 import Mathlib.Data.List.Basic
 import Mathlib.Data.Finset.Basic
+import Mathlib.Algebra.BigOperators.Group.Finset.Basic
 
 namespace Alpenglow
 
 universe u v w x
+
 -- Natural-number indices as in Defs. 1–3 (p.14–15)
 abbrev Slot := Nat         -- s
 abbrev SliceIndex := Nat   -- t
@@ -48,18 +50,22 @@ def padLeavesToPow2 (xs : List Hash) : List Hash :=
   | [x]            => [x]
   | x :: y :: rest => H.branch x y :: level rest
 
-/-- Fuelled fold-up to the root. -/
-def rootAux : Nat → List Hash → Hash
-  | _, []                    => H.leafLabel H.padding
-  | _, [x]                   => x
-  | 0, _ :: _ :: _           => H.leafLabel H.padding
-  | Nat.succ fuel, xs@(_::_::_) =>
-      rootAux fuel (level H xs)
+/-- Fuelled fold-up to the root. Returns `none` if fuel is exhausted.
+    With leaves padded to a power of two, using `leaves.length` as fuel
+    is sufficient, so `none` should be unreachable in `root`. -/
+def rootAux : Nat → List Hash → Option Hash
+  | _, []                      => some (H.leafLabel H.padding)
+  | _, [x]                     => some x
+  | 0, _ :: _ :: _             => none
+  | Nat.succ fuel, xs@(_::_::_) => rootAux fuel (level H xs)
 
 /-- Block/slice root = Merkle root of padded leaves (Defs. 2 & 4, p.14–15). -/
 def root (xs : List Hash) : Hash :=
   let leaves := padLeavesToPow2 H xs
-  rootAux H leaves.length leaves
+  match rootAux H leaves.length leaves with
+  | some r => r
+  | none   => H.leafLabel H.padding   -- Unreachable if fuel is sufficient
+
 end Merkle
 
 /-- Definition 1 (shred), §2.1, p.14.
@@ -92,6 +98,7 @@ structure Slice (Message : Type u) (Hash : Type v) (Signature : Type w) where
   deriving Repr
 
 namespace Slice
+
 variable {Message : Type u} {Hash : Type v} {Signature : Type w}
 
 /-- Header part of a slice: Slice(s, t, z_t, r_t) (p.14). -/
@@ -110,6 +117,7 @@ structure Block (Message : Type u) (Hash : Type v) (Signature : Type w) where
   deriving Repr
 
 namespace Block
+
 variable {Message : Type u} {Hash : Type v} {Signature : Type w}
 
 @[simp] def sliceCount (b : Block Message Hash Signature) : Nat :=
@@ -146,6 +154,7 @@ def valid (b : Block Message Hash Signature) : Prop :=
   b.allSlicesInSlot ∧
   b.hasTerminalSlice ∧
   ∀ sl, sl ∈ b.slices.dropLast → sl.z = false
+
 end Block
 
 /-– Node identifier (proof-of-stake node id). -/
@@ -172,6 +181,7 @@ structure BlockNode
   body   : Block Message Hash Signature
 
 namespace BlockNode
+
 /-– Parent relation: c.parentId = p.id and p.s < c.s (Def. 5, p.15). -/
 def isParentOf (p c : Header Hash) : Prop :=
   c.parentId = some p.id ∧ p.s < c.s
@@ -182,6 +192,7 @@ inductive IsAncestor (root : Header Hash) : Header Hash → Prop
 | step  : ∀ {mid child}, IsAncestor root mid → isParentOf (Hash:=Hash) mid child → IsAncestor root child
 
 def IsDescendant (child root : Header Hash) : Prop := IsAncestor (Hash:=Hash) root child
+
 end BlockNode
 
 /-- Stake model placeholder; weights drive thresholds (Assumption 1, p.4). -/
@@ -193,6 +204,27 @@ def Correct := NodeId → Prop
 
 structure AdversaryBound (SP : StakeProfile) (correct : Correct) where
   byzStakeBounded : Prop
+
+namespace StakeProfile
+
+/-- All node identifiers are assumed to be enumerated as `0, 1, ..., N-1`. -/
+@[simp] def allNodes (sp : StakeProfile) : Finset NodeId :=
+  Finset.range sp.N
+
+/-- Total stake over all nodes `0..N-1`. -/
+@[simp] def totalStake (sp : StakeProfile) : Nat :=
+  Finset.sum sp.allNodes sp.weight
+
+/-- Stake weight of a given voter set. -/
+@[simp] def weightOf (sp : StakeProfile) (voters : Finset NodeId) : Nat :=
+  Finset.sum (voters ∩ sp.allNodes) sp.weight
+
+/-- Threshold check: voted/total ≥ num/den (with `den ≠ 0`). -/
+def meetsFraction (sp : StakeProfile) (voters : Finset NodeId)
+    (num den : Nat) : Prop :=
+  den ≠ 0 ∧ (weightOf sp voters) * den ≥ num * (totalStake sp)
+
+end StakeProfile
 
 inductive VoteType | notar | notarFallback | skip | skipFallback | final
 deriving DecidableEq, Repr
@@ -212,7 +244,11 @@ structure Vote (Hash : Type _) (Signature : Type _) where
 
 /-– Certificate (Table 6, §2.4, p.20): aggregation of votes for a key.
     `kind` denotes the underlying aggregated vote type; thresholds (e.g., 80% fast vs. 60%)
-    are captured via `thrOK` and by usage in Def. 14. -/
+    are captured via `thrOK` and by usage in Def. 14.
+    Note: The whitepaper includes aggregate signatures for certificates (Section 1.6).
+    We intentionally omit the aggregate signature field here to keep `Basics` focused on
+    structural definitions; cryptographic details can be modeled via `SigScheme` in higher layers. -/
+
 structure Certificate (Hash : Type _) where
   kind      : VoteType
   key       : VoteKey Hash
@@ -230,7 +266,9 @@ structure Pool (Hash : Type v) : Type (max 1 v) where
   certs : VoteType → VoteKey Hash → Option (Certificate Hash)
 
 namespace Pool
+
 variable {Hash : Type v}
+
 /-– Notarization certificate lookup (Table 6). -/
 def notarCert? (P : Pool Hash) (s : Slot) (b : BlockId Hash) :
     Option (NotarCert Hash) :=
@@ -246,6 +284,7 @@ def finalCert? (P : Pool Hash) (s : Slot) :
 /-- Fast-finalization (Def. 14, §2.4/§2.6): notar certificate satisfying the 80% threshold. -/
 def fastFinalCert (P : Pool Hash) (s : Slot) (b : BlockId Hash) : Prop :=
   ∃ C, P.notarCert? s b = some C ∧ C.thrOK
+
 end Pool
 
 /-– Events (Defs. 15–16, §2.4–§2.6, p.21–22). -/
@@ -300,4 +339,5 @@ structure View (Message : Type u) (Hash : Type v) (Signature : Type w) : Type (m
   closedUnderParents :
     ∀ {c pid}, c ∈ headers → c.parentId = some pid →
       ∃ p, p ∈ headers ∧ p.id = pid ∧ p.s < c.s
+
 end Alpenglow
