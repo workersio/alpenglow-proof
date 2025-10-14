@@ -20,6 +20,7 @@ import Lemma35
 import Lemma37
 import Lemma38
 import Lemma39
+import Corollary34
 
 def main : IO Unit := do
   IO.println "Alpenglow Protocol Formal Verification"

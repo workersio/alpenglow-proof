@@ -55,6 +55,9 @@ lean_lib «Lemma32» where
 lean_lib «Lemma33» where
   -- Formal proof of Lemma 33 (timeout scheduling after ParentReady)
 
+lean_lib «Corollary34» where
+  -- Formal proof of Corollary 34 (ParentReady witness for scheduled timeouts)
+
 lean_lib «Lemma35» where
   -- Formal proof of Lemma 35 (votes after timeout)
 
