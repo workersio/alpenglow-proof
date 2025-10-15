@@ -31,6 +31,7 @@ namespace Alpenglow
 namespace Lemma23
 
 variable {Hash : Type _} [DecidableEq Hash]
+set_option linter.unusedSectionVars false
 
 -- Reuse stake infrastructure from Lemma21
 open Lemma21 (StakeWeight totalStake stakeSum IsCorrect correctNodes byzantineNodes)
@@ -120,7 +121,6 @@ theorem notarization_implies_exclusivity
     (w : StakeWeight) (correct : IsCorrect)
     (s : Slot) (b : Hash)
     (votes : Finset (NotarVote Hash))
-    (h_notarized : IsNotarized w s b votes)
     (h_correct_maj : CorrectMajorityVoted w correct s b votes) :
     ∀ b', b' ≠ b → ¬(IsNotarized w s b' votes) := by
   intro b' h_diff

@@ -16,7 +16,7 @@
   finalizes its blocks again.
 -/
 
-import Theorem1_new
+import Theorem1
 import Theorem2
 
 open Classical
@@ -24,7 +24,7 @@ open Classical
 namespace Alpenglow
 namespace StandstillRecovery
 
-open Theorem1_new
+open Theorem1
 open Theorem2
 
 section

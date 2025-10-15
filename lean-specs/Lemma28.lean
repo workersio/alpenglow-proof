@@ -38,6 +38,7 @@ namespace Lemma28
 open Lemma21
 
 variable {Hash : Type _} [DecidableEq Hash]
+set_option linter.unusedSectionVars false
 
 /-! Block topology: abstracts parent pointers and slot indices for ancestry reasoning. -/
 

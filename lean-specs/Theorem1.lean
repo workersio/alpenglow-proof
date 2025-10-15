@@ -1,174 +1,144 @@
 /-
-  Alpenglow Protocol Theorem 1: Safety
+  Theorem 1 (Safety) — Finalization implies ancestry
+  ===================================================
 
-  This module contains the formalization of Theorem 1 (Safety) from the
-  Alpenglow whitepaper, along with all required definitions and lemmas.
+  This module assembles the supporting lemmas developed in Lemmas 20–32 to
+  mechanize Theorem 1 from the Alpenglow whitepaper:
 
-  Reference: "Solana Alpenglow Consensus" White Paper v1.1, July 22, 2025
+  - If a correct node finalizes block `b` in slot `s` and any correct node
+  - later finalizes block `b'` in slot `s' ≥ s`, then `b'` is a descendant of
+  - `b`.
+
+  The proof works with the abstract voting model used across the lemmas.  We
+  package the necessary global assumptions (stake distribution, vote sets,
+  leader windows, and block topology) into `SafetyContext`, and record the
+  invariants that any finalized block must satisfy in `FinalizedWitness`.
+  Under these hypotheses the ancestry claim follows by a case split on whether
+  the two slots belong to the same leader window (Lemma 31) or not (Lemma 32).
 -/
 
-import Mathlib.Data.Real.Basic
-import Mathlib.Data.Finset.Basic
-import Mathlib.Algebra.BigOperators.Group.Finset.Basic
 import Basics
+import Algorithm2
+import Lemma21
+import Lemma28
+import Lemma29
+import Lemma31
+import Lemma32
 
-open BigOperators
+open Classical
 
 namespace Alpenglow
+namespace Theorem1
 
-variable {Message : Type u} {Hash : Type v} {Signature : Type w}
+open Lemma21 (StakeWeight IsCorrect stakeSum notarizationThreshold notarVotesFor skipVotesFor)
+open Lemma29 (NotarFallbackVote notarFallbackVotesFor)
+open Lemma31 (SlotExclusive)
+open Lemma28.BlockTopology
 
-/-! Assumptions -/
+variable {Hash : Type _} [DecidableEq Hash]
 
-/- Helper: Byzantine stake is less than 20% of total stake -/
-def ByzantineStakeLessThan20 (_SP : StakeProfile) (_correct : Correct) : Prop :=
-  -- Abstract: Byzantine nodes control < 20% of total stake
-  -- In a concrete implementation: ∑(v where ¬correct v) SP.weight v < 20% * ∑v SP.weight v
-  True
+/- Global safety context bundling all proof-wide assumptions. -/
+structure SafetyContext (Hash : Type _) where
+  cfg           : VotorConfig
+  topo          : Lemma28.BlockTopology Hash
+  stakeWeight   : StakeWeight
+  correct       : IsCorrect
+  byzBound      : Lemma21.ByzantineStakeBound stakeWeight correct
+  notarVotes    : Finset (Lemma21.NotarVote Hash)
+  fallbackVotes : Finset (NotarFallbackVote Hash)
+  skipVotes     : Finset Lemma21.SkipVote
 
-/- Helper: Correct stake is more than 80% of total stake -/
-def CorrectStakeMoreThan80 (_SP : StakeProfile) (_correct : Correct) : Prop :=
-  -- Abstract: Correct nodes control > 80% of total stake
-  -- In a concrete implementation: ∑(v where correct v) SP.weight v > 80% * ∑v SP.weight v
-  True
+namespace SafetyContext
 
-/- Assumption 1 (fault tolerance) from p.4:
-    "Byzantine nodes control less than 20% of the stake.
-    The remaining nodes controlling more than 80% of stake are correct."
+/- Witness that a specific block/slot pair has been finalized by a correct node. -/
+structure FinalizedWitness {Hash : Type _} (ctx : SafetyContext Hash) where
+  block         : Hash
+  slot          : Slot
+  slot_eq       : ctx.topo.slotOf block = slot
+  notarized     :
+    stakeSum ctx.stakeWeight (notarVotesFor slot block ctx.notarVotes) ≥ notarizationThreshold
+  slotExclusive :
+    SlotExclusive ctx.topo ctx.stakeWeight ctx.notarVotes ctx.fallbackVotes slot block
+  skipBound     :
+    stakeSum ctx.stakeWeight (skipVotesFor slot ctx.skipVotes) < notarizationThreshold
 
-    Whitepaper reference: p.4, Section 1.2
+end SafetyContext
+
+open SafetyContext
+
+/-
+  In any safety context, if `bᵢ` finalizes in slot `sᵢ` and `b_k` finalizes in slot
+  `s_k ≥ sᵢ`, then `b_k` is a descendant of `bᵢ`.
 -/
-structure Assumption1 (SP : StakeProfile) (correct : Correct) : Prop where
-  /- Byzantine nodes control less than 20% of total stake -/
-  byzantineStakeLessThan20 : ByzantineStakeLessThan20 SP correct
-  /- Correct nodes control more than 80% of total stake -/
-  correctStakeMoreThan80 : CorrectStakeMoreThan80 SP correct
+theorem safety_descendant
+    {Hash : Type _} [DecidableEq Hash]
+    (ctx : SafetyContext Hash)
+    (fi fk : FinalizedWitness ctx)
+    (h_order : fi.slot ≤ fk.slot) :
+    IsAncestor ctx.topo fi.block fk.block := by
+  classical
+  -- Detect whether the slots coincide.
+  by_cases h_slots : fi.slot = fk.slot
+  · -- Same-slot finalizations must reference the identical block.
+    have h_slot_bk : ctx.topo.slotOf fk.block = fi.slot := by
+      simpa [h_slots] using fk.slot_eq
+    have h_ge :
+        stakeSum ctx.stakeWeight (notarVotesFor fi.slot fk.block ctx.notarVotes) ≥
+          notarizationThreshold := by
+      simpa [h_slots] using fk.notarized
+    have h_block_eq : fk.block = fi.block := by
+      by_contra h_diff
+      have h_forbid := fi.slotExclusive h_slot_bk h_diff
+      exact (not_lt_of_ge h_ge) h_forbid.1
+    have h_refl : IsAncestor ctx.topo fi.block fi.block :=
+      IsAncestor.refl (topo := ctx.topo)
+    simpa [h_block_eq] using h_refl
+  · -- Slots differ; derive the strict inequality needed for case analysis.
+    have h_lt : fi.slot < fk.slot := lt_of_le_of_ne h_order h_slots
+    by_cases h_window : fi.slot ∈ ctx.cfg.windowSlots fk.slot
+    · -- Same leader window: apply Lemma 31.
+      have h_cert :
+          stakeSum ctx.stakeWeight (notarVotesFor fk.slot fk.block ctx.notarVotes) ≥
+            notarizationThreshold ∨
+            stakeSum ctx.stakeWeight
+                (notarVotesFor fk.slot fk.block ctx.notarVotes ∪
+                  notarFallbackVotesFor fk.slot fk.block ctx.fallbackVotes) ≥
+              notarizationThreshold :=
+        Or.inl fk.notarized
+      exact
+        Lemma31.descendant_of_finalized_window_block
+          (cfg := ctx.cfg)
+          (topo := ctx.topo)
+          (w := ctx.stakeWeight)
+          (correct := ctx.correct)
+          (byzBound := ctx.byzBound)
+          (notarVotes := ctx.notarVotes)
+          (fallbackVotes := ctx.fallbackVotes)
+          (b_i := fi.block) (b_k := fk.block)
+          (s_i := fi.slot) (s_k := fk.slot)
+          fi.slot_eq fk.slot_eq h_window h_order
+          fi.notarized fi.slotExclusive h_cert
+    · -- Different windows: invoke Lemma 32.
+      have h_cert :
+          stakeSum ctx.stakeWeight (notarVotesFor fk.slot fk.block ctx.notarVotes) ≥
+            notarizationThreshold ∨
+            stakeSum ctx.stakeWeight
+                (notarVotesFor fk.slot fk.block ctx.notarVotes ∪
+                  notarFallbackVotesFor fk.slot fk.block ctx.fallbackVotes) ≥
+              notarizationThreshold :=
+        Or.inl fk.notarized
+      exact
+        Lemma32.descendant_across_windows
+          (cfg := ctx.cfg)
+          (topo := ctx.topo)
+          (w := ctx.stakeWeight)
+          (correct := ctx.correct)
+          (byzBound := ctx.byzBound)
+          (notarVotes := ctx.notarVotes)
+          (fallbackVotes := ctx.fallbackVotes)
+          (skipVotes := ctx.skipVotes)
+          fi.slot_eq fk.slot_eq h_lt
+          fi.notarized fi.slotExclusive fi.skipBound h_cert
 
-/-! ## Core Definitions -/
-
-/- Definition 11 (certificate vote thresholds) and Table 6 from p.19-20:
-
-    Certificate vote thresholds for different certificate types:
-    - Fast-Finalization: ≥ 80%
-    - Notarization: ≥ 60%
-    - Notar-Fallback: ≥ 60%
-    - Skip: ≥ 60%
-    - Finalization: ≥ 60%
-
-    Whitepaper reference: p.19-20, Definition 11, Table 6
--/
-def CertificateThreshold : VoteType → ℚ
-  | .notar => 60 / 100        -- Notarization: 60%
-  | .notarFallback => 60 / 100 -- Notar-Fallback: 60%
-  | .skip => 60 / 100         -- Skip: 60%
-  | .skipFallback => 60 / 100 -- Skip-Fallback
-  | .final => 60 / 100        -- Slot finalization: 60%
-
-/- Fast-finalization threshold is 80% -/
-def FastFinalizationThreshold : ℚ := 80 / 100
-
-/- Definition 12 (storing votes in Pool) from p.20:
-    "Pool stores received votes for every slot and every node as follows:
-    - The first received notarization or skip vote,
-    - up to 3 received notar-fallback votes,
-    - the first received skip-fallback vote, and
-    - the first received finalization vote."
-
-    Whitepaper reference: p.20, Definition 12
--/
-structure PoolVoteStorage (Hash : Type v) where
-  firstNotarOrSkip : Option (Vote Hash Signature)
-  notarFallbackVotes : List (Vote Hash Signature)  -- up to 3
-  notarFallbackLimit : notarFallbackVotes.length ≤ 3
-  firstSkipFallback : Option (Vote Hash Signature)
-  firstFinal : Option (Vote Hash Signature)
-
-/- Definition 13 (certificates in Pool) from p.20-21:
-    "Pool generates, stores and broadcasts certificates:
-    - When enough votes (see Table 6) are received, the respective certificate is generated.
-    - When a received or constructed certificate is newly added to Pool,
-      the certificate is broadcast to all other nodes.
-    - A single (received or constructed) certificate of each type corresponding
-      to the given block/slot is stored in Pool."
-
-    Whitepaper reference: p.20-21, Definition 13
--/
-def CertificateValid (_SP : StakeProfile) (cert : Certificate Hash) (vt : VoteType) : Prop :=
-  -- Abstract stake comparison: certificate voters have enough stake
-  -- Concrete: (∑v ∈ cert.voters, SP.weight v) / (∑v, SP.weight v) ≥ CertificateThreshold vt
-  cert.thrOK ∧ cert.kind = vt
-
-/- Fast-finalization certificate requires 80% stake and is block-scoped. -/
-def FastFinalizationCertValid (_SP : StakeProfile) (cert : Certificate Hash) : Prop :=
-  -- Abstract: certificate voters control at least 80% of stake
-  -- Concrete: (∑v ∈ cert.voters, SP.weight v) / (∑v, SP.weight v) ≥ 80/100
-  cert.thrOK ∧ cert.kind = VoteType.notar
-
-/- **Definition 14 (finalization)** from p.21:
-    "We have two ways to finalize a block:
-    - If a finalization certificate on slot s is in Pool, the unique notarized block
-      in slot s is finalized (we call this slow-finalized).
-    - If a fast-finalization certificate on block b is in Pool, the block b is finalized
-      (fast-finalized).
-    Whenever a block is finalized (slow or fast), all ancestors of the block are
-    finalized first."
-
-    Whitepaper reference: p.21, Definition 14
--/
-inductive BlockFinalized (P : Pool Hash) (SP : StakeProfile) : Header Hash → Prop
-  | fast (h : Header Hash) :
-      (∃ cert : Certificate Hash,
-        P.certs VoteType.notar (VoteKey.block h.s h.id) = some cert ∧
-        FastFinalizationCertValid SP cert) →
-      BlockFinalized P SP h
-  | slow (h : Header Hash) :
-      (∃ cert : Certificate Hash,
-        P.certs VoteType.final (VoteKey.slot h.s) = some cert ∧
-        CertificateValid SP cert VoteType.final) →
-      (∃ notarCert : Certificate Hash,
-        P.certs VoteType.notar (VoteKey.block h.s h.id) = some notarCert) →
-      BlockFinalized P SP h
-
-/- Definition 15 (Pool events) from p.21:
-    "The following events are emitted as input for Algorithm 1:
-    - BlockNotarized(slot(b), hash(b)): Pool holds a notarization certificate for block b.
-    - ParentReady(s, hash(b)): Slot s is the first of its leader window, and Pool holds a
-      notarization or notar-fallback certificate for a previous block b, and skip certificates
-      for every slot s' since b, i.e., for slot(b) < s' < s."
-
-    Whitepaper reference: p.21, Definition 15
--/
-inductive PoolEvent (Hash : Type v)
-  | BlockNotarized (s : Slot) (blockHash : Hash)
-  | ParentReady (s : Slot) (parentHash : Hash)
-
-/- **Definition 16 (fallback events)** from p.21-22:
-    "Consider block b in slot s = slot(b). By notar(b) denote the cumulative stake of nodes
-    whose notarization votes for block b are in Pool, and by skip(s) denote the cumulative
-    stake of nodes whose skip votes for slot s are in Pool.
-
-    The following events are emitted as input for Algorithm 1:
-    - SafeToNotar(s, hash(b)): The event is only issued if the node voted in slot s already,
-      but not to notarize b. Moreover:
-      notar(b) ≥ 40% or (skip(s) + notar(b) ≥ 60% and notar(b) ≥ 20%).
-      If s is the first slot in the leader window, the event is emitted. Otherwise, block b
-      is retrieved in the repair procedure first, in order to identify the parent of the block.
-      Then, the event is emitted when Pool contains the notar-fallback certificate for the
-      parent as well.
-    - SafeToSkip(s): The event is only issued if the node voted in slot s already, but not
-      to skip s. Moreover:
-      skip(s) + Σ_b notar(b) - max_b notar(b) ≥ 40%."
-
-    Whitepaper reference: p.21-22, Definition 16
--/
-structure SafeToNotarCondition (SP : StakeProfile) (P : Pool Hash) (s : Slot) (b : Hash) : Prop where
-  /- Either notar(b) ≥ 40% or (skip(s) + notar(b) ≥ 60% and notar(b) ≥ 20%) -/
-  notarStake40OrMixed : True  -- Abstract condition from Definition 16
-
-structure SafeToSkipCondition (SP : StakeProfile) (P : Pool Hash) (s : Slot) : Prop where
-  /- skip(s) + Σ_b notar(b) - max_b notar(b) ≥ 40% -/
-  skipPlusNotarMinus40 : True  -- Abstract condition from Definition 16
-
-/-! ## Window Properties -/
-
+end Theorem1
 end Alpenglow

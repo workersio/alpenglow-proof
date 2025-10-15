@@ -32,6 +32,8 @@ namespace Alpenglow
 namespace Lemma22
 
 variable {Hash : Type _} [DecidableEq Hash]
+set_option linter.unusedSectionVars false
+
 
 /-! ## State Invariant Properties -/
 

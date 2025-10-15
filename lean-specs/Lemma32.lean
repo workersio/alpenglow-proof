@@ -55,6 +55,7 @@ open Lemma31
 open BlockTopology
 
 variable {Hash : Type _} [DecidableEq Hash]
+set_option linter.unusedSectionVars false
 
 /-
   ## ParentReady Axioms

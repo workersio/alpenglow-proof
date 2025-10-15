@@ -35,6 +35,7 @@ open Lemma21
 open Lemma23
 
 variable {Hash : Type _} [DecidableEq Hash]
+set_option linter.unusedSectionVars false
 
 /-
   Represents the set S of correct nodes with ≥80% stake mentioned in the

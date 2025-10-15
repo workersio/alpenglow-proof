@@ -7,9 +7,6 @@ package «alpenglow-specs» where
 lean_lib «Basics» where
   -- Basic data structures for Alpenglow protocol
 
-lean_lib «Theorem1» where
-  -- add library configuration options here
-
 lean_lib «Lemmas» where
   -- Detailed proofs of Lemmas 20, 23, 24, 27-31
 
@@ -94,8 +91,8 @@ lean_lib «Algorithm2» where
 lean_lib «Blockstor» where
   -- Blockstor data structures and operations
 
-lean_lib «Theorem1_new» where
-  -- Formal proof of Theorem 1 (safety)
+lean_lib «Theorem1» where
+  -- add library configuration options here
 
 lean_lib «Theorem2» where
   -- Formal proof of Theorem 2 (liveness)

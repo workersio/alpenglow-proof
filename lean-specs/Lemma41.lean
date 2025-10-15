@@ -41,6 +41,7 @@ open Lemma37
 open Lemma40
 
 variable {Hash : Type _} [DecidableEq Hash]
+set_option linter.unusedSectionVars false
 
 /- Timeout witnesses for every slot in the leader window headed by `s`. -/
 abbrev WindowTimeouts

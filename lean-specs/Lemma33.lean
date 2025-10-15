@@ -32,6 +32,7 @@ namespace Alpenglow
 namespace Lemma33
 
 variable {Hash : Type _} [DecidableEq Hash]
+set_option linter.unusedSectionVars false
 
 /-
   List-fold helpers
