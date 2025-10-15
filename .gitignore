@@ -1,0 +1,20 @@
+# TLA+ generated files
+*.old
+*.out
+states/
+
+# Test files
+test.*
+simple.cfg
+
+# IDE and tool files
+.vscode/
+.claude/
+
+# Java
+*.class
+hyper-tla
+.tlacache
+tlapm
+lean-specs/.lake/
+CLAUDE.md
