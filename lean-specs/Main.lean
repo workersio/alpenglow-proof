@@ -24,6 +24,7 @@ import Lemma40
 import Lemma41
 import Lemma42
 import Corollary34
+import Theorem2
 
 def main : IO Unit := do
   IO.println "Alpenglow Protocol Formal Verification"

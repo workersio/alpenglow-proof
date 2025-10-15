@@ -94,6 +94,9 @@ lean_lib «Blockstor» where
 lean_lib «Theorem1_new» where
   -- Formal proof of Theorem 1 (safety)
 
+lean_lib «Theorem2» where
+  -- Formal proof of Theorem 2 (liveness)
+
 @[default_target]
 lean_exe «alpenglow-specs» where
   root := `Main
