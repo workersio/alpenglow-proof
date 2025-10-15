@@ -26,6 +26,7 @@ import Lemma28
 import Lemma29
 import Lemma39
 import Lemma40
+import Lemma41
 import Lemma42
 
 open Classical
@@ -69,6 +70,9 @@ structure WindowContext (Hash : Type _) [DecidableEq Hash] where
   Δ          : Nat
   afterGST   : Prop
   afterGST_holds : afterGST
+  parent_ready_timeout_propagation :
+      Lemma42.parentReadyTimeoutPropagation cfg topo stakeWeight correct Δ afterGST
+        notarVotes fallbackVotes skipVotes head
   rotor_no_skip :
       ∀ {t}, t ∈ cfg.windowSlots head →
         stakeSum stakeWeight (skipVotesFor t skipVotes) < notarizationThreshold
@@ -113,6 +117,7 @@ theorem liveness_window_blocks_finalized
       (notarVotes := ctx.notarVotes)
       (fallbackVotes := ctx.fallbackVotes)
       (skipVotes := ctx.skipVotes)
+      (propagate := ctx.parent_ready_timeout_propagation)
       (h_afterGST := ctx.afterGST_holds)
       (first_node_parent_ready := ctx.parent_ready)
   -- Extract concrete timeout witnesses from the non-emptiness packaging.

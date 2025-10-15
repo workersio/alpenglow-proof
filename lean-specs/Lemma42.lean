@@ -50,17 +50,18 @@ open Lemma41
 /--
   After GST, the certificates supporting a `ParentReady` witness spread to all
   correct nodes within the network latency bound `Δ`.  Consequently every slot
-  in the window headed by `s` acquires a timeout witness.
+  in the window headed by `s` acquires a timeout witness.  We expose this white
+  paper assumption as an explicit hypothesis.
 -/
-axiom parentReady_propagates_timeouts_afterGST
+abbrev parentReadyTimeoutPropagation
     (cfg : VotorConfig) (topo : BlockTopology Hash)
     (w : StakeWeight) (correct : IsCorrect)
     (Δ : Nat) (afterGST : Prop)
     (notarVotes : Finset (NotarVote Hash))
     (fallbackVotes : Finset (NotarFallbackVote Hash))
     (skipVotes : Finset SkipVote)
-    {s : Slot} :
-    afterGST →
+    (s : Slot) :=
+  afterGST →
     ParentReadyWitness cfg topo w notarVotes fallbackVotes skipVotes s →
       WindowTimeouts cfg w correct notarVotes skipVotes s
 
@@ -82,6 +83,9 @@ theorem parentReady_and_timeouts_after_first_timeout
     (fallbackVotes : Finset (NotarFallbackVote Hash))
     (skipVotes : Finset SkipVote)
     {s : Slot}
+    (propagate :
+      parentReadyTimeoutPropagation cfg topo w correct Δ afterGST
+        notarVotes fallbackVotes skipVotes s)
     (h_afterGST : afterGST)
     (first_node_parent_ready :
       ParentReadyWitness cfg topo w notarVotes fallbackVotes skipVotes s) :
@@ -91,11 +95,7 @@ theorem parentReady_and_timeouts_after_first_timeout
   -- The propagation axiom supplies timeout witnesses for the entire window.
   have h_timeouts :
       WindowTimeouts cfg w correct notarVotes skipVotes s :=
-    parentReady_propagates_timeouts_afterGST
-      (cfg := cfg) (topo := topo) (w := w) (correct := correct)
-      (Δ := Δ) (afterGST := afterGST)
-      (notarVotes := notarVotes) (fallbackVotes := fallbackVotes)
-      (skipVotes := skipVotes) h_afterGST first_node_parent_ready
+    propagate h_afterGST first_node_parent_ready
   refine ⟨first_node_parent_ready, ?_⟩
   intro t ht
   exact ⟨h_timeouts (t := t) ht⟩
