@@ -42,7 +42,7 @@ open Lemma28
 open Lemma29
 open Lemma30
 
-variable {Hash : Type _} [DecidableEq Hash]
+-- variable {Hash : Type _} [DecidableEq Hash]
 
 /-
   ## SafeToNotar Behaviour Axioms

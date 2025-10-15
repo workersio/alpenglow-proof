@@ -79,6 +79,9 @@ lean_lib «Lemma40» where
 lean_lib «Lemma41» where
   -- Formal proof of Lemma 41 (Global Timeout Scheduling)
 
+lean_lib «Lemma42» where
+  -- Formal proof of Lemma 42 (ParentReady propagation after GST)
+
 lean_lib «Algorithm1» where
   -- Votor event loop (Algorithm 1 from whitepaper)
 

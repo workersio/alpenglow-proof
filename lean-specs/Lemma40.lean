@@ -49,7 +49,7 @@ open Lemma29
 open Lemma37
 open Lemma39
 
-variable {Hash : Type _} [DecidableEq Hash]
+-- variable {Hash : Type _} [DecidableEq Hash]
 
 /-
   ## ParentReady Witness (Definition 15)
