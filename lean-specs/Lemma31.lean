@@ -1,32 +1,24 @@
 /-
-  Lemma 31 (Same-Window Finalization Ancestry)
-  ============================================
+  Lemma 31: Same-Window Finalization Ancestry
 
-  We mechanize Lemma 31 from the Alpenglow whitepaper (p.32):
+  Reference: Alpenglow whitepaper, page 32
 
-  > Suppose some correct node finalizes a block `bᵢ` and `b_k` is a block in the
-  > same leader window with `slot(bᵢ) ≤ slot(b_k)`.  If any correct node observes
-  > a notarization or notar-fallback certificate for `b_k`, then `b_k` is a
-  > descendant of `bᵢ`.
+  Statement: Suppose some correct node finalizes a block b_i and b_k is a block
+  in the same leader window with slot(b_i) <= slot(b_k). If any correct node
+  observes a notarization or notar-fallback certificate for b_k, then b_k is a
+  descendant of b_i.
 
-  **Intuition.**
-  Finalization of `bᵢ` rules out any competing certificates in slot `slot(bᵢ)`
-  (Lemmas 21 and 26) and, by Lemma 25, `bᵢ` itself is notarized.  We reason by
-  contradiction: assume some certified block `b_k` in the same leader window is
-  *not* a descendant of `bᵢ`.  Lemma 30 lifts the certificate on `b_k` to every
-  earlier slot within the window, providing either a correct notar-fallback
-  voter or a >40% correct notar majority for the ancestor `b_j` in slot
-  `slot(bᵢ)+1`.  Following the parent pointer from `b_j` yields a block `bᵢ'`
-  that lives in slot `slot(bᵢ)` but differs from `bᵢ`.
+  Proof (from whitepaper):
+  Assume b_k is not a descendant of b_i. By Lemmas 21 and 26, slot(b_i) ≠ slot(b_k),
+  so slot(b_i) < slot(b_k). By Lemma 30, there is an ancestor b_j of b_k in slot
+  slot(b_i) + 1 with support (either >40% correct notarization votes or a correct
+  notar-fallback vote). The parent b'_i of b_j lives in slot(b_i) but differs from b_i.
 
-  * If the support for `b_j` contains a correct notar-fallback vote, the guard
-    from Lemma 29 ensures a notarization-or-fallback certificate already exists
-    for `bᵢ'`, contradicting finalization exclusivity in slot `slot(bᵢ)`.
-  * Otherwise, >40% correct stake notarized `b_j`, and Lemma 28 pushes these
-    votes to `bᵢ'`.  Applying Lemma 23 with `bᵢ'` and the known notarization of
-    `bᵢ` again contradicts exclusivity in slot `slot(bᵢ)`.
+  If a correct node cast a notar-fallback vote for b_j, by Definition 16, b'_i is
+  notarized or notarized-fallback, contradicting Lemmas 21 or 26.
 
-  Hence every certified block in the window must extend the finalized block.
+  Otherwise, if correct nodes with >40% stake cast notarization votes for b_j, by
+  Lemma 28, these nodes also cast notarization votes for b'_i, contradicting Lemma 23.
 -/
 
 import Mathlib.Data.Nat.Basic
@@ -50,8 +42,9 @@ open BlockTopology
 
 variable {Hash : Type _} [DecidableEq Hash]
 
-/-- Slot exclusivity for finalized blocks: no competing block in slot `s`
-    admits either a notarization certificate or a notar-fallback certificate. -/
+/-- Slot exclusivity: no competing block in slot s can achieve notarization
+    or notar-fallback certification. This captures the exclusivity property from
+    Lemmas 21 and 26. -/
 def SlotExclusive
     (topo : BlockTopology Hash)
     (w : StakeWeight)
@@ -65,13 +58,8 @@ def SlotExclusive
             notarFallbackVotesFor s b fallbackVotes) <
         notarizationThreshold
 
-/-- **Lemma 31 (Finalization implies window ancestry).**
-
-    Let `bᵢ` be a finalized block in slot `sᵢ`, and suppose there exists a
-    notarization or notar-fallback certificate for some block `b_k` located in
-    slot `s_k` of the same leader window with `sᵢ ≤ s_k`.  If the finalized slot
-    is exclusive (no competing certificates) and `bᵢ` is notarized, then `b_k`
-    must be a descendant of `bᵢ`. -/
+/-- Lemma 31: If b_i is finalized and b_k has a certificate in the same leader
+    window with slot(b_i) <= slot(b_k), then b_k descends from b_i. -/
 theorem descendant_of_finalized_window_block
     (cfg : VotorConfig) (topo : BlockTopology Hash)
     (w : StakeWeight) (correct : IsCorrect)
@@ -96,9 +84,8 @@ theorem descendant_of_finalized_window_block
     IsAncestor topo b_i b_k := by
   classical
 
-  -- Certified blocks in the window provide supported ancestors via Lemma 30.
-  -- This lemma states that for any slot s' in the window of s_k with s' ≤ s_k,
-  -- there exists an ancestor block with support.
+  -- Apply Lemma 30: any slot in the window has an ancestor of b_k with support
+  -- (either >40% correct notarization votes or a correct notar-fallback vote).
   have h_window_support :
       ∀ {s'}, s' ∈ cfg.windowSlots s_k → s' ≤ s_k →
         ∃ b', topo.slotOf b' = s' ∧ BlockTopology.IsAncestor topo b' b_k ∧
@@ -109,16 +96,15 @@ theorem descendant_of_finalized_window_block
       (fallbackVotes := fallbackVotes)
       (s := s_k) (b := b_k) h_slot_k h_cert_k
 
-  -- Assume towards contradiction that `b_k` does not descend from `bᵢ`.
+  -- Proof by contradiction: assume b_k is not a descendant of b_i.
   by_contra h_not_descends
 
-  -- A non-descendant must differ from `bᵢ`.
   have h_bk_ne_bi : b_k ≠ b_i := by
     intro h_eq
     apply h_not_descends
     simpa [h_eq] using (IsAncestor.refl (topo := topo) (b := b_i))
 
-  -- The finalized slot cannot equal `s_k`; otherwise, exclusivity contradicts the certificate.
+  -- By Lemmas 21 and 26: slot(b_i) ≠ slot(b_k), otherwise exclusivity is violated.
   have h_si_ne_sk : s_i ≠ s_k := by
     intro h_eq
     have h_slot_bk_si : topo.slotOf b_k = s_i := by
@@ -138,19 +124,17 @@ theorem descendant_of_finalized_window_block
           exact h_union_ge
         exact (not_lt_of_ge h_union_ge') h_union_lt
 
-  -- Numerical: `sᵢ < s_k`.
   have h_si_lt_sk : s_i < s_k := lt_of_le_of_ne h_slot_le h_si_ne_sk
 
-  -- The successor slot remains in the same leader window.
   have h_succ_mem :
       Nat.succ s_i ∈ cfg.windowSlots s_k :=
     window_succ_closed (cfg := cfg) (s := s_k) h_window h_si_lt_sk
 
-  -- An ancestor `b_j` exists in slot `sᵢ + 1` with window support.
+  -- Obtain b_j: the ancestor of b_k in slot(b_i) + 1 with support (Lemma 30).
   obtain ⟨b_j, h_slot_bj, h_anc_bj, h_support_bj⟩ :=
     h_window_support h_succ_mem (Nat.succ_le_of_lt h_si_lt_sk)
 
-  -- Parent information for `b_j`.
+  -- Extract parent of b_j, which lives in slot(b_i).
   have h_first_le_si :
       cfg.windowFirstSlot s_k ≤ s_i :=
     window_first_le (cfg := cfg) (s := s_k) h_window
@@ -166,7 +150,7 @@ theorem descendant_of_finalized_window_block
       topo.slotOf parent = s_i := by
     simpa [Nat.pred_succ] using h_slot_parent
 
-  -- If the parent were `bᵢ`, then ancestry would follow immediately.
+  -- This parent b'_i differs from b_i (else b_k would descend from b_i).
   have h_parent_ne_bi : parent ≠ b_i := by
     intro h_eq
     apply h_not_descends
@@ -178,10 +162,12 @@ theorem descendant_of_finalized_window_block
       ancestor_trans (topo := topo) h_anc_parent_bj h_anc_bj
     simpa [h_eq] using h_anc_parent_bk
 
-  -- Decide between the support alternatives for `b_j`.
+  -- Case analysis on support for b_j (from Lemma 30).
   cases h_support_bj with
   | inl h_majority =>
-      -- Majority support propagates to the parent, which contradicts `bᵢ`'s notarization.
+      -- Case 1: >40% correct nodes notarized b_j.
+      -- By Lemma 28, these votes propagate to parent b'_i.
+      -- This contradicts Lemma 23 since both b_i and b'_i would be notarized.
       have h_parent_majority :
           stakeSum w
               ((notarVotesFor s_i parent notarVotes).filter correct) >
@@ -206,9 +192,10 @@ theorem descendant_of_finalized_window_block
           h_parent_correct_majority h_parent_ne_bi
       exact h_no_notar h_notarized_bi
   | inr h_fallback =>
-      -- A correct notar-fallback vote on `b_j` implies a certificate for the parent.
+      -- Case 2: A correct node cast a notar-fallback vote for b_j.
+      -- By Definition 16 (via Lemma 29), parent b'_i is notarized or notarized-fallback.
+      -- This contradicts slot exclusivity (Lemmas 21 or 26).
       obtain ⟨v, h_v_corr, h_v_vote⟩ := h_fallback
-      -- All slots in the window share the same first slot; reuse the earlier inequality.
       have h_first_eq :
           cfg.windowFirstSlot (Nat.succ s_i) =
             cfg.windowFirstSlot s_k :=

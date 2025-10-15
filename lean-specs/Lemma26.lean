@@ -2,37 +2,31 @@
   Lemma 26 (Slow-Finalization Property)
   =====================================
 
-  We mechanize Lemma 26 from the Alpenglow whitepaper (p.30):
+  Reference: Alpenglow whitepaper p.30, lines 872-880
 
-  > If a block `b` is slow-finalized then:
-  > (i)  No other block `b'` in the same slot can be notarized.
-  > (ii) No other block `b'` in the same slot can be notarized-fallback.
-  > (iii) There cannot exist a skip certificate for the same slot.
+  Statement: If a block b is slow-finalized then:
+    (i)   no other block b' in the same slot can be notarized,
+    (ii)  no other block b' in the same slot can be notarized-fallback,
+    (iii) there cannot exist a skip certificate for the same slot.
 
-  **Whitepaper Proof Sketch:**
-  A slow-finalization certificate on slot `s` requires 60% of stake to cast a
-  finalization vote, and by assumption byzantine nodes control < 20% stake.
-  Therefore, a set `V` of correct nodes with > 40% stake finalizes slot `s`.
-  The guard of Algorithm 2, line 19, ensures that every correct node in `V`
-  already emitted a notarization vote for the same block `b`.  Lemmas 20 and 22
-  guarantee that these correct nodes have not cast any conflicting votes in the
-  same slot.  Since every certificate threshold is 60%, the remaining < 60% stake
-  cannot produce a notarization / notar-fallback / skip certificate contradicting
-  `b`.
+  Whitepaper proof:
+  Suppose some correct node slow-finalized block b in slot s. By Definition 14,
+  nodes holding at least 60% of stake cast finalization votes in slot s. Since
+  byzantine nodes hold < 20% stake, a set V of correct nodes holding > 40% stake
+  cast finalization votes. By Algorithm 2 line 19, nodes in V observed a
+  notarization certificate for some block. By Lemma 24, all nodes in V observed
+  the same certificate for block b, so all nodes in V previously cast a
+  notarization vote for b. By Lemmas 20 and 22, nodes in V cast no other votes
+  in slot s besides the notarization vote for b and the finalization vote. Since
+  V holds > 40% stake and every certificate requires >= 60% stake, no skip
+  certificate or certificate on another block b' != b can be produced.
 
-  **Lean Strategy:**
-  We parameterize over abstract stake accounting (borrowed from Lemma 21) and
-  assume:
-
-  * a finalization certificate witnessing 60% stake in `finalVotes`,
-  * correct final voters lie inside the notarization voters for `b`,
-  * byzantine stake is bounded by 20%.
-
-  From these assumptions we derive that correct notarization voters for `b`
-  hold > 40% stake (`CorrectMajorityVoted`), enabling reuse of Lemma 23.  The
-  exclusivity axioms exported from Lemma 20 ensure that this majority never
-  appears in competing vote sets, and a mild stake arithmetic axiom bounds the
-  remaining stake strictly below the 60% certificate threshold.
+  Implementation approach:
+  We establish that correct final voters form a majority (> 40% stake) that
+  all voted to notarize b. This lets us invoke Lemma 23 for notarization
+  exclusivity. Vote exclusivity from Lemma 20 ensures this majority cannot
+  appear in competing vote sets, and stake arithmetic ensures the remaining
+  stake is insufficient (< 60%) to form any conflicting certificate.
 -/
 
 import Mathlib.Data.Finset.Basic
@@ -51,14 +45,13 @@ open Lemma23
 variable {Hash : Type _} [DecidableEq Hash]
 
 /-
-  ## Stake Arithmetic Axioms
+  Stake Arithmetic Axioms
 
-  The following axioms abstract simple arithmetic facts about stake accounting.
-  They are mild strengthening of the axioms already assumed in Lemma 21.
+  These axioms capture basic arithmetic properties needed for the proof.
+  See AXIOMS_TO_PROVE.md for whitepaper references.
 -/
 
-/-- If a set of voters accumulates 60% total stake and byzantine nodes control
-    < 20%, then correct voters inside the set contribute > 40% stake. -/
+/-- Given 60% stake and < 20% byzantine, correct voters contribute > 40%. -/
 axiom final_votes_imply_correct_majority
     (w : StakeWeight) (correct : IsCorrect)
     (byzBound : ByzantineStakeBound w correct)
@@ -66,14 +59,13 @@ axiom final_votes_imply_correct_majority
     stakeSum w finalVotes >= notarizationThreshold →
     stakeSum w (finalVotes.filter correct) > fallbackThreshold
 
-/-- Monotonicity of `stakeSum`: enlarging the voter set cannot decrease stake. -/
+/-- Monotonicity: enlarging a voter set cannot decrease total stake. -/
 axiom stakeSum_subset_le
     (w : StakeWeight) (A B : Finset NodeId) :
     (∀ ⦃n⦄, n ∈ A → n ∈ B) →
     stakeSum w A ≤ stakeSum w B
 
-/-- If correct voters control > 40% stake, any disjoint set of other voters
-    holds strictly less than the 60% certificate threshold. -/
+/-- If correct voters hold > 40%, any disjoint set holds < 60% (certificate threshold). -/
 axiom complement_stake_lt_threshold
     (w : StakeWeight) (correct : IsCorrect)
     (majority : Finset NodeId) :
@@ -84,25 +76,16 @@ axiom complement_stake_lt_threshold
       stakeSum w others < notarizationThreshold
 
 /-
-  ## Slow-Finalization Exclusivity
-
-  The main lemma mirrors the whitepaper statement using the abstract vote
-  sets introduced in Lemma 21 and Lemma 23.
+  Main Theorem
 -/
 
 variable {w : StakeWeight} {correct : IsCorrect}
 
-/-- **Lemma 26 (Slow-Finalization Property).**
-
-    Suppose slot `s` carries a slow-finalization certificate (60% stake in
-    `finalVotes`) for block `b`, and every correct final voter already cast a
-    notarization vote for `b`.  Then:
-
-    1. No other block in slot `s` reaches notarization threshold.
-    2. No other block in slot `s` can accumulate enough stake (notar or skip)
-       to trigger a notar-fallback certificate.
-    3. Slot `s` cannot accumulate enough skip votes to form a skip certificate.
--/
+/-- Lemma 26: If slot s has a slow-finalization certificate for block b, and
+    correct final voters already cast notarization votes for b, then:
+    (i)   no other block in slot s reaches notarization threshold,
+    (ii)  no other block in slot s can form a notar-fallback certificate,
+    (iii) slot s cannot form a skip certificate. -/
 theorem slow_finalization_exclusivity
     (byzBound : ByzantineStakeBound w correct)
     (s : Slot) (b : Hash)
@@ -113,38 +96,30 @@ theorem slow_finalization_exclusivity
     (h_final_notar :
       ∀ ⦃n⦄, n ∈ finalVotes.filter correct →
         n ∈ (notarVotesFor s b notarVotes).filter correct) :
-    -- (i) No other block can be notarized
     (∀ b', b' ≠ b →
         stakeSum w (notarVotesFor s b' notarVotes) < notarizationThreshold) ∧
-    -- (ii) No other block can reach notar-fallback threshold
     (∀ b', b' ≠ b →
         stakeSum w (notarVotesFor s b' notarVotes ∪ skipVotesFor s skipVotes)
           < notarizationThreshold) ∧
-    -- (iii) No skip certificate can exist
     stakeSum w (skipVotesFor s skipVotes) < notarizationThreshold := by
   classical
-  -- Correct final voters form the majority set `majority`.
   set majority := finalVotes.filter correct
-  -- Their stake exceeds 40%.
   have h_majority_gt40 :
       stakeSum w majority > fallbackThreshold :=
     final_votes_imply_correct_majority w correct byzBound finalVotes h_final_threshold
-  -- Every element of `majority` is correct by construction.
   have h_majority_correct :
       ∀ n ∈ majority, correct n := by
     intro n hn
     exact (Finset.mem_filter.mp hn).2
-  -- The majority embeds into the notarization voters of block `b`.
   have h_majority_subset_notar :
       ∀ {n}, n ∈ majority →
         n ∈ (notarVotesFor s b notarVotes).filter correct := by
     intro n hn
     simpa [majority] using h_final_notar (by simpa [majority] using hn)
-  -- Therefore correct notarization voters for `b` also exceed 40% stake.
+  -- Correct notarization voters for b also exceed 40% stake (by monotonicity).
   have h_correct_maj_notar :
       CorrectMajorityVoted w correct s b notarVotes := by
     unfold CorrectMajorityVoted
-    -- Monotonicity lifts the >40% bound from `majority` to the larger set.
     have h_subset_sum :
         stakeSum w majority ≤
           stakeSum w ((notarVotesFor s b notarVotes).filter correct) :=
@@ -152,30 +127,24 @@ theorem slow_finalization_exclusivity
         intro n hn
         exact h_majority_subset_notar (by simpa using hn))
     exact lt_of_lt_of_le h_majority_gt40 h_subset_sum
-  -- Helper: every node in `majority` also voted to notarize `b`.
   have h_majority_notar :
       ∀ {n}, n ∈ majority → n ∈ notarVotesFor s b notarVotes := by
     intro n hn
     have h := h_majority_subset_notar (by simpa using hn)
     exact (Finset.mem_filter.mp h).1
-  -- Assemble the three exclusivity clauses.
   refine ⟨?_, ?_, ?_⟩
-  · -- (i) No other block notarized.
+  · -- (i) Use Lemma 23: if b' were notarized, contradicts correct majority for b.
     intro b' h_diff
     have h_no_conflict :=
       lemma23_no_other_block_notarized w correct s b b' notarVotes
         h_correct_maj_notar h_diff.symm
-    -- If the stake were ≥ 60, we would contradict Lemma 23.
     by_contra h_ge
     have h_is_notarized : IsNotarized w s b' notarVotes := by
       unfold IsNotarized notarizationThreshold
       exact not_lt.mp h_ge
     exact h_no_conflict h_is_notarized
-  · -- (ii) No notar-fallback certificate on a different block.
+  · -- (ii) Majority cannot vote for b' or skip (by Lemma 20), so remaining stake < 60%.
     intro b' h_diff
-    -- Voters in `majority` cannot appear in the union:
-    -- they are correct, notarized `b`, hence cannot notarize `b'`
-    -- (Lemma 20) nor skip the slot.
     have h_disjoint :
         ∀ n ∈ (notarVotesFor s b' notarVotes ∪ skipVotesFor s skipVotes),
           n ∉ majority := by
@@ -185,16 +154,13 @@ theorem slow_finalization_exclusivity
         h_majority_notar (by simpa using hn_majority)
       cases Finset.mem_union.mp hn_union with
       | inl h_voted_b' =>
-          -- Contradiction: correct node voted for both `b` and `b'`.
           exact
             Lemma21.correct_node_single_notar_vote correct s b b' notarVotes
               n h_correct h_diff.symm h_voted_b h_voted_b'
       | inr h_skip =>
-          -- Contradiction: correct node voted notarize `b` and skip.
           exact
             Lemma21.correct_node_notar_excludes_skip correct s b notarVotes
               skipVotes n h_correct h_voted_b h_skip
-    -- Apply the complement stake bound with `others = notarVotes ∪ skipVotes`.
     have :=
       complement_stake_lt_threshold w correct majority
         h_majority_correct h_majority_gt40
@@ -203,8 +169,7 @@ theorem slow_finalization_exclusivity
           intro n hn_union hn_majority
           exact (h_disjoint n hn_union) hn_majority)
     exact this
-  · -- (iii) No skip certificate in slot `s`.
-    -- The same complement argument applies with just the skip votes.
+  · -- (iii) Similar argument: majority cannot skip (by Lemma 20), so skip votes < 60%.
     have h_disjoint_skip :
         ∀ n ∈ skipVotesFor s skipVotes, n ∉ majority := by
       intro n h_skip h_majority

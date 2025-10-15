@@ -1,37 +1,26 @@
 /-
-  Lemma 29 (Parent Support for Notar-Fallback Votes)
-  ================================================
+  Lemma 29: Parent Support for Notar-Fallback Votes
 
-  We mechanize Lemma 29 from the Alpenglow whitepaper (p.31):
+  Whitepaper: Lemma 29, page 31, lines 899-901
 
-  > Suppose a correct node `v` cast a notar-fallback vote for a block `b` in
-  > slot `s` that is not the first slot of the window, and `b'` is the parent
-  > of `b`. Then, either some correct node cast a notar-fallback vote for `b'`,
-  > or correct nodes with more than 40% of stake cast notarization votes for `b'`.
+  Statement from whitepaper:
+  Suppose a correct node v cast a notar-fallback vote for a block b in slot s
+  that is not the first slot of the window, and b' is the parent of b. Then,
+  either some correct node cast a notar-fallback vote for b', or correct nodes
+  with more than 40% of stake cast notarization votes for b'.
 
-  **Whitepaper intuition:**
-  - Casting a notar-fallback vote in a non-first slot requires `SafeToNotar`
-    to fire. For these slots, the guard first retrieves the parent block and
-    only emits the event once the parent has a notarization or notar-fallback
-    certificate.
-  - Such a certificate aggregates at least 60% stake in notar or notar-fallback
-    votes for the parent. Since byzantine stake stays below 20%, either some
-    correct node contributed a fallback vote for the parent, or correct nodes
-    alone contributed over 40% stake in notarization votes.
+  Proof from whitepaper (page 31, line 901):
+  SafeToNotar conditions (Definition 16) require that v observed a notarization
+  or notar-fallback certificate for b', and so nodes with at least 60% of stake
+  cast notarization or notar-fallback votes for b'. Since byzantine nodes
+  possess less than 20% of stake, either correct nodes with more than 40% of
+  stake cast notarization votes for b', or some correct node cast a
+  notar-fallback vote for b'.
 
-  **Lean strategy:**
-  We introduce a lightweight `NotarFallbackVote` record mirroring notarization
-  votes and an abstract extractor `notarFallbackVotesFor`. The interaction
-  between `SafeToNotar` and the parent certificate is summarized by two axioms:
-
-  1. `fallback_vote_requires_parent_certificate` — every correct notar-fallback
-     vote in a non-first slot witnesses a parent certificate combining notar and
-     notar-fallback votes (≥ 60% stake).
-  2. `certificate_yields_fallback_or_majority` — whenever such a certificate
-     exists, either some correct fallback vote is present or the correct notar
-     voters alone exceed the 40% fallback threshold.
-
-  Combining both axioms produces the desired disjunction for the parent block.
+  Key insight: The SafeToNotar event for non-first slots requires a certificate
+  for the parent (Definition 16, page 22, lines 565-569). With 60% total votes
+  and <20% byzantine stake, correct votes must either include a fallback vote
+  or exceed 40% in notarization votes alone.
 -/
 
 import Mathlib.Data.Finset.Basic
@@ -49,28 +38,23 @@ open Lemma28
 
 variable {Hash : Type _} [DecidableEq Hash]
 
-/-
-  ## Notar-Fallback Votes
--/
-
-/-- Record that a node cast a notar-fallback vote for block `b` in slot `s`. -/
+/-- Record that a node cast a notar-fallback vote for block b in slot s. -/
 structure NotarFallbackVote (Hash : Type _) where
   voter : NodeId
   slot : Slot
   blockHash : Hash
 
-/-- Extract the set of nodes that cast notar-fallback votes for `(s, b)`. -/
+/-- Extract the set of nodes that cast notar-fallback votes for (s, b). -/
 axiom notarFallbackVotesFor
     (s : Slot) (b : Hash)
     (votes : Finset (NotarFallbackVote Hash)) :
     Finset NodeId
 
 /-
-  ## SafeToNotar Guard Axioms
+  Axiom 1: A correct notar-fallback vote in a non-first slot implies the parent
+  has a certificate (>= 60% stake in combined notar/notar-fallback votes).
+  This captures the SafeToNotar guard for non-first slots (Definition 16).
 -/
-
-/-- Casting a notar-fallback vote in a non-first slot necessitates observing a
-    notarization or notar-fallback certificate for the parent block. -/
 axiom fallback_vote_requires_parent_certificate
     (cfg : VotorConfig) (topo : BlockTopology Hash)
     (w : StakeWeight) (correct : IsCorrect)
@@ -87,8 +71,11 @@ axiom fallback_vote_requires_parent_certificate
         notarFallbackVotesFor (topo.slotOf parent) parent fallbackVotes) ≥
       notarizationThreshold
 
-/-- Certificates aggregating ≥60% stake in notar/notar-fallback votes either
-    include a correct fallback voter or grant >40% correct notar support. -/
+/-
+  Axiom 2: Given a certificate (>= 60% stake) and byzantine stake < 20%,
+  either some correct node cast a fallback vote, or correct notarization
+  votes alone exceed 40%. This is the stake arithmetic from the proof.
+-/
 axiom certificate_yields_fallback_or_majority
     (w : StakeWeight) (correct : IsCorrect)
     (byzBound : ByzantineStakeBound w correct)
@@ -103,17 +90,11 @@ axiom certificate_yields_fallback_or_majority
     stakeSum w ((notarVotesFor slot b notarVotes).filter correct) >
       fallbackThreshold
 
-/-
-  ## Lemma 29
--/
-
-/-- **Lemma 29 (Parent support for notar-fallback votes).**
-
-    If a correct node casts a notar-fallback vote for block `b` in a non-first
-    slot `s`, then the parent block `parent` enjoys one of two guarantees:
-
-    * some correct node emitted a notar-fallback vote for `parent`, or
-    * correct notar voters for `parent` alone exceed the 40% fallback threshold.
+/--
+  Lemma 29: If a correct node casts a notar-fallback vote for block b in a
+  non-first slot s, then for the parent block parent, either some correct node
+  cast a notar-fallback vote for parent, or correct notarization votes for
+  parent exceed 40% of stake.
 -/
 theorem parent_support_for_fallback
     (cfg : VotorConfig) (topo : BlockTopology Hash)
@@ -133,7 +114,8 @@ theorem parent_support_for_fallback
           ((notarVotesFor (topo.slotOf parent) parent notarVotes).filter correct) >
         fallbackThreshold := by
   classical
-  -- SafeToNotar guard yields a parent certificate.
+
+  -- Axiom 1: SafeToNotar guard yields a parent certificate.
   have h_parent_cert :
       stakeSum w
           (notarVotesFor (topo.slotOf parent) parent notarVotes ∪
@@ -142,7 +124,8 @@ theorem parent_support_for_fallback
     fallback_vote_requires_parent_certificate (cfg := cfg) (topo := topo)
       (w := w) (correct := correct) (notarVotes := notarVotes)
       (fallbackVotes := fallbackVotes) h_slot h_parent h_not_first h_vote h_correct
-  -- The certificate implies either a correct fallback voter or >40% correct notar stake.
+
+  -- Axiom 2: The certificate implies the desired disjunction.
   have h_support :=
     certificate_yields_fallback_or_majority
       (w := w) (correct := correct) (byzBound := byzBound)

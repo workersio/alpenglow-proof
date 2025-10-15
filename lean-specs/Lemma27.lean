@@ -1,26 +1,22 @@
 /-
-  Lemma 27 (Correct Notar Voter in Every Certificate)
-  ================================================
+  Lemma 27: Correct Notar Voter in Every Certificate
 
-  We mechanize Lemma 27 from the Alpenglow whitepaper (p.30):
+  Whitepaper: Lemma 27, page 30
 
-  > If there exists a notarization or notar-fallback certificate for block `b`,
-  > then some correct node cast its notarization vote for `b`.
+  Statement: If there exists a notarization or notar-fallback certificate for
+  block b, then some correct node cast its notarization vote for b.
 
-  **Whitepaper intuition:**
-  - Notarization certificates aggregate ≥ 60% stake worth of notar votes.
-    With < 20% byzantine stake, at least one correct node must have voted.
-  - Notar-fallback certificates are only issued after the `SafeToNotar`
-    guard fires (Definition 16). The guard requires at least 20% stake in
-    notar votes for `b`. Since byzantine stake stays below 20%, a fallback
-    certificate also implies the presence of a correct notar voter.
+  Proof sketch (by contradiction):
+  Assume no correct node voted to notarize b. Since byzantine stake < 20%, each
+  correct node observes < 20% stake voting to notarize b. Both SafeToNotar
+  conditions (Definition 16, pages 21-22) require at least 20% stake voting to
+  notarize b. Therefore no correct node emits SafeToNotar(s, hash(b)), which is
+  the only trigger for notar-fallback votes (Algorithm 1, line 16-19). So no
+  correct node casts a notar-fallback vote for b. But certificates require >= 60%
+  stake (Definition 11), contradiction.
 
-  **Lean strategy:**
-  We reuse the stake accounting infrastructure from Lemma 21 and introduce a
-  single axiom capturing the SafeToNotar guard: whenever the union of notar and
-  skip votes reaches the 60% certificate threshold, the notar votes alone must
-  carry at least 20% stake. Combining this guard with the global <20% byzantine
-  bound yields the desired correct voter in both certificate cases.
+  Mechanization: We axiomatize the SafeToNotar guard from Definition 16 and
+  combine it with the byzantine stake bound to derive the contradiction.
 -/
 
 import Mathlib.Data.Finset.Basic
@@ -36,16 +32,16 @@ open Lemma21
 
 variable {Hash : Type _}
 
-/-
-  ## SafeToNotar Guard Axiom
+-- SafeToNotar Guard Axiom (Definition 16, pages 21-22)
+--
+-- A notar-fallback certificate can only exist if SafeToNotar fired, which
+-- requires notar(b) >= 20% in the condition:
+--   notar(b) >= 40%  OR  (skip(s) + notar(b) >= 60%  AND  notar(b) >= 20%)
+-- When a notar-fallback certificate exists (notar + skip >= 60%), this axiom
+-- enforces the 20% lower bound on notar votes alone.
 
-  Definition 16 requires at least 20% notar stake before notar-fallback votes
-  can be cast.  We encode this requirement so that any notar-fallback
-  certificate implies sufficiently many notar votes on `b`.
--/
-
-/-- SafeToNotar guard (Definition 16): a notar-fallback certificate implies
-    at least 20% stake worth of notar votes for block `b`. -/
+/-- SafeToNotar guard: a notar-fallback certificate implies at least 20% stake
+    worth of notar votes for block b. -/
 axiom notar_fallback_requires_notar_support
     (w : StakeWeight) (s : Slot) (b : Hash)
     (notarVotes : Finset (NotarVote Hash))
@@ -53,11 +49,8 @@ axiom notar_fallback_requires_notar_support
     stakeSum w (notarVotesFor s b notarVotes ∪ skipVotesFor s skipVotes) >= notarizationThreshold →
     stakeSum w (notarVotesFor s b notarVotes) ≥ (20 : Real)
 
-/-- **Lemma 27 (Correct notar voter exists).**
-
-    If block `b` in slot `s` has either a notarization certificate or a
-    notar-fallback certificate, then some correct node cast a notar vote for `b`.
--/
+/-- Lemma 27: If block b in slot s has either a notarization certificate or a
+    notar-fallback certificate, then some correct node cast a notar vote for b. -/
 theorem correct_voter_exists_for_certificate
     {w : StakeWeight} {correct : IsCorrect}
     (byzBound : ByzantineStakeBound w correct)
@@ -70,22 +63,22 @@ theorem correct_voter_exists_for_certificate
     ∃ n, correct n ∧ n ∈ notarVotesFor s b notarVotes := by
   classical
   by_contra h_none
-  -- All notar voters would have to be byzantine otherwise.
+  -- If no correct node voted, all notar voters must be byzantine.
   have h_all_byz :
       ∀ n ∈ notarVotesFor s b notarVotes, ¬correct n := by
     intro n hn
     by_contra h_corr
     exact h_none ⟨n, h_corr, hn⟩
-  -- Apply the byzantine stake bound to the notar voters.
+  -- Byzantine stake < 20%, so notar votes carry < 20% stake.
   have h_byz :
       stakeSum w (notarVotesFor s b notarVotes) < (20 : Real) :=
     byzBound.bound (notarVotesFor s b notarVotes) (by
       intro n hn
       exact h_all_byz n hn)
-  -- Distinguish the two certificate flavours.
+  -- Consider both certificate types.
   refine h_cert.elim ?h_notar ?h_fallback
   · intro h_notar
-    -- ≥60% stake and <20% stake cannot both hold.
+    -- Notarization certificate: notar votes >= 60%, but we have < 20%.
     have h_contra :
         (60 : Real) < 20 := by
       simpa [notarizationThreshold] using lt_of_le_of_lt h_notar h_byz
@@ -94,7 +87,7 @@ theorem correct_voter_exists_for_certificate
     have : (20 : Real) < (20 : Real) := lt_of_le_of_lt h_le h_contra
     exact lt_irrefl _ this
   · intro h_fallback
-    -- SafeToNotar axiom yields a ≥20% lower bound, contradicting <20%.
+    -- Notar-fallback certificate: SafeToNotar requires >= 20%, but we have < 20%.
     have h_min :
         stakeSum w (notarVotesFor s b notarVotes) ≥ (20 : Real) :=
       notar_fallback_requires_notar_support w s b notarVotes skipVotes h_fallback

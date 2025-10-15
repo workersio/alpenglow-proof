@@ -1,33 +1,30 @@
 /-
-  Lemma 40 (ParentReady After Window Timeouts)
-  ============================================
+  Lemma 40: ParentReady After Window Timeouts
 
-  Whitepaper statement (p.35):
+  Whitepaper (pp.35-36): If all correct nodes set the timeouts for slots WINDOWSLOTS(s),
+  then all correct nodes will emit the event ParentReady(s+, ...), where s+ > s is
+  the first slot of the following leader window.
 
-  > If all correct nodes set the timeouts for slots `WINDOWSLOTS(s)`, then all
-  > correct nodes will emit the event `ParentReady(s+, …)`, where `s+ > s` is the
-  > first slot of the following leader window.
+  Proof strategy from whitepaper:
 
-  **Informal outline.**
-  * By Lemma 39, once every slot in `WINDOWSLOTS(s)` has its timeout witness,
-    each slot either accumulates a skip certificate or produces a notar-fallback
-    certificate for some block in that slot.
-  * If *every* slot yields a skip certificate, the existing parent-ready witness
-    for the window head (Corollary 34) extends across the entire window,
-    delivering the prerequisites of Definition 15 for the next window head `s+`.
-  * Otherwise pick the highest slot `s'` inside the window that lacks a skip
-    certificate.  Lemma 39 ensures a certified block `b` in slot `s'`.  Maximality
-    of `s'` implies that all later slots in the window do enjoy skip certificates,
-    so Definition 15 fires for `s+` with parent `b`.
+  Case (i): All correct nodes observe skip certificates for all slots in WINDOWSLOTS(s).
+    By Corollary 34, node v had emitted ParentReady(k, hash(b)) where k is the first
+    slot of WINDOWSLOTS(s). By Definition 15, there is a block b with a notar-fallback
+    certificate and skip certificates for all slots between slot(b) and k. Since skip
+    certificates exist for all slots in WINDOWSLOTS(s), they exist for all slots
+    between slot(b) and s+. By Definition 15, v will emit ParentReady(s+, hash(b)).
 
-  The mechanization below packages Definition 15 into the predicate
-  `ParentReadyWitness`: a node can emit `ParentReady(s, …)` precisely when it can
-  exhibit a certified parent block together with skip certificates for every slot
-  between the parent and `s`.  Under mild structural assumptions about leader
-  windows we show that the window-wide timeout hypothesis always provides such a
-  witness for the next leader window.  The parent-ready witness for the current
-  window head is treated as an input (available from Corollary 34 in the overall
-  development).
+  Case (ii): Some correct node does not observe a skip certificate for some slot in WINDOWSLOTS(s).
+    Let s' be the highest such slot. By Lemma 39, v will observe a notar-fallback
+    certificate for some block b in slot s'. By maximality of s', v will observe
+    skip certificates for all slots between slot(b) and s+. By Definition 15,
+    v will emit ParentReady(s+, hash(b)).
+
+  Definition 15 (ParentReady event): Slot s is the first of its leader window, and
+  Pool holds a notarization or notar-fallback certificate for a previous block b,
+  and skip certificates for every slot s' between b and s (slot(b) < s' < s).
+
+  The mechanization represents Definition 15 as ParentReadyWitness.
 -/
 
 import Mathlib.Data.Finset.Basic
@@ -49,19 +46,12 @@ open Lemma29
 open Lemma37
 open Lemma39
 
--- variable {Hash : Type _} [DecidableEq Hash]
+/- ParentReady Witness (Definition 15 from whitepaper, p.20)
 
-/-
-  ## ParentReady Witness (Definition 15)
--/
-
-/-- Witness for emitting `ParentReady(s, …)`:
-
-    * `s` is the first slot of its leader window,
-    * some block `parent` situated in an earlier slot carries a notar-fallback certificate,
-    * every slot between `parent` and `s` owns a skip certificate.
-
-    This mirrors Definition 15 from the whitepaper. -/
+   Witness for emitting ParentReady(s, ...):
+   - s is the first slot of its leader window
+   - some block parent in an earlier slot has a notar-fallback certificate
+   - every slot between parent and s has a skip certificate -/
 structure ParentReadyWitness
     (cfg : VotorConfig) (topo : BlockTopology Hash)
     (w : StakeWeight) (notarVotes : Finset (NotarVote Hash))
@@ -79,13 +69,8 @@ structure ParentReadyWitness
         ∀ {t}, topo.slotOf parent < t → t < s →
           stakeSum w (skipVotesFor t skipVotes) ≥ notarizationThreshold
 
-/-
-  ## Finite-Maximum Helper
--/
-
-/-- In a finite initial segment of the naturals, any nonempty predicate admits a
-    maximal element.  We use this to pick the highest slot lacking a skip
-    certificate. -/
+/- Helper lemma: find the maximal element in a bounded set.
+   Used to identify the highest slot without a skip certificate (Case ii). -/
 private lemma exists_max_of_bounded
     {S : Nat → Prop} [DecidablePred S] (B : Nat)
     (h_nonempty : ∃ n, S n)
@@ -109,20 +94,11 @@ private lemma exists_max_of_bounded
       exact ⟨Nat.lt_succ_of_le (h_bdd n hSn), hSn⟩
     exact Finset.le_max' satisfying n hn_mem
 
-/-
-  ## Window Timeout ⇒ ParentReady (Lemma 40)
--/
+/- Lemma 40 (whitepaper pp.35-36)
 
-/-- **Lemma 40.** Suppose
-
-    * every slot in `WINDOWSLOTS(s)` comes with a timeout witness,
-    * `sPlus` is the first slot of the next leader window (strictly larger than
-      the current window head), and
-    * the current window head already has a parent-ready witness
-      (available from Corollary 34).
-
-    Then the prerequisites of Definition 15 hold for `sPlus`.  Equivalently,
-    correct nodes can emit `ParentReady(sPlus, …)`. -/
+   Given timeout witnesses for all slots in WINDOWSLOTS(s) and the current window
+   head's parent-ready witness (from Corollary 34), we construct a parent-ready
+   witness for the next window head sPlus. -/
 theorem window_timeouts_emit_parent_ready
     (cfg : VotorConfig) (topo : BlockTopology Hash)
     (w : StakeWeight) (correct : IsCorrect)
@@ -153,7 +129,7 @@ theorem window_timeouts_emit_parent_ready
       head < sPlus := window_upper (t := head) head_mem
   let hasSkip : Slot → Prop :=
     fun t => stakeSum w (skipVotesFor t skipVotes) ≥ notarizationThreshold
-  -- Lemma 39 outcome: every window slot has either a skip certificate or a notar-fallback certificate.
+  -- By Lemma 39, each slot has either a skip certificate or a notar-fallback certificate.
   have certificates_or_skips :
       ∀ {t}, t ∈ cfg.windowSlots s →
         hasSkip t ∨
@@ -169,11 +145,11 @@ theorem window_timeouts_emit_parent_ready
       (notarVotes := notarVotes) (fallbackVotes := fallbackVotes)
       (skipVotes := skipVotes) (s := s)
       (timeouts := timeouts)
-  -- Case split: either all slots already have skip certificates, or some slot lacks one.
+  -- Case split: all slots have skip certificates (Case i), or some slot lacks one (Case ii).
   by_cases h_all_skip : ∀ t ∈ cfg.windowSlots s, hasSkip t
-  · -- Every slot in the current window has a skip certificate.
+  · -- Case (i): All slots have skip certificates.
+    -- Extend the parent-ready witness from Corollary 34 across the whole window.
     rcases head_witness with ⟨head_first, ⟨parent, parent_lt_head, parent_cert, parent_chain⟩⟩
-    -- Extend the existing parent-ready witness across the whole window.
     refine
       { first_slot := sPlus_first
         parent_exists := ⟨parent, ?_, ?_, ?_⟩ }
@@ -181,16 +157,15 @@ theorem window_timeouts_emit_parent_ready
     · exact parent_cert
     · intro t h_parent_lt h_t_lt
       by_cases h_t_before_head : t < head
-      · -- Slots before the current window head use the original skip chain.
-        exact parent_chain h_parent_lt h_t_before_head
-      · -- Slots inside the current window inherit their skip certificate.
-        have h_head_le_t :
+      · exact parent_chain h_parent_lt h_t_before_head
+      · have h_head_le_t :
             head ≤ t := le_of_not_gt h_t_before_head
         have h_t_mem :
             t ∈ cfg.windowSlots s :=
           window_cover (t := t) h_head_le_t h_t_lt
         exact h_all_skip t h_t_mem
-  · -- Some slot lacks a skip certificate: select the highest such slot.
+  · -- Case (ii): Some slot lacks a skip certificate.
+    -- Find the highest slot s' without a skip certificate.
     push_neg at h_all_skip
     obtain ⟨t₀, t₀_mem, t₀_no_skip⟩ := h_all_skip
     have t₀_lt_sPlus :
@@ -210,13 +185,13 @@ theorem window_timeouts_emit_parent_ready
     have s'_lt_sPlus : s' < sPlus := hs'.1
     have s'_mem_window : s' ∈ cfg.windowSlots s := (hs'.2).1
     have s'_no_skip : ¬ hasSkip s' := (hs'.2).2
-    -- Lemma 39 supplies a certified block in slot s'.
+    -- By Lemma 39, s' must have a notar-fallback certificate for some block.
     cases certificates_or_skips (t := s') s'_mem_window with
     | inl h_skip =>
         exact False.elim (s'_no_skip h_skip)
     | inr h_block =>
         rcases h_block with ⟨parent, h_parent_slot, h_parent_cert⟩
-        -- Prove that every slot strictly between s' and sPlus has a skip certificate.
+        -- By maximality of s', all slots after s' have skip certificates.
         have skips_after :
             ∀ {t}, s' < t → t < sPlus → hasSkip t := by
           intro t ht_gt ht_lt
@@ -237,7 +212,6 @@ theorem window_timeouts_emit_parent_ready
                 t ≤ s' := h_max t h_bad_t
           have ht_lt_self : t < t := lt_of_le_of_lt ht_le_s' ht_gt
           exact (Nat.lt_irrefl _ ht_lt_self)
-        -- Assemble the parent-ready witness for the next window head.
         refine
           { first_slot := sPlus_first
             parent_exists := ⟨parent, ?_, ?_, ?_⟩ }

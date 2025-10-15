@@ -1,23 +1,27 @@
 /-
-  Lemma 39 (Window Certificates After Timeouts)
-  =============================================
+  Lemma 39: Window Certificates After Timeouts
 
-  Whitepaper statement (p.35):
+  Whitepaper: Lemma 39, page 35
 
-  > If all correct nodes set the timeouts for slots of the leader window
-  > `WINDOWSLOTS(s)`, then for every slot `s' ∈ WINDOWSLOTS(s)` all correct nodes
-  > will observe a notar-fallback certificate for some block `b` with
-  > `s' = slot(b)`, or a skip certificate for `s'`.
+  Statement from whitepaper:
+  If all correct nodes set the timeouts for slots of the leader window
+  WINDOWSLOTS(s), then for every slot s' in WINDOWSLOTS(s) all correct nodes
+  will observe a notar-fallback certificate for b in slot s' = slot(b), or a
+  skip certificate for s'.
 
-  **Strategy.**
-  For every slot `s'` in the leader window we reuse the timeout witness from
-  Lemma 37.  The witness guarantees that either a skip certificate materializes
-  for `s'`, or correct voters controlling more than 40% stake cast notar votes
-  for a common block `b` in that slot.  In the latter case we appeal to Lemma 38,
-  which upgrades the correct-majority condition to a notar-fallback certificate.
-  A lightweight axiom records that a correct-majority vote set must contain an
-  explicit correct voter; combined with the `vote_slot_consistency` axiom from
-  Lemma 28 this identifies the slot assignment required by Lemma 38.
+  Proof from whitepaper (page 35):
+  If correct nodes observe skip certificates in all slots, we are done.
+  Otherwise, let s' be any slot for which a correct node will not observe a
+  skip certificate. By Lemma 37, there is a block b in slot s' = slot(b) such
+  that correct nodes with more than 40% of stake cast the notarization vote for
+  b. By Lemma 38, correct nodes will observe a notar-fallback certificate for b.
+
+  Proof strategy:
+  For each slot s' in the window, apply Lemma 37 using the timeout witness.
+  This yields either a skip certificate or >40% correct notar votes for some
+  block b. In the latter case, identify a concrete correct voter (axiom
+  majority_has_correct_voter) to determine the slot assignment via Lemma 28,
+  then apply Lemma 38 to obtain the notar-fallback certificate.
 -/
 
 import Mathlib.Data.Finset.Basic
@@ -40,10 +44,7 @@ open Lemma38
 
 variable {Hash : Type _} [DecidableEq Hash]
 
-/-- Any correct-majority notar vote set exposes a concrete correct voter who
-    cast the vote.  This follows immediately from the whitepaper semantics:
-    accumulating strictly more than 40% stake requires at least one correct
-    participant. -/
+/-- Accumulating >40% stake requires at least one correct participant. -/
 axiom majority_has_correct_voter
     (w : StakeWeight) (correct : IsCorrect)
     (notarVotes : Finset (NotarVote Hash))
@@ -51,12 +52,10 @@ axiom majority_has_correct_voter
     CorrectMajorityVoted w correct s b notarVotes →
     ∃ v, correct v ∧ v ∈ notarVotesFor s b notarVotes
 
-/--
-  **Lemma 39.** If every correct node schedules the timeout for each slot in
-  `WINDOWSLOTS(s)`, then for every slot in that window either the skip vote
-  threshold is met, or some block in the slot carries a notar-fallback
-  certificate.
--/
+/-- Lemma 39: If every correct node schedules the timeout for each slot in
+    WINDOWSLOTS(s), then for every slot in that window either the skip vote
+    threshold is met, or some block in the slot carries a notar-fallback
+    certificate. -/
 theorem window_timeouts_yield_certificates
     (cfg : VotorConfig) (topo : BlockTopology Hash)
     (w : StakeWeight) (correct : IsCorrect)
@@ -77,11 +76,10 @@ theorem window_timeouts_yield_certificates
             notarizationThreshold := by
   classical
   intro s' h_mem
-  -- Timeout witness supplied by the hypothesis.
   have witness :
       TimeoutStakeWitness w correct s' notarVotes skipVotes :=
     timeouts h_mem
-  -- Lemma 37 yields either a skip certificate or a correct notar majority.
+  -- Apply Lemma 37.
   have h_outcome :=
     timeout_skip_or_majority
       (w := w) (correct := correct)
@@ -89,9 +87,9 @@ theorem window_timeouts_yield_certificates
       (skipVotes := skipVotes) witness
   cases h_outcome with
   | inl h_majority_exists =>
-      -- Correct notar majority ⇒ notar-fallback certificate via Lemma 38.
+      -- Case: >40% correct notar votes for some block b.
       rcases h_majority_exists with ⟨b, h_majority⟩
-      -- Identify a concrete correct voter to recover the block's slot.
+      -- Extract a concrete correct voter to determine b's slot assignment.
       obtain ⟨v, h_v_corr, h_voted⟩ :=
         majority_has_correct_voter
           (w := w) (correct := correct)
@@ -102,7 +100,7 @@ theorem window_timeouts_yield_certificates
         vote_slot_consistency
           (topo := topo) (votes := notarVotes)
           (s := s') (b := b) (v := v) h_voted
-      -- Lemma 38 upgrades the majority to a notar-fallback certificate.
+      -- Apply Lemma 38.
       have h_certificate :
           stakeSum w
               (notarVotesFor s' b notarVotes ∪
@@ -116,7 +114,6 @@ theorem window_timeouts_yield_certificates
           (s := s') (b := b) h_slot h_majority
       exact Or.inr ⟨b, h_slot, h_certificate⟩
   | inr h_skip =>
-      -- Skip certificate case.
       exact Or.inl h_skip
 
 end Lemma39

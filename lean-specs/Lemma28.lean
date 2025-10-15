@@ -1,36 +1,28 @@
 /-
-  Lemma 28 (Window-Ancestor Voting Closure)
-  ========================================
+  Lemma 28: Window-Ancestor Voting Closure
+  =========================================
 
-  We mechanize Lemma 28 from the Alpenglow whitepaper (p.30):
+  Whitepaper reference: Lemma 28, page 31
 
-  > If a correct node `v` cast the notarization vote for block `b` in slot
-  > `s = slot(b)`, then for every slot `s' ≤ s` such that
-  > `s' ∈ WINDOWSLOTS(s)`, `v` cast the notarization vote for the ancestor
-  > `b'` of `b` in slot `s' = slot(b')`.
+  Statement:
+  If a correct node v cast the notarization vote for block b in slot s = slot(b),
+  then for every slot s' ≤ s such that s' ∈ WINDOWSLOTS(s), v cast the notarization
+  vote for the ancestor b' of b in slot s' = slot(b').
 
-  **Whitepaper intuition:**
-  Notarization votes produced by a correct node inside a leader window form a
-  contiguous chain anchored at the window's first slot.  Algorithm 2 enforces
-  this via the `TRYNOTAR` guard: to vote in slot `s`, the node must already
-  hold `VotedNotar` for the parent block in `s-1` (or, for the first slot of
-  the window, a `ParentReady` marker identifying the parent block outside the
-  window).  Whenever a correct node succeeds in `TRYNOTAR`, the vote for the
-  parent block is already in place.  Iterating this guard across the window
-  yields the ancestry closure claimed by Lemma 28.
+  Proof intuition from whitepaper:
+  The condition in line 11 of Algorithm 2 (TRYNOTAR function, page 25) enforces that
+  to cast a notarization vote for block b in slot s:
+  - If s is the first slot: ParentReady(hash_parent) ∈ state[s]
+  - If s is not the first slot: VotedNotar(hash_parent) ∈ state[s-1]
 
-  **Lean strategy:**
-  We introduce a lightweight block topology recording each block's slot and
-  parent hash, alongside axioms abstracting the `TRYNOTAR` guard:
+  The VotedNotar object is added to state[s-1] only when casting a notarization vote
+  (line 13 of Algorithm 2). By induction, v cast notarization votes for all ancestors
+  of b in slots s' < s within the same leader window.
 
-  * `vote_slot_consistency` — votes align with the block's slot,
-  * `parent_exists_for_slot` — non-first slots obtain a parent inside the window,
-  * `correct_vote_implies_parent_vote` — correct votes propagate to the parent.
-
-  Two mild axioms about `WINDOWSLOTS` capture that leader windows are
-  contiguous ranges headed by `windowFirstSlot`.  Armed with these ingredients,
-  the lemma follows by downward induction on `s - s'`, successively peeling
-  off parents until reaching the required ancestor slot.
+  Formalization approach:
+  Block topology models slot assignment and parent pointers. Axioms capture the
+  TRYNOTAR guard behavior and window structure. The main theorem uses downward
+  induction on slot distance s - s'.
 -/
 
 import Mathlib.Data.Nat.Basic
@@ -47,14 +39,9 @@ open Lemma21
 
 variable {Hash : Type _} [DecidableEq Hash]
 
-/-
-  ## Block Topology
+/-! Block topology: abstracts parent pointers and slot indices for ancestry reasoning. -/
 
-  We abstract the parent pointers and slot indices of blocks into a minimal
-  structure that suffices for reasoning about ancestry inside a window.
--/
-
-/-- Block topology capturing the slot index and parent pointer of every block. -/
+/-- Block topology capturing slot index and parent pointer of each block. -/
 structure BlockTopology (Hash : Type _) where
   slotOf   : Hash → Slot
   parentOf : Hash → Option Hash
@@ -63,7 +50,7 @@ namespace BlockTopology
 
 variable (topo : BlockTopology Hash)
 
-/-- Ancestor relation induced by repeatedly following parent pointers. -/
+/-- Ancestor relation: transitive closure of parent pointers. -/
 inductive IsAncestor : Hash → Hash → Prop
   | refl {b} : IsAncestor b b
   | step {anc parent child} :
@@ -91,12 +78,7 @@ lemma ancestor_trans {a b c : Hash}
 
 end BlockTopology
 
-/-
-  ## Window Structure Axioms
-
-  Leader windows form contiguous slot ranges headed by `windowFirstSlot`.
-  We encode only the properties needed for Lemma 28.
--/
+/-! Window structure: leader windows are contiguous slot ranges starting at windowFirstSlot. -/
 
 /-- The first slot of a window belongs to the window enumeration. -/
 axiom window_first_mem (cfg : VotorConfig) (s : Slot) :
@@ -106,16 +88,11 @@ axiom window_first_mem (cfg : VotorConfig) (s : Slot) :
 axiom window_first_le (cfg : VotorConfig) (s : Slot) :
     ∀ {t}, t ∈ cfg.windowSlots s → cfg.windowFirstSlot s ≤ t
 
-/-- Window slots are contiguous: every predecessor of the top slot has its
-    successor listed as well. -/
+/-- Window slots are contiguous: if t is in the window and t < s, then t+1 is also in the window. -/
 axiom window_succ_closed (cfg : VotorConfig) (s : Slot) :
     ∀ {t}, t ∈ cfg.windowSlots s → t < s → Nat.succ t ∈ cfg.windowSlots s
 
-/-
-  ## TRYNOTAR Guard Axioms
-
-  The following axioms summarize the behaviour enforced by Algorithm 2.
--/
+/-! TRYNOTAR guard axioms: capture the voting requirements from Algorithm 2, page 25. -/
 
 /-- Votes reference the slot of their block. -/
 axiom vote_slot_consistency
@@ -137,7 +114,7 @@ axiom parent_exists_for_slot
       topo.slotOf parent = Nat.pred slot ∧
       Nat.pred slot ∈ cfg.windowSlots topSlot
 
-/-- Correct votes propagate to the parent block when TRYNOTAR succeeds. -/
+/-- Correct votes propagate to parent: if v votes for block, it must have voted for parent (line 11 of Algorithm 2). -/
 axiom correct_vote_implies_parent_vote
     (cfg : VotorConfig) (topo : BlockTopology Hash)
     (topSlot : Slot) (correct : IsCorrect)
@@ -152,12 +129,7 @@ axiom correct_vote_implies_parent_vote
     correct v →
     v ∈ notarVotesFor (Nat.pred slot) parent votes
 
-/-
-  ## Lemma 28
--/
-
-/-- Helper arithmetic fact for natural numbers. If `s - t = succ d`, then the
-    predecessor slot `t.succ` pulls the difference down by one. -/
+/-- Helper: if s - t = succ d, then s - (t+1) = d. -/
 private lemma sub_succ_of_sub_succ
     {s t d : Nat} (h : s - t = Nat.succ d) :
     s - Nat.succ t = d := by
@@ -167,7 +139,6 @@ private lemma sub_succ_of_sub_succ
       intro s h
       cases s with
       | zero =>
-          -- Impossible: `0 = succ d`
           cases h
       | succ s =>
           have hs : s = d := Nat.succ_injective h
@@ -176,7 +147,6 @@ private lemma sub_succ_of_sub_succ
       intro s h
       cases s with
       | zero =>
-          -- `0 - succ t = 0`, contradiction with `succ d`
           simp at h
       | succ s =>
           have h' : s - t = Nat.succ d := by
@@ -184,11 +154,8 @@ private lemma sub_succ_of_sub_succ
           have := ih h'
           simpa [Nat.succ_sub_succ_eq_sub] using this
 
-/-- **Lemma 28 (Voting respects window ancestry).**
-
-    If a correct node `v` casts a notarization vote for block `b` in slot `s`,
-    then for every slot `s' ≤ s` with `s' ∈ cfg.windowSlots s`, the node also
-    voted for the unique ancestor `b'` of `b` that resides in slot `s'`. -/
+/-- Lemma 28: If a correct node v votes for block b in slot s, then for every
+    slot s' ≤ s in the same window, v voted for the ancestor b' of b in slot s'. -/
 theorem correct_node_votes_all_ancestors
     (cfg : VotorConfig) (topo : BlockTopology Hash)
     (correct : IsCorrect)
@@ -200,10 +167,9 @@ theorem correct_node_votes_all_ancestors
       ∃ b', topo.slotOf b' = s' ∧ BlockTopology.IsAncestor topo b' b ∧
             v ∈ notarVotesFor s' b' votes := by
   classical
-  -- Slot(s) consistency for the target block.
   have h_slot_b : topo.slotOf b = s :=
     vote_slot_consistency (topo := topo) h_vote
-  -- Define the induction predicate over the distance `s - t`.
+  -- Induct on the distance s - t.
   let P : ℕ → Prop := fun d =>
     ∀ {t : Slot},
       t ∈ cfg.windowSlots s →
@@ -211,10 +177,9 @@ theorem correct_node_votes_all_ancestors
       s - t = d →
       ∃ b', topo.slotOf b' = t ∧ BlockTopology.IsAncestor topo b' b ∧
             v ∈ notarVotesFor t b' votes
-  -- Establish the predicate for every natural number by recursion on `d`.
   have hP : ∀ d, P d := by
     refine Nat.rec ?base ?step
-    · -- Base case: `s - t = 0` implies `t = s`, so reuse the original vote.
+    · -- Base case: s - t = 0 implies t = s.
       intro t h_mem h_le h_diff
       have h_zero : s - t = 0 := by simpa using h_diff
       have h_le' : s ≤ t :=
@@ -226,10 +191,9 @@ theorem correct_node_votes_all_ancestors
         simpa [h_eq] using
           (BlockTopology.IsAncestor.refl (topo := topo) (b := b))
       · simpa [h_eq] using h_vote
-    · -- Inductive step: strip one level of ancestry via the parent pointer.
+    · -- Inductive step: use parent pointer to step backward through ancestors.
       intro d ih t h_mem h_le h_diff
       have h_diff_succ : s - t = Nat.succ d := by simpa using h_diff
-      -- Since the distance is positive, we must have `t < s`.
       have h_ne : t ≠ s := by
         intro h_eq
         have : Nat.succ d = 0 := by
@@ -240,18 +204,14 @@ theorem correct_node_votes_all_ancestors
         have h_le' : s ≤ t := le_of_not_gt h_not
         have : s - t = 0 := Nat.sub_eq_zero_of_le h_le'
         simpa [h_diff_succ] using this
-      -- Move one slot towards `s`, apply the induction hypothesis.
       set u := Nat.succ t
       have h_u_mem : u ∈ cfg.windowSlots s :=
         window_succ_closed (cfg := cfg) (s := s) h_mem h_lt
       have h_u_le : u ≤ s := Nat.succ_le_of_lt h_lt
-      have h_diff_u :
-          s - u = d :=
+      have h_diff_u : s - u = d :=
         sub_succ_of_sub_succ (s := s) (t := t) (d := d) h_diff_succ
-      -- Apply the induction hypothesis to obtain the vote in slot `u`.
       obtain ⟨bu, h_slot_bu, h_anc_bu, h_vote_bu⟩ :=
         ih h_u_mem h_u_le h_diff_u
-      -- Recover the parent block located in slot `t`.
       have h_first_le_t :
           cfg.windowFirstSlot s ≤ t :=
         window_first_le (cfg := cfg) (s := s) h_mem
@@ -262,7 +222,6 @@ theorem correct_node_votes_all_ancestors
         parent_exists_for_slot (cfg := cfg) (topo := topo) s
           (slot := u) (block := bu)
           h_slot_bu h_u_mem h_first_lt_u
-      -- Correctness propagates the vote to the parent slot.
       have h_vote_parent :
           v ∈ notarVotesFor (Nat.pred u) parent votes :=
         correct_vote_implies_parent_vote
@@ -270,7 +229,6 @@ theorem correct_node_votes_all_ancestors
           (slot := u) (block := bu) (parent := parent)
           h_slot_bu h_u_mem h_first_lt_u h_parent h_slot_parent
           h_vote_bu h_correct
-      -- Assemble the ancestor information for slot `t = pred u`.
       have h_slot_parent_t :
           topo.slotOf parent = t := by
         simpa [u, Nat.pred_succ] using h_slot_parent
@@ -284,7 +242,6 @@ theorem correct_node_votes_all_ancestors
           BlockTopology.IsAncestor topo parent b :=
         BlockTopology.ancestor_trans (topo := topo) h_anc_parent_bu h_anc_bu
       refine ⟨parent, h_slot_parent_t, h_anc_parent_b, h_vote_parent_t⟩
-  -- Apply the established predicate to the requested slot `s'`.
   intro s' h_mem h_le
   have := hP (s - s') h_mem h_le rfl
   simpa using this

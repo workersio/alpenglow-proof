@@ -2,25 +2,24 @@
   Lemma 33 (Timeout Scheduling after ParentReady)
   ================================================
 
-  We mechanize Lemma 33 from the Alpenglow whitepaper (p.33):
+  From the Alpenglow whitepaper (p.33, Section 2.10 Liveness):
 
-  > If a correct node emits the event ParentReady(s, …), then for every slot k
-  > in the leader window beginning with s the node will emit the event Timeout(k).
+    "If a correct node emits the event ParentReady(s, ...), then for every
+     slot k in the leader window beginning with s the node will emit the
+     event Timeout(k)."
 
-  In Algorithm 1 (lines 12–15), handling ParentReady first records the event,
-  then invokes CHECKPENDINGBLOCKS, and finally calls SETTIMEOUTS.  The helper
-  SETTIMEOUTS (Algorithm 2, lines 3–5) iterates over all slots in the leader
-  window and programs a timeout for each slot at
+  Whitepaper proof: The handler of ParentReady(s, ...) in line 12 of
+  Algorithm 1 calls SETTIMEOUTS(s) which schedules Timeout(k) for every
+  slot k in the leader window (k ∈ WINDOWSLOTS(s)).
 
-      clock() + Δ_timeout + (k - s + 1) · Δ_block          (Definition 17).
+  Algorithm 1 (lines 12-15, p.24) handles ParentReady by:
+    - Recording the event in state
+    - Calling CHECKPENDINGBLOCKS
+    - Calling SETTIMEOUTS(s)
 
-  The Lean development below exposes this behaviour through two steps:
-
-  1. A structural lemma about SETTIMEOUTS showing that it updates the timeout
-     map exactly on the slots returned by `windowSlots`.
-  2. A proof that the ParentReady handler merely adds the tag, runs
-     CHECKPENDINGBLOCKS (which leaves the clock untouched), and delegates to
-     SETTIMEOUTS, hence inheriting the timeout guarantees.
+  Algorithm 2 (lines 3-5, p.25) defines SETTIMEOUTS to schedule Timeout(i)
+  for each i ∈ WINDOWSLOTS(s) at time:
+    clock() + Δ_timeout + (i - s + 1) · Δ_block  (Definition 17, p.23)
 -/
 
 import Mathlib.Data.List.Basic
@@ -35,11 +34,10 @@ namespace Lemma33
 variable {Hash : Type _} [DecidableEq Hash]
 
 /-
-  ## List-fold helpers
- -/
+  List-fold helpers
+-/
 
-/-- Evaluating a `foldl` that repeatedly applies `Function.update` with a fixed
-    value formula. -/
+/-- Evaluates foldl that applies Function.update with a computed value. -/
 private lemma foldl_update_const_apply
     {α β : Type _} [DecidableEq α] (h : α → β) :
     ∀ (l : List α) (f : α → β) (x : α),
@@ -60,7 +58,7 @@ private lemma foldl_update_const_apply
       · simp [Function.update, hx] at hrec
         simpa [List.mem_cons, hx] using hrec
 
-/-- Eliminating the `VotorState` wrapper to reason about the timeout map. -/
+/-- Relates the fold over setTimeout operations to a fold over the timeout map. -/
 private lemma fold_setTimeout_timeouts
     (cfg : VotorConfig) (first : Slot) (base : Nat)
     (slots : List Slot) (st : VotorState Hash) :
@@ -89,10 +87,10 @@ private lemma fold_setTimeout_timeouts
       rfl
 
 /-
-  ## Behaviour of `SETTIMEOUTS`
+  Behaviour of SETTIMEOUTS
 -/
 
-/-- Evaluate the timeout map produced by `SETTIMEOUTS`. -/
+/-- Evaluates the timeout map produced by SETTIMEOUTS. -/
 private lemma setTimeouts_timeouts_eval
     (cfg : VotorConfig) (st : VotorState Hash)
     (first slot : Slot) :
@@ -107,7 +105,6 @@ private lemma setTimeouts_timeouts_eval
   have hfold :=
     fold_setTimeout_timeouts (cfg := cfg) (first := first)
       (base := base) (slots := cfg.windowSlots first) (st := st)
-  -- Apply setTimeouts definition and use hfold
   have hfold' : (setTimeouts cfg first st).timeouts =
       (cfg.windowSlots first).foldl
         (fun acc slot =>
@@ -115,7 +112,6 @@ private lemma setTimeouts_timeouts_eval
         st.timeouts := by
     simp only [setTimeouts, base]
     exact hfold
-  -- Apply the foldl evaluation lemma
   have hupdate :=
     foldl_update_const_apply
       (α := Slot) (β := Option Nat)
@@ -124,7 +120,7 @@ private lemma setTimeouts_timeouts_eval
   rw [hfold']
   exact hupdate
 
-/-- `SETTIMEOUTS` programmes a timeout for every slot of the leader window. -/
+/-- SETTIMEOUTS schedules a timeout for every slot in the leader window. -/
 lemma setTimeouts_timeout_of_mem
     (cfg : VotorConfig) (st : VotorState Hash)
     (first slot : Slot) (h_mem : slot ∈ cfg.windowSlots first) :
@@ -137,7 +133,7 @@ lemma setTimeouts_timeout_of_mem
       (first := first) (slot := slot)
   simpa [h_mem] using h
 
-/-- `SETTIMEOUTS` does not modify the local clock. -/
+/-- SETTIMEOUTS preserves the clock value. -/
 lemma setTimeouts_preserves_clock
     (cfg : VotorConfig) (st : VotorState Hash) (first : Slot) :
     (setTimeouts cfg first st).clock = st.clock := by
@@ -158,14 +154,12 @@ lemma setTimeouts_preserves_clock
       rfl
 
 /-
-  ## Lemma 33
+  Lemma 33
 -/
 
-/-- **Lemma 33 (Timeout scheduling after ParentReady).**
-
-    Handling `ParentReady(s, hash)` schedules `Timeout(k)` for every slot `k`
-    in the leader window that begins at `s`, with the timestamp prescribed by
-    Definition 17. -/
+/-- Lemma 33 (Timeout scheduling after ParentReady).
+    Handling ParentReady(s, hash) schedules Timeout(k) for every slot k
+    in the leader window beginning at s, with the timestamp from Definition 17. -/
 theorem parentReady_schedules_timeouts
     (cfg : VotorConfig) (st st' : VotorState Hash)
     (hash : Hash) (s : Slot) (logs : List (Broadcast Hash)) :
@@ -176,39 +170,32 @@ theorem parentReady_schedules_timeouts
           (((k - s) + 1) * cfg.deltaBlock)) := by
   classical
   intro h k hk
-  -- Unfold the handler structure.
   let st1 := st.addTag s (SlotTag.parentReady hash)
   let result := checkPendingBlocks cfg st1
   let st2 := result.fst
   let bc := result.snd
   have hcb : checkPendingBlocks cfg st1 = (st2, bc) := by
     simp only [st2, bc, result]
-  -- First component equality exposes the call to SETTIMEOUTS.
   have hfst := congrArg Prod.fst h
   simp [handleParentReady, st1, hcb] at hfst
-  -- Timeouts produced by SETTIMEOUTS.
   have hTimeouts :
       (setTimeouts cfg s st2).timeouts k =
         some (st2.clock + cfg.deltaTimeout +
           (((k - s) + 1) * cfg.deltaBlock)) :=
     setTimeouts_timeout_of_mem (cfg := cfg) (st := st2)
       (first := s) (slot := k) hk
-  -- Translate timeout statement to the final state.
   have hTimeouts' :
       st'.timeouts k =
         some (st2.clock + cfg.deltaTimeout +
           (((k - s) + 1) * cfg.deltaBlock)) := by
     simpa [hfst] using hTimeouts
-  -- Convert the clock reference.
   have hclock :
       (setTimeouts cfg s st2).clock = st2.clock :=
     setTimeouts_preserves_clock (cfg := cfg) (st := st2) (first := s)
   have hclock' : st'.clock = st2.clock := by
     have := congrArg VotorState.clock hfst
-    -- `this : (setTimeouts cfg s st2).clock = st'.clock`
     have := this.symm
     simpa [hclock] using this
-  -- Rewrite the timestamp in terms of `st'.clock`.
   simpa [hclock'] using hTimeouts'
 
 end Lemma33

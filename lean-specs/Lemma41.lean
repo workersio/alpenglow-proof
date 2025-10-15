@@ -1,35 +1,26 @@
 /-
-  Lemma 41 (Global Timeout Scheduling)
-  ====================================
+  Lemma 41: Global Timeout Scheduling
 
-  Whitepaper statement (p.36):
+  Whitepaper (page 36):
+  All correct nodes will set the timeouts for all slots.
 
-  > All correct nodes will set the timeouts for all slots.
+  Proof: Follows by induction from Lemma 33 and Lemma 40.
 
-  The whitepaper derives this property by combining Lemma 33—showing that
-  handling `ParentReady` programs the timeouts for the entire leader window—
-  with Lemma 40, which establishes that once a window’s timeouts are set,
-  correct nodes emit the `ParentReady` event for the subsequent leader window.
+  The whitepaper proof combines:
+  - Lemma 33 (page 33): When a correct node emits ParentReady(s, ...), it sets
+    timeouts for all slots in WINDOWSLOTS(s).
+  - Lemma 40 (page 35): If all correct nodes set timeouts for WINDOWSLOTS(s),
+    they all emit ParentReady(s+, ...) for the next window.
 
-  The argument therefore proceeds window-by-window: a `ParentReady` witness for
-  the current leader window yields timeout witnesses for every slot in that
-  window (Lemma 33).  These witnesses trigger a `ParentReady` witness for the
-  next window (Lemma 40), and the process repeats.  Abstracting this reasoning
-  into a simple induction across an enumeration of leader windows gives the
-  global timeout property stated in Lemma 41.
+  This creates window-by-window propagation: ParentReady for window n gives
+  timeouts for that window, which triggers ParentReady for window n+1, repeating
+  indefinitely.
 
-  The mechanization below captures this pattern.  We assume:
-
-  * an infinite enumeration `windowHead` listing the first slot of each leader
-    window, together with the structural facts required by Lemma 40
-    (`window_head_upper`/`window_head_cover`);
-  * a base `ParentReady` witness for the initial window; and
-  * a procedure turning any `ParentReady` witness into timeout witnesses for the
-    slots of that window (realized in practice via Lemma 33 together with
-    system-level reasoning about correct nodes).
-
-  Strong induction over `windowHead` then supplies timeout witnesses for every
-  slot in the schedule.
+  The mechanization enumerates windows by their first slot and uses induction to
+  propagate ParentReady and timeout witnesses across all windows, requiring:
+  - Initial ParentReady witness for window 0
+  - Each ParentReady witness implies timeout witnesses for that entire window
+  - Structural properties ensuring windows cover all slots
 -/
 
 import Lemma21
@@ -60,17 +51,16 @@ abbrev WindowTimeouts
     TimeoutStakeWitness w correct t notarVotes skipVotes
 
 /--
-  **Lemma 41.** Suppose we enumerate leader windows by their first slot through
-  `windowHead`, and assume:
+  Lemma 41. If we enumerate leader windows by their first slot through
+  windowHead with:
+  - each windowHead n being the first slot of its window,
+  - the structural bounds required by Lemma 40,
+  - every slot belonging to some enumerated window, and
+  - every ParentReady witness yielding timeout witnesses for the whole window
+    (materializing Lemma 33 for correct nodes),
 
-  * each `windowHead n` is indeed the first slot of its window,
-  * the enumeration supplies the structural bounds required by Lemma 40,
-  * every slot belongs to some enumerated window, and
-  * every `ParentReady` witness yields timeout witnesses for the whole window
-    (materializing the effect of Lemma 33 for correct nodes).
-
-  If the initial window carries a `ParentReady` witness, then all slots admit a
-  timeout witness—i.e. all correct nodes set the timeouts for every slot.
+  then an initial window ParentReady witness implies all slots admit a timeout
+  witness.
 -/
 theorem all_correct_nodes_set_timeouts
     (cfg : VotorConfig) (topo : BlockTopology Hash)
@@ -98,7 +88,7 @@ theorem all_correct_nodes_set_timeouts
           WindowTimeouts cfg w correct notarVotes skipVotes s) :
     ∀ s, Nonempty (TimeoutStakeWitness w correct s notarVotes skipVotes) := by
   classical
-  -- Parent-ready witnesses for every window head, obtained inductively via Lemma 40.
+  -- Inductive construction: ParentReady for window n implies ParentReady for window n+1.
   have parent_ready_all :
       ∀ n,
         ParentReadyWitness cfg topo w notarVotes fallbackVotes skipVotes
@@ -106,6 +96,7 @@ theorem all_correct_nodes_set_timeouts
     refine Nat.rec ?base ?step
     · exact base_parent_ready
     · intro n ih
+      -- ParentReady for window n gives timeout witnesses for all its slots.
       have timeouts :
           ∀ {t}, t ∈ cfg.windowSlots (windowHead n) →
             TimeoutStakeWitness w correct t notarVotes skipVotes :=
@@ -125,6 +116,7 @@ theorem all_correct_nodes_set_timeouts
           (cfg.windowFirstSlot (windowHead n)) := by
         rw [window_head_first n]
         exact ih
+      -- Apply Lemma 40: timeouts for window n trigger ParentReady for window n+1.
       exact
         window_timeouts_emit_parent_ready
           (cfg := cfg) (topo := topo)
@@ -139,12 +131,11 @@ theorem all_correct_nodes_set_timeouts
           (sPlus_first := window_head_first (Nat.succ n))
           (head_witness := ih_first)
           (timeouts := timeouts)
-  -- Timeout witnesses for every enumerated window follow from the parent-ready witnesses.
   have timeouts_all :
       ∀ n,
         WindowTimeouts cfg w correct notarVotes skipVotes (windowHead n) :=
     fun n => timeouts_from_parent_ready (parent_ready_all n)
-  -- Every slot lies in some window; extract its witness from the corresponding window.
+  -- Every slot belongs to some window, so extract its timeout witness.
   intro s
   obtain ⟨n, h_mem⟩ := window_cover_all s
   exact Nonempty.intro ((timeouts_all n) h_mem)

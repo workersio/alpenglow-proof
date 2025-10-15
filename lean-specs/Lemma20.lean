@@ -1,32 +1,31 @@
 /-
-  Lemma 20 (Notarization or Skip Exclusivity)
-  ==========================================
+  Lemma 20: Notarization or Skip Exclusivity
 
-  Ground truth reference: white-paper-origintal.pdf
-  - Lemma 20 (notarization or skip): page 28, lines 1361–1367
+  Reference: alpenglow-whitepaper.md, Section 2.9 Safety, page 29
 
-  Verbatim lemma (white-paper-origintal.pdf:28, 1361–1367):
-  > Lemma 20 (notarization or skip). A correct node exclusively casts only one
-  > notarization vote or skip vote per slot.
-  > Proof. Notarization votes and skip votes are only cast via functions tryNotar()
-  > and trySkipWindow() of Algorithm 2, respectively. Votes are only cast if
-  > Voted ∉ state[s]. After voting, the state is modified so that Voted ∈ state[s].
-  > Therefore, a notarization or skip vote can only be cast once per slot by a
-  > correct node.
+  Lemma 20 (notarization or skip): A correct node exclusively casts only one
+  notarization vote or skip vote per slot.
 
-  Our mechanization proves Lemma 20 directly from the concrete implementations of
-  `tryNotar` and `trySkipWindow` in Algorithm2.lean, mirroring the whitepaper’s
-  proof structure:
+  Proof: Notarization votes and skip votes are only cast via functions TRYNOTAR()
+  and TRYSKIPWINDOW() of Algorithm 2 respectively. Votes are only cast if
+  Voted ∉ state[s]. After voting, the state is modified so that Voted ∈ state[s].
+  Therefore, a notarization or skip vote can only be cast once per slot by a
+  correct node.
 
-  1. tryNotar only succeeds when Voted ∉ state[s] (precondition) — fully proven
-  2. tryNotar sets Voted ∈ state[s] when it succeeds (postcondition) — proven
-  3. trySkipWindow only casts when Voted ∉ state[s] and sets Voted — axiomatized
-  4. Mutual exclusivity follows from these properties — fully proven
+  Mechanization approach:
 
-  Status: All theorems proven. The file uses 6 small axioms to capture
-  straightforward properties of tag preservation and the fold over window slots.
-  These follow directly from the implementation but would require unfolding
-  private definitions or lengthy list-induction proofs in this file.
+  The proof traces through tryNotar and trySkipWindow to show:
+  1. Both functions check that Voted ∉ state[s] before casting a vote
+  2. Both functions set Voted ∈ state[s] after casting a vote
+  3. This ensures mutual exclusivity: whichever executes first prevents the other
+
+  Axioms required (6 total):
+  - 3 for tag preservation (addTag, tryFinal)
+  - 2 for trySkipWindow fold behavior
+  - 1 for slot window membership
+
+  These axioms capture implementation details that require unfolding private
+  definitions or list induction proofs.
 -/
 
 import Algorithm2
@@ -40,24 +39,24 @@ namespace Lemma20
 
 variable {Hash : Type _} [DecidableEq Hash]
 
-/-! ## Concrete Vote Predicates -/
+/-! Vote Predicates
 
-/-- A notarization vote was broadcast for slot s in the output of a function.
-    This is concrete: we check if `Broadcast.notar s _` appears in the list. -/
+Check whether a notarization or skip vote was broadcast for a given slot.
+-/
+
 def HasNotarVote (s : Slot) (broadcasts : List (Broadcast Hash)) : Prop :=
   ∃ h, Broadcast.notar s h ∈ broadcasts
 
-/-- A skip vote was broadcast for slot s in the output of a function. -/
 def HasSkipVote (s : Slot) (broadcasts : List (Broadcast Hash)) : Prop :=
   Broadcast.skip s ∈ broadcasts
 
-/-! ## Core Properties of tryNotar -/
+/-! Properties of tryNotar
 
-/-- ** FULLY PROVEN: tryNotar precondition**
+Establishes preconditions and postconditions for TRYNOTAR() from Algorithm 2.
+-/
 
-    If tryNotar succeeds, the initial state must NOT have had the Voted flag set.
-
-    This is the key property that ensures exclusive voting. -/
+/-- tryNotar precondition: succeeds only when Voted ∉ state[s].
+This is the key to exclusive voting. -/
 theorem tryNotar_requires_notVoted
     (cfg : VotorConfig) (st : VotorState Hash) (blk : PendingBlock Hash)
     (st' : VotorState Hash) (broadcasts : List (Broadcast Hash)) :
@@ -75,45 +74,34 @@ theorem tryNotar_requires_notVoted
     simp [Bool.not_eq_true] at h_not_voted
     exact h_not_voted
 
-/-- Helper lemma: addTag actually adds the tag
-    This follows from the definition of addTag and modifySlot, but requires
-    unfolding a private definition. -/
+/-- After addTag, the tag is present in the state.
+Requires unfolding private definitions. -/
 axiom addTag_has_tag (st : VotorState Hash) (slot : Slot) (tag : SlotTag Hash) :
     (st.addTag slot tag).hasTag slot tag = true
 
-/-- Helper lemma: clearPending preserves slotState -/
 @[simp]
 lemma clearPending_preserves_slotState {Hash : Type _} (st : VotorState Hash) (slot : Slot) :
     (st.clearPending slot).slotState = st.slotState := by
   unfold VotorState.clearPending
   rfl
 
-/-- Helper lemma: clearPending preserves tags -/
 lemma clearPending_preserves_hasTag (st : VotorState Hash) (s k : Slot) (tag : SlotTag Hash) :
     (st.clearPending s).hasTag k tag = st.hasTag k tag := by
   unfold VotorState.hasTag
   rw [clearPending_preserves_slotState]
 
-/-- Helper lemma: tryFinal preserves tags (it only adds, never removes)
-    This follows from the definition of tryFinal which either adds a tag or leaves
-    the state unchanged. Completing the proof requires unfolding private definitions. -/
+/-- tryFinal preserves tags (only adds, never removes). -/
 axiom tryFinal_preserves_hasTag (st : VotorState Hash) (s : Slot) (h : Hash) (k : Slot) (tag : SlotTag Hash) :
     st.hasTag k tag = true →
     (tryFinal st s h).1.hasTag k tag = true
 
-/-- Helper lemma: addTag preserves existing tags
-    This follows from the definition that addTag inserts into a Finset, preserving
-    existing members. Requires unfolding private definitions. -/
+/-- addTag preserves existing tags (like Finset.insert). -/
 axiom addTag_preserves_hasTag (st : VotorState Hash) (s : Slot) (tag tag' : SlotTag Hash) :
     st.hasTag s tag' = true →
     (st.addTag s tag).hasTag s tag' = true
 
-/-- **tryNotar postcondition (structural):**
-
-    If tryNotar succeeds, the resulting state DOES have the Voted flag set.
-
-    The proof outline is complete but requires helper lemmas about tag preservation
-    through the state update chain: st -> st1 -> st2 -> st3 -> st4 -/
+/-- tryNotar postcondition: sets Voted ∈ state[s].
+Traces tag preservation through st -> st1 -> st2 -> st3 -> st4. -/
 theorem tryNotar_sets_voted
     (cfg : VotorConfig) (st : VotorState Hash) (blk : PendingBlock Hash)
     (st' : VotorState Hash) (broadcasts : List (Broadcast Hash)) :
@@ -147,10 +135,7 @@ theorem tryNotar_sets_voted
   -- st4 (from tryFinal) preserves the voted tag
   exact tryFinal_preserves_hasTag _ blk.slot blk.hash blk.slot SlotTag.voted h3
 
-/-- ** FULLY PROVEN: tryNotar broadcasts a notarization vote**
-
-    If tryNotar succeeds, a notarization vote for the block's slot is in the
-    broadcast list. -/
+/-- tryNotar broadcasts a notarization vote for the block's slot. -/
 theorem tryNotar_broadcasts_notar
     (cfg : VotorConfig) (st : VotorState Hash) (blk : PendingBlock Hash)
     (st' : VotorState Hash) (broadcasts : List (Broadcast Hash)) :
@@ -169,16 +154,14 @@ theorem tryNotar_broadcasts_notar
   use blk.hash
   simp [List.mem_cons]
 
-/-! ## Core Properties of trySkipWindow -/
+/-! Properties of trySkipWindow
 
-/-- **trySkipWindow precondition (structural):**
+Establishes preconditions and postconditions for TRYSKIPWINDOW() from Algorithm 2.
+These require induction on the foldl over windowSlots.
+-/
 
-    If a slot k gets a skip vote from trySkipWindow, then the initial state
-    did NOT have Voted set for k.
-
-    This follows from the implementation of trySkipWindow which only adds skip votes
-    for slots where hasTag voted is false. The proof requires induction on the foldl
-    over windowSlots, tracking how broadcasts accumulate through the fold. -/
+/-- trySkipWindow precondition: casts skip vote for k only when Voted ∉ state[k].
+Requires list induction proof. -/
 axiom trySkipWindow_slot_requires_notVoted
     (cfg : VotorConfig) (s k : Slot) (st st' : VotorState Hash)
     (broadcasts : List (Broadcast Hash)) :
@@ -187,12 +170,8 @@ axiom trySkipWindow_slot_requires_notVoted
     k ∈ cfg.windowSlots s →
     st.hasTag k SlotTag.voted = false
 
-/-- **trySkipWindow postcondition (structural):**
-
-    For any slot k that received a skip vote, the final state has Voted set for k.
-
-    This follows from the implementation which adds the voted tag before emitting
-    a skip vote. The proof requires induction on the foldl, tracking state updates. -/
+/-- trySkipWindow postcondition: sets Voted ∈ state[k] for slots that got skip votes.
+Requires list induction proof. -/
 axiom trySkipWindow_sets_voted
     (cfg : VotorConfig) (s k : Slot) (st st' : VotorState Hash)
     (broadcasts : List (Broadcast Hash)) :
@@ -201,17 +180,11 @@ axiom trySkipWindow_sets_voted
     k ∈ cfg.windowSlots s →
     st'.hasTag k SlotTag.voted = true
 
-/-! ## Lemma 20: Main Results -/
+/-! Lemma 20: Main Results -/
 
-/-- ** FULLY PROVEN: Lemma 20 Core Exclusivity Property**
-
-    The fundamental property: tryNotar only succeeds when Voted is false.
-
-    This is proven directly from the code and guarantees that a node cannot cast
-    both types of votes, since whichever function executes first will set the
-    Voted flag, preventing the other from succeeding.
-
-    This is the essence of Lemma 20 from the whitepaper. -/
+/-- Lemma 20 core exclusivity: tryNotar only succeeds when Voted is false.
+Whichever function (tryNotar or trySkipWindow) executes first sets Voted,
+preventing the other from succeeding. -/
 theorem lemma20_core_exclusivity :
     ∀ (cfg : VotorConfig) (st : VotorState Hash),
     ∀ (s : Slot) (blk : PendingBlock Hash),
@@ -223,16 +196,12 @@ theorem lemma20_core_exclusivity :
   rw [← h_slot]
   exact tryNotar_requires_notVoted cfg st blk st' bc h_notar
 
-/-- Assumption: Every slot is contained in its own window.
-    This is a reasonable assumption about the window function. -/
+/-- Every slot is contained in its own leader window. -/
 axiom slot_in_own_window (cfg : VotorConfig) (s : Slot) : s ∈ cfg.windowSlots s
 
-/-- **Corollary: Sequential execution guarantees mutual exclusivity**
-
-    If tryNotar succeeds, any subsequent call to trySkipWindow on the same slot
-    cannot add a skip vote, because tryNotar sets the Voted flag.
-
-    This demonstrates the core mutual exclusivity property. -/
+/-- Sequential execution demonstrates mutual exclusivity.
+If tryNotar succeeds first, subsequent trySkipWindow cannot cast a skip vote
+for the same slot because Voted is already set. -/
 theorem sequential_exclusivity_notar_then_skip
     (cfg : VotorConfig) (st : VotorState Hash) (s : Slot) :
     ∀ (blk : PendingBlock Hash),
@@ -256,60 +225,49 @@ theorem sequential_exclusivity_notar_then_skip
   rw [h_voted] at h_not_voted_n
   contradiction
 
-/-! ## Computational Verification -/
+/-! Computational Verification -/
 
-/-- ** Verified Example:** Demonstrate the precondition computationally. -/
+/-- Example demonstrating the precondition computationally. -/
 example : ∀ (cfg : VotorConfig) (st : VotorState Hash) (blk : PendingBlock Hash),
     (∃ st' broadcasts, tryNotar cfg st blk = some (st', broadcasts)) →
     st.hasTag blk.slot SlotTag.voted = false := by
   intro cfg st blk ⟨st', broadcasts, h⟩
   exact tryNotar_requires_notVoted cfg st blk st' broadcasts h
 
-/-! ## Summary and Verification Status
+/-! Summary
 
-    For a correct node executing the protocol:
-    1. Notarization votes are only cast when Voted ∉ state[s]
-    2. Skip votes are only cast when Voted ∉ state[s]
-    3. After casting either vote, Voted ∈ state[s]
-    4. Therefore, only one vote (of either type) can be cast per slot
+For a correct node executing the protocol:
+1. Notarization votes are only cast when Voted ∉ state[s]
+2. Skip votes are only cast when Voted ∉ state[s]
+3. After casting either vote, Voted ∈ state[s]
+4. Therefore, only one vote (of either type) can be cast per slot
 
-    **Verification Status:**
+Main theorems:
+- tryNotar_requires_notVoted: Core precondition (no axioms)
+- tryNotar_broadcasts_notar: Vote broadcast (no axioms)
+- lemma20_core_exclusivity: Main exclusivity property (no axioms)
+- tryNotar_sets_voted: Uses tag preservation axioms
+- sequential_exclusivity_notar_then_skip: Combines above theorems
 
-     **FULLY PROVEN (no axioms):**
-    - `tryNotar_requires_notVoted` - Core precondition proven from code
-    - `tryNotar_broadcasts_notar` - Vote broadcast proven
-    - `lemma20_core_exclusivity` - Main exclusivity property proven
+Axioms (6 total):
+- addTag_has_tag: Adding a tag makes it present
+- addTag_preserves_hasTag: Tag preservation
+- tryFinal_preserves_hasTag: Tag preservation through tryFinal
+- trySkipWindow_slot_requires_notVoted: Skip vote precondition
+- trySkipWindow_sets_voted: Skip vote postcondition
+- slot_in_own_window: Every slot is in its own leader window
 
-     **PROVEN (uses axioms for implementation details):**
-    - `tryNotar_sets_voted` - Uses axioms for addTag and tryFinal tag preservation
-    - `trySkipWindow_slot_requires_notVoted` - Uses axiom for foldl behavior
-    - `trySkipWindow_sets_voted` - Uses axiom for foldl state updates
-    - `sequential_exclusivity_notar_then_skip` - Proven from above + slot_in_own_window axiom
-
-    **Axioms Used:**
-    - `addTag_has_tag`: Adding a tag makes it present (follows from Finset.insert)
-    - `addTag_preserves_hasTag`: Adding a tag preserves other tags
-    - `tryFinal_preserves_hasTag`: tryFinal only adds tags, never removes them
-    - `trySkipWindow_slot_requires_notVoted`: Skip votes only for unvoted slots (foldl property)
-    - `trySkipWindow_sets_voted`: Skip votes set the voted flag (foldl property)
-    - `slot_in_own_window`: Every slot is in its own leader window
-
-    All axioms are straightforward properties that follow directly from the implementation
-    but require unfolding private definitions or complex list induction proofs.
-
-    **Key Achievement:**
-    Lemma 20 is FULLY PROVEN with reasonable axioms. The core mutual exclusivity property
-    is established: a node cannot cast both a notarization vote and a skip vote for the
-    same slot, matching the whitepaper's theorem.
+These axioms follow from implementations but require unfolding private
+definitions or list induction proofs.
 -/
 
-#check tryNotar_requires_notVoted          --  FULLY PROVEN - no axioms!
-#check tryNotar_broadcasts_notar           --  FULLY PROVEN - no axioms!
-#check lemma20_core_exclusivity            --  FULLY PROVEN - no axioms!
-#check tryNotar_sets_voted                 --  PROVEN - uses tag preservation axioms
-#check trySkipWindow_slot_requires_notVoted --  PROVEN - uses foldl axiom
-#check trySkipWindow_sets_voted            --  PROVEN - uses foldl axiom
-#check sequential_exclusivity_notar_then_skip --  PROVEN - combines above theorems
+#check tryNotar_requires_notVoted
+#check tryNotar_broadcasts_notar
+#check lemma20_core_exclusivity
+#check tryNotar_sets_voted
+#check trySkipWindow_slot_requires_notVoted
+#check trySkipWindow_sets_voted
+#check sequential_exclusivity_notar_then_skip
 
 end Lemma20
 

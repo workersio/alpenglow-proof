@@ -1,25 +1,24 @@
 /-
   Lemma 35 (Votes After Timeout)
-  ==============================
 
-  This file mechanizes Lemma 35 from the Alpenglow whitepaper (p.33):
+  Reference: Alpenglow whitepaper p.33
 
-  > If all correct nodes set the timeout for slot `s`, all correct nodes will
-  > cast a notarization vote or skip vote in slot `s`.
+  Lemma 35: If all correct nodes set the timeout for slot s, all correct nodes
+  will cast a notarization vote or skip vote in slot s.
 
-  In the implementation, setting the timeout for `s` means the node will
-  eventually handle the `Timeout(s)` event (Algorithm 1, line 6).  The handler
-  checks whether the node has already voted in slot `s`.  If so, nothing
-  changes—the vote must have been a prior notarization or skip (captured by the
-  `Voted` tag).  Otherwise the handler delegates to `TRYSCIPWINDOW`, which emits
-  a skip vote for every slot in the leader window that still lacks the `Voted`
-  marker, in particular for `s`.
+  Whitepaper proof: For any correct node that set the timeout for slot s, the
+  handler of event Timeout(s) in line 6 of Algorithm 1 will call the function
+  TRYSKIPWINDOW(s), unless Voted is in state[s]. Next, either Voted is not in
+  state[s] in line 24 of Algorithm 2 and the node casts a skip vote in slot s,
+  or Voted is in state[s]. The object Voted is added to state[s] only when the
+  node cast a notarization or skip vote in slot s, and therefore the node must
+  have cast either vote.
 
-  The core statement below formalizes exactly this behaviour: handling
-  `Timeout(s)` either produces a skip vote for `s`, or the state already
-  records a vote in slot `s`.  Together with Lemma 20—which shows that the
-  `Voted` tag arises only from notarization or skip votes—this yields the
-  whitepaper lemma.
+  Implementation note: Setting the timeout for s means the node handles the
+  Timeout(s) event (Algorithm 1, lines 6-8). If the node already voted (Voted
+  in state[s]), the handler does nothing. Otherwise it calls TRYSKIPWINDOW,
+  which emits a skip vote for every unvoted slot in the leader window
+  (Algorithm 2, lines 22-27), including slot s.
 -/
 
 import Algorithm1
@@ -36,12 +35,11 @@ open Lemma20
 variable {Hash : Type _} [DecidableEq Hash]
 
 /--
-  Helper axiom: if the current slot `s` is still missing the `Voted` marker,
-  `trySkipWindow` emits a skip vote for `s`.
+  Helper axiom: if slot s lacks the Voted marker, trySkipWindow emits a skip
+  vote for s.
 
-  This follows immediately from the implementation (Algorithm 2, lines 22–27):
-  the fold appends `Broadcast.skip currentSlot` precisely when the guard
-  `hasTag currentSlot SlotTag.voted` fails.
+  From Algorithm 2, lines 22-27: TRYSKIPWINDOW iterates through all slots in
+  the window and broadcasts SkipVote(k) when Voted is not in state[k].
 -/
 axiom trySkipWindow_emits_skip_self
     (cfg : VotorConfig) (s : Slot) (st : VotorState Hash) :
@@ -49,13 +47,12 @@ axiom trySkipWindow_emits_skip_self
     HasSkipVote (Hash := Hash) s (trySkipWindow cfg s st).2
 
 /--
-  **Lemma 35.** Handling the timeout event for slot `s` ensures that the node
-  either emits a skip vote for `s`, or had already voted in `s`.
+  Lemma 35: Handling Timeout(s) ensures the node either emits a skip vote for
+  s, or had already voted in s.
 
-  More precisely, the post-state always carries the `Voted` tag for slot `s`,
-  and either the handler broadcasts `Skip(s)` or the incoming state already
-  contained `Voted`.  By Lemma 20, the presence of `Voted` witnesses a previous
-  notarization or skip vote, so this matches the whitepaper statement.
+  The post-state always has the Voted tag for slot s, and either the handler
+  broadcasts Skip(s) or the pre-state already had Voted. By Lemma 20, Voted
+  indicates a prior notarization or skip vote.
 -/
 theorem timeout_handlers_vote_or_skip
     (cfg : VotorConfig) (st st' : VotorState Hash)
@@ -68,14 +65,10 @@ theorem timeout_handlers_vote_or_skip
   intro htimeout
   unfold handleTimeout at htimeout
   split_ifs at htimeout with htag
-  · -- Case: st.hasTag s SlotTag.voted = true
-    -- The handler returns immediately with the unchanged state and no broadcasts.
+  · -- Already voted: handler returns unchanged state with no broadcasts
     cases htimeout
     exact ⟨htag, Or.inr htag⟩
-  · -- Case: st.hasTag s SlotTag.voted = false
-    -- Timeout calls `trySkipWindow`.  The helper axiom guarantees a skip vote
-    -- for `s`, and the `trySkipWindow_sets_voted` axiom records that the
-    -- resulting state marks the slot as voted.
+  · -- Not yet voted: handler calls trySkipWindow
     have htag_false : st.hasTag s SlotTag.voted = false := by
       cases h : st.hasTag s SlotTag.voted
       · rfl
