@@ -68,18 +68,6 @@ The TLA+ models define both safety and liveness properties:
 
 The Lean4 development establishes safety properties through mechanically verified proofs, including the key lemmas from Section 2.9 of the whitepaper that together prove Theorem 1 (safety). Liveness properties are modeled in TLA+ but not yet fully proven in Lean4.
 
-## What's Not Included
-
-This verification focuses on safety properties within a single epoch. The following are out of scope:
-
-- **Liveness** - Temporal properties (eventual finalization) are not verified
-- **Multi-epoch transitions** - Validator set changes and epoch boundaries
-- **Performance bounds** - Latency and bandwidth analysis
-- **Implementation details** - Cryptographic primitives, shred-level erasure coding, exact repair algorithms
-- **Optimizations** - Optimistic block creation and pipelining optimizations
-
-See the design notes in [MainProtocol.tla](specs/MainProtocol.tla) for detailed modeling choices.
-
 ## Model Definitions
 
 ### TLA+ Models
@@ -109,10 +97,6 @@ See the design notes in [MainProtocol.tla](specs/MainProtocol.tla) for detailed 
 - Fallback: 40% stake
 - Byzantine bound: &lt;20% stake
 
-## Proof Status
-
-See [AXIOMS_TO_PROVE.md](AXIOMS_TO_PROVE.md) for detailed proof status. Current progress includes proven theorems for Lemmas 20-30, with remaining work on implementation properties and stake arithmetic.
-
 ## Repository Structure
 
 ```
@@ -132,8 +116,7 @@ alpenglow-proof/
 │   ├── Algorithm2.lean      # Voting logic
 │   ├── Lemma*.lean          # Safety proofs
 │   └── Corollary34.lean     # Derived results
-├── alpenglow-whitepaper.md  # Protocol specification
-└── AXIOMS_TO_PROVE.md       # Proof status tracking
+└── alpenglow-whitepaper.md  # Protocol specification
 ```
 
 ## Running the Models
@@ -158,7 +141,3 @@ lake build
 ## References
 
 This work formalizes the protocol described in the Alpenglow whitepaper. All lemma numbers and section references correspond to that document.
-
-## License
-
-See the main Alpenglow repository for license information.
