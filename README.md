@@ -2,7 +2,7 @@
 
 Formal specs and proofs for the Alpenglow consensus protocol, using TLA+ for model checking and Lean 4 for machine-checked proofs.
 
-![Static Badge](https://img.shields.io/badge/docs-alpenglow_proof-brightgreen?style=flat&link=https%3A%2F%2Falpenglow-proof.vercel.app%2FBasics.html)
+[![Docs](https://img.shields.io/badge/docs-alpenglow_proof-brightgreen?style=flat)](https://alpenglow-proof.vercel.app/Basics.html)
 
 ## Quick Start
 
