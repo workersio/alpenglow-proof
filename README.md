@@ -1,109 +1,90 @@
 # Alpenglow Formal Verification
 
-Formal verification of the Alpenglow consensus protocol using TLA+ and Lean4.
+Formal specs and proofs for the Alpenglow consensus protocol, using TLA+ for model checking and Lean 4 for machine-checked proofs.
 
 ![Static Badge](https://img.shields.io/badge/docs-alpenglow_proof-brightgreen?style=flat&link=https%3A%2F%2Falpenglow-proof.vercel.app%2FBasics.html)
 
-## Overview
+## Quick Start
 
-This repository contains formal specifications and proofs for Alpenglow, a Byzantine fault-tolerant consensus protocol with fast finality and crash tolerance. The work includes both model checking in TLA+ and machine-checked proofs in Lean4.
+Pick one path. Both work well.
 
-## What We've Built
+- VS Code (recommended)
+  - Install extensions: “TLA+” and “Lean 4”.
+  - Open the repo folder in VS Code.
+  - TLA+: open `tla/MC.tla`, then use “Run TLC Model Checker”.
+  - Lean: open any file in `lean/` (e.g., `lean/Main.lean`). The extension builds automatically; if not, run `lake build` in `lean/`.
 
-### TLA+ Specification (`specs/`)
+  TLA+ model checking example:
 
-The TLA+ models formalize the protocol described in the Alpenglow whitepaper, covering the core consensus mechanisms:
+  ![TLA+ example](assets/tla-mc.png)
 
-- **MainProtocol.tla** - Top-level protocol model integrating Votor (voting), Rotor (dissemination), Blokstor (storage), and Repair mechanisms
-- **VotorCore.tla** - Validator state machines and voting logic per Algorithms 1-2
-- **Rotor.tla** - Block dissemination with PS-P relay sampling
-- **Certificates.tla** - Certificate generation and threshold validation
-- **VoteStorage.tla** - Vote pool management and storage rules
-- **Blocks.tla** - Block structure and chain relationships
-- **Messages.tla** - Vote and certificate message formats
+  Lean proof example:
 
-### Lean4 Proofs (`lean-specs/`)
+  ![Lean proof example](assets/lean-proof.png)
 
-The Lean4 development proves safety properties from the whitepaper using mechanically verified proofs:
+- Command line
+  - TLA+:
+    ```bash
+    java -XX:+UseParallelGC -jar tla2tools.jar -config tla/MC.cfg tla/MC.tla
+    ```
+  - Lean 4:
+    ```bash
+    cd lean
+    lake build
+    ```
 
-**Core Lemmas:**
-- **Lemma20.lean** - Vote uniqueness (one initial vote per slot)
-- **Lemma21.lean** - Fast finalization excludes conflicting notarization
-- **Lemma22.lean** - Final votes and fallback votes are mutually exclusive
-- **Lemma23.lean** - Stake overlap prevents conflicting notarization
-- **Lemma24.lean** - Uniqueness of notarized blocks per slot
-- **Lemma25.lean** - Finalized blocks are notarized
-- **Lemma26.lean** - Slow finalization requires unique notarization
-- **Lemma27.lean** - Notar-fallback requires notarization support
-- **Lemma28.lean** - Voting for a block implies voting for ancestors
-- **Lemma29.lean** - Fallback votes require parent certificates
-- **Lemma30.lean** - Notarized blocks have ancestor support
+## What’s Inside
 
-**Protocol Components:**
-- **Algorithm1.lean** - Timeout handling and fallback voting
-- **Algorithm2.lean** - Event-driven voting logic
-- **Basics.lean** - Core data structures (blocks, votes, certificates)
-- **Blokstor.lean** - Block storage abstractions
+- TLA+ models (`tla/`)
+  - `MainProtocol.tla` – top-level protocol
+  - `VotorCore.tla` – validator state/voting (Algorithms 1–2)
+  - `Rotor.tla` – block dissemination (PS-P relay sampling)
+  - `Certificates.tla` – certificate generation and thresholds
+  - `VoteStorage.tla` – vote pool and storage rules
+  - `Blocks.tla`, `Messages.tla` – core data and messages
+  - `MC.tla`, `MC.cfg` – model setup for TLC
 
-## What's Verified
+- Lean 4 proofs (`lean/`)
+  - Algorithms: `Algorithm1.lean`, `Algorithm2.lean`
+  - Core: `Basics.lean`, `Blokstor.lean`
+  - Safety lemmas: `Lemma20.lean` … `Lemma42.lean`
+  - Theorems: `Theorem1.lean` (safety), `Theorem2.lean` (liveness sketch)
+  - Build files: `lakefile.lean`, `lean-toolchain`
 
-### TLA+ Specification
+The protocol is specified in `alpenglow-whitepaper.md`.
 
-The TLA+ models define both safety and liveness properties:
+## What’s Verified
 
-**Safety Properties:**
-- No conflicting finalization (Theorem 1)
-- Vote uniqueness per slot (Lemma 20)
-- Unique notarization per slot (Lemmas 23-24)
-- Certificate generation correctness
-- Dual voting paths (fast 80% threshold, slow 60% threshold)
-- Byzantine resilience under protocol assumptions
+- Safety (TLA+ and Lean)
+  - No conflicting finalization (Theorem 1)
+  - Vote uniqueness per slot (Lemma 20)
+  - Unique notarization per slot (Lemmas 23–24)
+  - Correct certificate thresholds (fast 80%, slow 60%)
 
-**Liveness Properties (with fairness constraints):**
-- Basic liveness: blocks eventually finalize after GST (Theorem 2)
-- Progress: each correct node eventually increases its highest finalized slot
-- Window finalization: correct leader windows finalize completely
-- Fast path: fast-finalization certificates lead to finalization
-- Repair: nodes eventually obtain needed blocks after GST
+- Liveness (TLA+ with fairness)
+  - Progress after GST (Theorem 2)
+  - Windows finalize; repair eventually succeeds
 
-### Lean4 Proofs
+Lean focuses on safety with machine-checked proofs. Liveness is exercised in TLA+.
 
-The Lean4 development establishes safety properties through mechanically verified proofs, including the key lemmas from Section 2.9 of the whitepaper that together prove Theorem 1 (safety). Liveness properties are modeled in TLA+ but not yet fully proven in Lean4.
+## Run in VS Code
 
-## Model Definitions
+- TLA+
+  - Install the “TLA+” extension.
+  - Open `tla/MC.tla` and select “Run TLC Model Checker”.
+  - Results appear in the VS Code panel; expand traces if a property fails.
 
-### TLA+ Models
+- Lean 4
+  - Install the “Lean 4” extension (Lean Prover Community).
+  - Open any `.lean` file in `lean/`. The extension reads `lean/lean-toolchain` and installs the right toolchain.
+  - Hover on terms to see types; use the infoview for goals/tactics.
+  - If the server isn’t building, run `lake build` in `lean/` once.
 
-**Configuration:**
-- `specs/MC.cfg` - Model checking configuration
-- `specs/MC.tla` - Model constants and state constraints
-
-**Core Definitions:**
-- Byzantine nodes hold &lt;20% stake (Assumption 1)
-- Crash failures ≤20% stake with ≥60% correct nodes (Assumption 2)
-- Single epoch with fixed stake distribution
-- Global stabilization time (GST) for synchrony
-
-### Lean4 Definitions
-
-**Key Structures:**
-- `VotorState` - Validator local state with slot tags and vote pool
-- `VotorConfig` - Protocol parameters (thresholds, window size)
-- `NotarVote`, `SkipVote`, `FinalVote` - Vote types
-- `Certificate` - Aggregated vote certificates
-- `StakeWeight` - Stake distribution over validators
-
-**Thresholds:**
-- Fast finalization: 80% stake
-- Notarization: 60% stake
-- Fallback: 40% stake
-- Byzantine bound: &lt;20% stake
-
-## Repository Structure
+## Repository Layout
 
 ```
 alpenglow-proof/
-├── specs/                    # TLA+ specifications
+├── tla/                     # TLA+ specifications + model configs
 │   ├── MainProtocol.tla     # Main protocol model
 │   ├── VotorCore.tla        # Voting logic
 │   ├── Rotor.tla            # Dissemination
@@ -111,35 +92,25 @@ alpenglow-proof/
 │   ├── VoteStorage.tla      # Vote pool
 │   ├── Blocks.tla           # Block structures
 │   ├── Messages.tla         # Message types
-│   └── MC*.cfg              # Model configs
-├── lean-specs/              # Lean4 proofs
+│   ├── MC.tla               # Model wrapper
+│   └── MC.cfg               # TLC configuration
+├── lean/                    # Lean 4 proofs and build
 │   ├── Basics.lean          # Core definitions
 │   ├── Algorithm1.lean      # Timeout logic
 │   ├── Algorithm2.lean      # Voting logic
-│   ├── Lemma*.lean          # Safety proofs
-│   └── Corollary34.lean     # Derived results
-└── alpenglow-whitepaper.md  # Protocol specification
+│   ├── Lemma*.lean          # Safety lemmas
+│   ├── Theorem1.lean        # Safety theorem
+│   ├── lakefile.lean        # Lake build
+│   └── lean-toolchain       # Toolchain pin
+└── alpenglow-whitepaper.md  # Protocol description
 ```
 
-## Running the Models
+## Notes
 
-### TLA+
+- TLC jar (`tla2tools.jar`) is included for convenience; you can also use the VS Code extension exclusively.
+- Generated TLC states live under `states/` and `tla/states/`.
+- The docs badge above points to generated Lean docs if published.
 
-Requires TLC model checker. Run with:
+## Background
 
-```bash
-java -XX:+UseParallelGC -jar tla2tools.jar -config specs/MC.cfg specs/MC.tla
-```
-
-### Lean4
-
-Requires Lean4 and mathlib. Build with:
-
-```bash
-cd lean-specs
-lake build
-```
-
-## References
-
-This work formalizes the protocol described in the Alpenglow whitepaper. All lemma numbers and section references correspond to that document.
+If you’re new to formal methods: TLA+ explores system behaviors to catch design bugs (model checking). Lean 4 is a proof assistant that checks mathematical proofs of properties like safety. We use both: TLA+ for rapid design checks and Lean for precise, machine-checked safety proofs.
