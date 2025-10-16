@@ -2,9 +2,7 @@
 
 Formal verification of the Alpenglow consensus protocol using TLA+ and Lean4.
 
-## Docs
-
-**Proof docs** - `lean-specs/doc` - Auto generated using doc-gen4
+![Static Badge](https://img.shields.io/badge/docs-alpenglow_proof-brightgreen?style=flat&link=https%3A%2F%2Falpenglow-proof.vercel.app%2FBasics.html)
 
 ## Overview
 
