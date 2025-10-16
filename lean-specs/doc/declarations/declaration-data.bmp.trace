@@ -1,0 +1,15 @@
+{"synthetic": false,
+ "outputs": null,
+ "log":
+ [{"message": "Documentation indexing", "level": "info"},
+  {"message":
+   ".> /Users/chaitanya/Documents/workers.io/alpenglow-proof/lean-specs/.lake/packages/doc-gen4/.lake/build/bin/doc-gen4 index --build /Users/chaitanya/Documents/workers.io/alpenglow-proof/lean-specs/docbuild/.lake/build",
+   "level": "trace"}],
+ "inputs":
+ [["/Users/chaitanya/Documents/workers.io/alpenglow-proof/lean-specs/.lake/packages/doc-gen4/.lake/build/bin/doc-gen4",
+   "14530417092425997119"],
+  ["<nil>", "6748611221465965550"],
+  ["<collection>",
+   [["/Users/chaitanya/Documents/workers.io/alpenglow-proof/lean-specs/docbuild/.lake/build/doc/Main.html",
+     "5430566144068756220"]]]],
+ "depHash": "849844802154835828"}

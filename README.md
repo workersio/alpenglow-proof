@@ -2,6 +2,10 @@
 
 Formal verification of the Alpenglow consensus protocol using TLA+ and Lean4.
 
+## Docs
+
+**Proof docs** - `lean-specs/doc` - Auto generated using doc-gen4
+
 ## Overview
 
 This repository contains formal specifications and proofs for Alpenglow, a Byzantine fault-tolerant consensus protocol with fast finality and crash tolerance. The work includes both model checking in TLA+ and machine-checked proofs in Lean4.

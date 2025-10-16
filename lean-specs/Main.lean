@@ -5,6 +5,7 @@
 
 import Basics
 import Algorithm1
+import Algorithm2
 import Lemmas
 import Lemma20
 import Lemma21

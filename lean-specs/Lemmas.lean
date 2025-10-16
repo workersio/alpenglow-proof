@@ -8,24 +8,6 @@ import Mathlib.Data.Real.Basic
 import Mathlib.Probability.ProbabilityMassFunction.Basic
 import Mathlib.Analysis.SpecificLimits.Basic
 import Basics
-import Lemma24
-import Lemma25
-import Lemma27
-import Lemma28
-import Lemma29
-import Lemma30
-import Lemma31
-import Lemma32
-import Lemma33
-import Corollary34
-import Lemma35
-import Lemma36
-import Lemma37
-import Lemma38
-import Lemma39
-import Lemma40
-import Lemma41
-import Lemma42
 
 namespace Alpenglow
 
