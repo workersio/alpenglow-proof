@@ -200,7 +200,8 @@ Init ==
     /\ validators = [v \in Validators |->
                         LET base == InitValidatorState(v)
                             withParent == [base EXCEPT !.parentReady[1] = GenesisHash]
-                        IN AddState(withParent, 1, "ParentReady")]
+                            withClock == [withParent EXCEPT !.clock = GST]
+                        IN AddState(withClock, 1, "ParentReady")]
     (* WP Sec. 2.7: first slot of first window is parent‑ready on genesis so the first leader can produce immediately. :contentReference[oaicite:11]{index=11} *)
     /\ blocks = {GenesisBlock}
     /\ messages = {}
@@ -208,7 +209,7 @@ Init ==
     /\ unresponsiveNodes \in SUBSET (Validators \ byzantineNodes)
     /\ (CalculateStake(byzantineNodes) * 100) < (TotalStake * 20)
     /\ (CalculateStake(unresponsiveNodes) * 100) <= (TotalStake * 20)
-    /\ time = 0
+    /\ time = GST
     /\ finalized = [v \in Validators |-> {}]
     /\ blockAvailability = [v \in Validators |-> {GenesisBlock}]
     /\ avail80Start = [s \in 1..MaxSlot |-> [h \in BlockHashes |-> 0]]
@@ -267,6 +268,8 @@ ByzantineAction(v) ==
         /\ IsValidVote(vote)
         /\ vote.validator = v
         /\ vote.slot <= MaxSlot
+        /\ vote.blockHash \in ({b.hash : b \in blocks} \cup {NoBlock})
+        /\ Cardinality({m \in messages : m \in Vote /\ m.validator \in byzantineNodes}) < 3
         /\ messages' = messages \cup {vote}
     /\ UNCHANGED <<validators, blocks, byzantineNodes, unresponsiveNodes, time, finalized, blockAvailability, avail80Start, avail60Start>>
 (* WP Sec. 1.5 “Adversary”: byzantine nodes may send arbitrarily scheduled but syntactically valid votes; safety must hold regardless (Sec. 2.9). :contentReference[oaicite:16]{index=16} *)
@@ -279,8 +282,12 @@ HonestProposeBlock(leader, slot, parent) ==
     /\ slot > parent.slot
     /\ slot <= MaxSlot
     /\ Cardinality(blocks) < MaxBlocks
+    /\ ~\E b \in blocks : b.slot = slot /\ b.leader = leader
     /\ IsFirstSlotOfWindow(slot)
-        => HasState(validators[leader], slot, "ParentReady")
+        => /\ HasState(validators[leader], slot, "ParentReady")
+           /\ parent.hash = validators[leader].parentReady[slot]
+    /\ ~IsFirstSlotOfWindow(slot)
+        => \/ parent.slot < slot
     /\ LET newBlock == [
            slot |-> slot,
            hash |-> CHOOSE h \in BlockHashes : 
@@ -494,23 +501,23 @@ EmitParentReady ==
 
 Next ==
     \/ \E v \in Validators, b \in blocks : ReceiveBlock(v, b)
+    \/ BroadcastLocalVote
+    \/ DeliverVote
     \/ \E v \in Validators, s \in 1..MaxSlot : GenerateCertificateAction(v, s)
-    \/ \E v \in Validators, b \in blocks : FinalizeBlock(v, b)
+    \/ DeliverCertificate
     \/ EmitBlockNotarized
+    \/ EmitParentReady
     \/ EmitSafeToNotar
     \/ EmitSafeToSkip
-    \/ EmitParentReady
-    \/ \E v \in byzantineNodes : ByzantineAction(v)
-    \/ \E l \in Validators, s \in 1..MaxSlot, p \in blocks : HonestProposeBlock(l, s, p)
-    \/ \E l \in Validators, s \in 1..MaxSlot, p \in blocks : ByzantineProposeBlock(l, s, p)
-    \/ DeliverVote
-    \/ DeliverCertificate
-    \/ BroadcastLocalVote
+    \/ \E v \in Validators, b \in blocks : FinalizeBlock(v, b)
     \/ \E b \in blocks : RotorDisseminateSuccess(b)
     \/ \E b \in blocks : RotorFailInsufficientRelays(b)
+    \/ \E v \in Validators, b \in blocks, supplier \in Validators : RepairBlock(v, b, supplier)
+    \/ \E l \in Validators, s \in 1..MaxSlot, p \in blocks : HonestProposeBlock(l, s, p)
+    \/ \E l \in Validators, s \in 1..MaxSlot, p \in blocks : ByzantineProposeBlock(l, s, p)
+    \/ \E v \in byzantineNodes : ByzantineAction(v)
     \/ \E b \in blocks : RotorFailByzantineLeader(b)
     \/ \E b \in blocks : RotorNoDissemination(b)
-    \/ \E v \in Validators, b \in blocks, supplier \in Validators : RepairBlock(v, b, supplier)
     \/ AdvanceTime
 (* WP Sec. 2 Figure 7 pipeline: dissemination → votes → certs → finalization; adversarial and repair transitions included. :contentReference[oaicite:32]{index=32} *)
 
