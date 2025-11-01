@@ -209,7 +209,7 @@ Init ==
     /\ unresponsiveNodes \in SUBSET (Validators \ byzantineNodes)
     /\ (CalculateStake(byzantineNodes) * 100) < (TotalStake * 20)
     /\ (CalculateStake(unresponsiveNodes) * 100) <= (TotalStake * 20)
-    /\ time = GST
+    /\ time = GST  \* START AT GST so fairness is immediately active
     /\ finalized = [v \in Validators |-> {}]
     /\ blockAvailability = [v \in Validators |-> {GenesisBlock}]
     /\ avail80Start = [s \in 1..MaxSlot |-> [h \in BlockHashes |-> 0]]
@@ -239,14 +239,23 @@ GenerateCertificateAction(v, slot) ==
                              /\ (\E w \in Validators : CanStoreCertificate(validators[w].pool, c))
                              /\ CanStoreCertificate(validators[v].pool, c)}
        IN /\ candidates # {}
-          /\ LET cert ==
+          /\ LET
+                \* Store all certificates locally (per WP Def. 13: "one per type")
+                finalPool == LET RECURSIVE StoreAll(_,_)
+                                 StoreAll(p, cs) ==
+                                     IF cs = {} THEN p
+                                     ELSE LET c == CHOOSE x \in cs : TRUE
+                                          IN StoreAll(StoreCertificate(p, c), cs \ {c})
+                             IN StoreAll(pool, candidates)
+                \* Broadcast one certificate (prioritize FastFinalizationCert)
+                cert ==
                     IF (\E c \in candidates : c.type = "FastFinalizationCert")
                     THEN CHOOSE c \in candidates : c.type = "FastFinalizationCert"
                     ELSE IF (\E c \in candidates : c.type = "NotarizationCert")
                          THEN CHOOSE c \in candidates : c.type = "NotarizationCert"
                          ELSE CHOOSE c \in candidates : TRUE
              IN /\ messages' = messages \cup {cert}
-                /\ validators' = [validators EXCEPT ![v].pool = StoreCertificate(validators[v].pool, cert)]
+                /\ validators' = [validators EXCEPT ![v].pool = finalPool]
     /\ UNCHANGED <<blocks, byzantineNodes, unresponsiveNodes, time, finalized, blockAvailability, avail80Start, avail60Start>>
 (* WP Def. 13: when enough votes exist, generate and broadcast the certificate, storing one per type. Prefer fast-finalization if present. :contentReference[oaicite:14]{index=14} *)
 
@@ -424,8 +433,9 @@ DeliverVote ==
     /\ LET vmsg == CHOOSE vv \in messages : vv \in Vote /\ IsValidVote(vv)
        IN /\ messages' = messages \ {vmsg}
           /\ validators' = [w \in Validators |->
-                               [validators[w] EXCEPT
-                                   !.pool = StoreVote(@, vmsg)]]
+                               IF w \in CorrectNodes
+                               THEN [validators[w] EXCEPT !.pool = StoreVote(@, vmsg)]
+                               ELSE validators[w]]
     /\ UNCHANGED <<blocks, byzantineNodes, unresponsiveNodes, time, finalized, blockAvailability, avail80Start, avail60Start>>
 (* WP Sec. 2.5 Def. 12: Pool stores first notar/skip, up to limited fallback, and first final vote, keyed by (slot,validator). :contentReference[oaicite:25]{index=25} *)
 
@@ -434,8 +444,9 @@ DeliverCertificate ==
     /\ LET cmsg == CHOOSE cc \in messages : cc \in Certificate /\ IsValidCertificate(cc)
        IN /\ messages' = messages \ {cmsg}
           /\ validators' = [w \in Validators |->
-                               [validators[w] EXCEPT
-                                   !.pool = StoreCertificate(@, cmsg)]]
+                               IF w \in CorrectNodes
+                               THEN [validators[w] EXCEPT !.pool = StoreCertificate(@, cmsg)]
+                               ELSE validators[w]]
     /\ UNCHANGED <<blocks, byzantineNodes, unresponsiveNodes, time, finalized, blockAvailability, avail80Start, avail60Start>>
 (* WP Sec. 2.5 Def. 13: Pool stores at most one certificate per type, broadcasts on add. :contentReference[oaicite:26]{index=26} *)
 

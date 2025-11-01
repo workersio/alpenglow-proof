@@ -117,8 +117,21 @@ StoreCertificate(pool, cert) ==
        /\ IsValidCertificate(cert)
        /\ CertificateWellFormed(cert)
     THEN
-        [pool EXCEPT !.certificates[cert.slot] = 
-            pool.certificates[cert.slot] \cup {cert}]
+        LET base == [pool EXCEPT !.certificates[cert.slot] = 
+                           pool.certificates[cert.slot] \cup {cert}]
+            implied ==
+                IF cert.type = "FastFinalizationCert" THEN
+                    { CreateNotarizationCert(cert.votes, cert.slot, cert.blockHash),
+                      CreateNotarFallbackCert(cert.votes, cert.slot, cert.blockHash) }
+                ELSE {}
+            RECURSIVE StoreAll(_,_)
+            StoreAll(p, cs) ==
+                IF cs = {} THEN p
+                ELSE LET c == CHOOSE x \in cs : TRUE
+                         ok == CanStoreCertificate(p, c) /\ IsValidCertificate(c) /\ CertificateWellFormed(c)
+                         pNext == IF ok THEN [p EXCEPT !.certificates[c.slot] = p.certificates[c.slot] \cup {c}] ELSE p
+                     IN StoreAll(pNext, cs \ {c})
+        IN StoreAll(base, implied)
     ELSE
         pool
 
