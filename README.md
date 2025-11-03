@@ -43,6 +43,7 @@ Pick one path. Both work well.
   - `VoteStorage.tla` – vote pool and storage rules
   - `Blocks.tla`, `Messages.tla` – core data and messages
   - `MC.tla`, `MC.cfg` – model setup for TLC
+  - `tla/full-run` - full run of the model checker with coverage.
 
 - Lean 4 proofs (`lean/`)
   - Algorithms: `Algorithm1.lean`, `Algorithm2.lean`
